@@ -1,0 +1,106 @@
+{
+  "schema_version": "1.0",
+  "candidate_phase": "0/1-fictional",
+  "release_command": "./scripts/verify",
+  "criteria": [
+    {
+      "id": "ARCH-ROLE-001",
+      "phase": 0,
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "fixture": "config/roles.json and roles/*/{AGENTS,SOUL}.md",
+      "command": "python3 -m unittest tests.test_repository_contract.RepositoryContractTests.test_role_catalogue_is_complete",
+      "expected_evidence": "exactly 12 unique roles and 24 profile files"
+    },
+    {
+      "id": "TENANT-READ-001",
+      "phase": 1,
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "fixture": "two fictional principals",
+      "command": "python3 -m unittest tests.test_store.StoreTests.test_cross_tenant_read_is_indistinguishable_from_absence",
+      "expected_evidence": "foreign record cannot be retrieved"
+    },
+    {
+      "id": "TENANT-WRITE-001",
+      "phase": 1,
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "fixture": "wrong-brand and wrong-role principals",
+      "command": "python3 -m unittest tests.test_store.StoreTests.test_cross_tenant_and_wrong_role_writes_are_denied",
+      "expected_evidence": "both writes fail closed"
+    },
+    {
+      "id": "PUBLIC-BOUNDARY-001",
+      "phase": 1,
+      "owner": "editorial-integrity-qa",
+      "release_blocker": true,
+      "fixture": "fictional article with internal note canary",
+      "command": "python3 -m unittest tests.test_workflow.WorkflowTests.test_vertical_slice_publishes_only_public_fields",
+      "expected_evidence": "canary is absent from adapter output"
+    },
+    {
+      "id": "APPROVAL-BINDING-001",
+      "phase": 1,
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "fixture": "changed manifest, destination, and expired approval",
+      "command": "python3 -m unittest tests.test_gateway.GatewayTests.test_changed_expired_or_wrong_destination_is_denied",
+      "expected_evidence": "all mutations are denied before dispatch"
+    },
+    {
+      "id": "IDEMPOTENCY-001",
+      "phase": 1,
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "fixture": "duplicate request and rebound key",
+      "command": "python3 -m unittest tests.test_gateway.GatewayTests.test_duplicate_retry_is_safe_and_rebinding_is_denied",
+      "expected_evidence": "one external call; rebound key denied"
+    },
+    {
+      "id": "LEARNING-SCOPE-001",
+      "phase": 1,
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "fixture": "active, expired, unvalidated, and superseded learning",
+      "command": "python3 -m unittest tests.test_store.StoreTests.test_learning_query_filters_unsafe_records",
+      "expected_evidence": "only active validated fresh same-brand record returns"
+    },
+    {
+      "id": "RECOVERY-001",
+      "phase": 1,
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "fixture": "tenant snapshot and foreign restore attempt",
+      "command": "python3 -m unittest tests.test_store.StoreTests.test_snapshot_restore_is_tenant_bound",
+      "expected_evidence": "same tenant round trip passes; foreign restore denied"
+    },
+    {
+      "id": "SCHEMA-001",
+      "phase": 1,
+      "owner": "technical-implementation-specialist",
+      "release_blocker": true,
+      "fixture": "schemas/*.schema.json",
+      "command": "python3 -m unittest tests.test_repository_contract.RepositoryContractTests.test_required_schema_definitions_exist",
+      "expected_evidence": "all lifecycle and learning definitions are present"
+    },
+    {
+      "id": "EXTERNAL-UNKNOWN-001",
+      "phase": 1,
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "fixture": "synthetic timeout from local mock adapter",
+      "command": "python3 -m unittest tests.test_gateway.GatewayTests.test_unknown_result_requires_reconciliation_before_retry",
+      "expected_evidence": "state remains UNKNOWN and retry is blocked pending reconciliation"
+    },
+    {
+      "id": "VERTICAL-SLICE-001",
+      "phase": 1,
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "fixture": "fixtures/fictional_brand.json",
+      "command": "python3 -m unittest tests.test_workflow.WorkflowTests.test_complete_fictional_flow",
+      "expected_evidence": "draft through measured publication receipt passes with no real write"
+    }
+  ]
+}
