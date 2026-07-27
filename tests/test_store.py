@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 from datetime import datetime, timedelta, timezone
 
-from agency_os.contracts import finalize_record
+from agency_os.contracts import ContractError, finalize_record
 from agency_os.store import AuthorizationError, Principal, TenantStore
 
 
@@ -80,6 +80,24 @@ class StoreTests(unittest.TestCase):
         )
         with self.assertRaises(AuthorizationError):
             TenantStore.restore(self.director_b, snapshot)
+
+    def test_conflicting_record_replacement_is_denied(self) -> None:
+        original = self._learning("learn_a")
+        self.store.put(self.director_a, original)
+        changed = dict(original)
+        changed["version"] = 2
+        changed = finalize_record(changed)
+        with self.assertRaises(ContractError):
+            self.store.put(self.director_a, changed)
+        self.assertEqual(self.store.get(self.director_a, "learn_a"), original)
+
+    def test_non_director_cannot_snapshot_or_read_learning(self) -> None:
+        self.store.put(self.director_a, self._learning("learn_a"))
+        publisher = Principal("publisher_a", "publishing-operator", "brand_a")
+        with self.assertRaises(AuthorizationError):
+            self.store.get(publisher, "learn_a")
+        with self.assertRaises(AuthorizationError):
+            self.store.snapshot(publisher)
 
 
 if __name__ == "__main__":

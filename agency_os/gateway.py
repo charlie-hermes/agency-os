@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import threading
 from datetime import datetime, timezone
 from typing import Any, Mapping
 
@@ -14,7 +15,7 @@ from .contracts import (
     utc_now,
     verify_record,
 )
-from .store import Principal
+from .store import Principal, TenantStore
 
 
 class GatewayDenied(PermissionError):
@@ -45,11 +46,19 @@ class MockPublisher:
 
 class ActionGateway:
     def __init__(
-        self, *, capability: Mapping[str, Any], publisher: MockPublisher
+        self,
+        *,
+        capability: Mapping[str, Any],
+        publisher: MockPublisher,
+        approval_store: TenantStore,
+        approval_authorities: Mapping[str, Mapping[str, list[str] | tuple[str, ...]]],
     ) -> None:
         self.capability = copy.deepcopy(dict(capability))
         self.publisher = publisher
+        self.approval_store = approval_store
+        self.approval_authorities = copy.deepcopy(dict(approval_authorities))
         self._ledger: dict[str, dict[str, Any]] = {}
+        self._ledger_lock = threading.RLock()
         self.audit: list[dict[str, Any]] = []
 
     def publish(
@@ -57,12 +66,24 @@ class ActionGateway:
         *,
         principal: Principal,
         manifest: Mapping[str, Any],
-        approval: Mapping[str, Any],
+        approval_id: str,
         idempotency_key: str,
         now: datetime | None = None,
     ) -> dict[str, Any]:
         current_time = now or datetime.now(timezone.utc)
-        self._preflight(principal, manifest, approval, current_time)
+        try:
+            approval, approval_provenance = self.approval_store.resolve_approval(
+                principal.brand_id, approval_id
+            )
+        except (KeyError, ContractError) as exc:
+            self._deny(
+                "APPROVAL_NOT_AUTHORITATIVE",
+                {"brand_id": principal.brand_id},
+                cause=exc,
+            )
+        self._preflight(
+            principal, manifest, approval, approval_provenance, current_time
+        )
         request_binding = {
             "actor_id": principal.actor_id,
             "role_id": principal.role_id,
@@ -77,34 +98,36 @@ class ActionGateway:
             "idempotency_key": idempotency_key,
         }
         request_checksum = canonical_checksum(request_binding)
-        existing = self._ledger.get(idempotency_key)
-        if existing is not None:
-            if existing["request_checksum"] != request_checksum:
-                self._deny("IDEMPOTENCY_KEY_REBOUND", request_binding)
-            if existing["state"] in {"REQUESTED", "UNKNOWN"}:
-                self._deny("RECONCILIATION_REQUIRED", request_binding)
-            self.audit.append(
-                {
-                    "outcome": "ALLOW_IDEMPOTENT_REPLAY",
-                    "brand_id": principal.brand_id,
-                    "request_binding_checksum": request_checksum,
-                }
-            )
-            return copy.deepcopy(existing["receipt"])
+        with self._ledger_lock:
+            existing = self._ledger.get(idempotency_key)
+            if existing is not None:
+                if existing["request_checksum"] != request_checksum:
+                    self._deny("IDEMPOTENCY_KEY_REBOUND", request_binding)
+                if existing["state"] in {"REQUESTED", "UNKNOWN"}:
+                    self._deny("RECONCILIATION_REQUIRED", request_binding)
+                self.audit.append(
+                    {
+                        "outcome": "ALLOW_IDEMPOTENT_REPLAY",
+                        "brand_id": principal.brand_id,
+                        "request_binding_checksum": request_checksum,
+                    }
+                )
+                return copy.deepcopy(existing["receipt"])
 
-        # Persist intent before the external call.
-        self._ledger[idempotency_key] = {
-            "request_checksum": request_checksum,
-            "state": "REQUESTED",
-            "receipt": None,
-        }
+            # Atomically persist intent before the external call.
+            self._ledger[idempotency_key] = {
+                "request_checksum": request_checksum,
+                "state": "REQUESTED",
+                "receipt": None,
+            }
         try:
             external = self.publisher.publish(
                 public_fields=manifest["public_fields"],
                 idempotency_key=idempotency_key,
             )
         except Exception as exc:
-            self._ledger[idempotency_key]["state"] = "UNKNOWN"
+            with self._ledger_lock:
+                self._ledger[idempotency_key]["state"] = "UNKNOWN"
             self._deny("EXTERNAL_RESULT_UNKNOWN", request_binding, cause=exc)
 
         receipt = finalize_record(
@@ -140,11 +163,12 @@ class ActionGateway:
                 "replayed": False,
             }
         )
-        self._ledger[idempotency_key] = {
-            "request_checksum": request_checksum,
-            "state": receipt["state"],
-            "receipt": receipt,
-        }
+        with self._ledger_lock:
+            self._ledger[idempotency_key] = {
+                "request_checksum": request_checksum,
+                "state": receipt["state"],
+                "receipt": receipt,
+            }
         self.audit.append(
             {
                 "outcome": "ALLOW",
@@ -160,6 +184,7 @@ class ActionGateway:
         principal: Principal,
         manifest: Mapping[str, Any],
         approval: Mapping[str, Any],
+        approval_provenance: Mapping[str, str],
         now: datetime,
     ) -> None:
         try:
@@ -183,6 +208,15 @@ class ActionGateway:
                 self._deny(f"MANIFEST_{field.upper()}_MISMATCH", dict(manifest))
         if principal.role_id not in self.capability.get("allowed_role_ids", []):
             self._deny("CAPABILITY_ROLE_DENIED", dict(manifest))
+        if (
+            approval_provenance.get("actor_id") != approval.get("approver_id")
+            or approval_provenance.get("role_id") != "human-approver"
+        ):
+            self._deny("APPROVAL_PROVENANCE_INVALID", dict(manifest))
+        brand_policy = self.approval_authorities.get(principal.brand_id, {})
+        allowed_approvers = brand_policy.get(str(approval.get("authority_role")), ())
+        if approval.get("approver_id") not in allowed_approvers:
+            self._deny("APPROVAL_AUTHORITY_DENIED", dict(manifest))
         if approval.get("decision") != "APPROVED":
             self._deny("NOT_APPROVED", dict(manifest))
         bindings = (

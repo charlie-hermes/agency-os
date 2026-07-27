@@ -244,11 +244,13 @@ def run_fictional_article() -> VerticalSliceResult:
             "operation": "publish",
         },
         publisher=publisher,
+        approval_store=store,
+        approval_authorities={brand_id: {"brand_owner": ["human_owner"]}},
     )
     receipt = gateway.publish(
         principal=principals["publisher"],
         manifest=manifest,
-        approval=approval,
+        approval_id=approval["approval_id"],
         idempotency_key="idem_guide_v1",
         now=now,
     )

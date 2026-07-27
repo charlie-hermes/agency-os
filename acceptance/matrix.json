@@ -22,6 +22,15 @@
       "expected_evidence": "foreign record cannot be retrieved"
     },
     {
+      "id": "ROLE-READ-001",
+      "phase": 1,
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "fixture": "same-brand publisher and private draft/complete packages",
+      "command": "python3 -m unittest tests.test_workflow.WorkflowTests.test_publisher_can_read_manifest_but_not_private_asset_packages",
+      "expected_evidence": "publisher receives the public manifest but private packages are denied"
+    },
+    {
       "id": "TENANT-WRITE-001",
       "phase": 1,
       "owner": "platform-assurance-reviewer",
@@ -49,6 +58,24 @@
       "expected_evidence": "all mutations are denied before dispatch"
     },
     {
+      "id": "APPROVAL-AUTHORITY-001",
+      "phase": 1,
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "fixture": "unpersisted, self-issued, unknown-role, and unknown-actor approvals",
+      "command": "python3 -m unittest tests.test_gateway.GatewayTests.test_unpersisted_self_issued_and_unknown_authority_are_denied",
+      "expected_evidence": "only an immutable stored approval with trusted brand authority can dispatch"
+    },
+    {
+      "id": "APPROVAL-IMMUTABLE-001",
+      "phase": 1,
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "fixture": "checksum-valid replacement using an existing approval ID",
+      "command": "python3 -m unittest tests.test_gateway.GatewayTests.test_stored_approval_cannot_be_replaced",
+      "expected_evidence": "replacement is rejected and the original approval plus provenance remain intact"
+    },
+    {
       "id": "IDEMPOTENCY-001",
       "phase": 1,
       "owner": "platform-assurance-reviewer",
@@ -56,6 +83,24 @@
       "fixture": "duplicate request and rebound key",
       "command": "python3 -m unittest tests.test_gateway.GatewayTests.test_duplicate_retry_is_safe_and_rebinding_is_denied",
       "expected_evidence": "one external call; rebound key denied"
+    },
+    {
+      "id": "IDEMPOTENCY-CONCURRENT-001",
+      "phase": 1,
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "fixture": "two overlapping workers using one idempotency key",
+      "command": "python3 -m unittest tests.test_gateway.GatewayTests.test_concurrent_callers_dispatch_once",
+      "expected_evidence": "one reservation and one external dispatch; concurrent retry is denied"
+    },
+    {
+      "id": "STORE-IDENTITY-001",
+      "phase": 1,
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "fixture": "manifest, approval, and receipt from the fictional vertical slice",
+      "command": "python3 -m unittest tests.test_workflow.WorkflowTests.test_type_distinct_records_coexist_under_their_own_ids",
+      "expected_evidence": "all three immutable records survive under their artifact-specific primary IDs"
     },
     {
       "id": "LEARNING-SCOPE-001",

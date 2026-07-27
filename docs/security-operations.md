@@ -5,14 +5,22 @@
 - Workload identity is represented by an immutable `Principal` supplied by the
   host/runtime boundary.
 - The tenant store checks the principal's `brand_id` on every read and write.
-- Role write permissions are allowlisted by record type.
+- Role read and write permissions are allowlisted by record type. The publishing
+  operator can retrieve the public Publication Manifest but not draft or
+  complete private asset packages, and tenant snapshots are director-only.
+- Records use an artifact-type-specific primary ID and reject conflicting
+  replacement. Approval Records are resolved by ID from that immutable store,
+  retain authenticated writer provenance, and must match the brand-scoped
+  approver identity and authority-role policy.
 - Public fields and internal notes are separate values; only public fields
   cross the publication adapter.
 - The action gateway checks role, brand, environment, destination, operation,
   approval expiry, manifest checksum, artifact checksum, and schedule.
-- The idempotency ledger is written before adapter dispatch. Reuse with a
-  different request fingerprint is denied; exact replay returns the original
-  receipt without a second write.
+- The Phase 0/1 in-process idempotency reservation is atomic and written before
+  adapter dispatch. Reuse with a different request fingerprint is denied; exact
+  replay returns the original receipt without a second write. Production
+  promotion still requires a shared durable ledger with a unique idempotency
+  constraint across workers and processes.
 - The only Phase 0/1 destination is a local mock. Real egress is absent.
 - Audit records contain identifiers, checksums, state, and reason codes, never
   credentials or client content.
