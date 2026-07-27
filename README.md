@@ -37,6 +37,12 @@ provider, or publish externally.
 
 ## Verify
 
+The complete repository gate is supported on **Linux only** because the runtime
+identity tests intentionally require `SO_PEERCRED` and process facts from a
+mounted `/proc` filesystem. The verification script checks these prerequisites
+before running any tests. GitHub Actions runs the same gate on Ubuntu; macOS and
+Windows are not supported validation hosts for Gate 4.
+
 ```bash
 ./scripts/verify
 ```

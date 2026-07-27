@@ -471,15 +471,20 @@ class FictionalCredentialBroker:
         return active[1]
 
 
-def fictional_runtime(
-    principal: Principal,
-    *,
-    runtime_id: str | None = None,
-) -> SupervisorRuntimeBoundary:
-    """Start a separate fictional supervisor with OS-derived peer identity."""
+_FICTIONAL_RUNTIME_ID = "runtime_agent_publisher"
+_FICTIONAL_RUNTIME_PRINCIPAL = Principal(
+    "agent_publisher", "publishing-operator", "brand_lantern"
+)
 
-    if not all((principal.actor_id, principal.role_id, principal.brand_id)):
-        raise ValueError("runtime principal fields must be non-empty")
+
+def fictional_runtime() -> SupervisorRuntimeBoundary:
+    """Start the pre-provisioned fictional publisher runtime supervisor.
+
+    The worker-visible factory accepts no principal, role, brand, runtime ID, or
+    observation. The authority process owns that mapping and binds it to the
+    operating-system identity of the process that provisions the gateway.
+    """
+
     temporary_directory = tempfile.TemporaryDirectory(
         prefix="agency-os-runtime-supervisor-"
     )
@@ -487,13 +492,13 @@ def fictional_runtime(
     expected_observation = _observe_linux_process(
         os.getpid(),
         os.getuid(),
-        runtime_id or f"runtime_{principal.actor_id}",
+        _FICTIONAL_RUNTIME_ID,
     )
     context = multiprocessing.get_context("fork")
     ready_parent, ready_child = context.Pipe(duplex=False)
     process = context.Process(
         target=_run_runtime_supervisor,
-        args=(socket_path, expected_observation, principal, ready_child),
+        args=(socket_path, expected_observation, ready_child),
         daemon=True,
     )
     process.start()
@@ -520,10 +525,10 @@ def fictional_runtime(
 def _run_runtime_supervisor(
     socket_path: str,
     expected_observation: RuntimeObservation,
-    principal: Principal,
     ready: Any,
 ) -> None:
     authority = RuntimeIdentityAuthority()
+    principal = _principal_for_fictional_observation(expected_observation)
     authority.enroll(expected_observation, principal)
     try:
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as server:
@@ -582,6 +587,16 @@ def _run_runtime_supervisor(
             pass
 
 
+def _principal_for_fictional_observation(
+    observation: RuntimeObservation,
+) -> Principal:
+    """Resolve the authority-owned fictional OS-identity enrollment."""
+
+    if observation.runtime_id != _FICTIONAL_RUNTIME_ID:
+        raise RuntimeIdentityError("RUNTIME_NOT_ENROLLED")
+    return _FICTIONAL_RUNTIME_PRINCIPAL
+
+
 def _observe_linux_process(pid: int, uid: int, runtime_id: str) -> RuntimeObservation:
     try:
         executable = Path(f"/proc/{pid}/exe").resolve(strict=True)
@@ -596,7 +611,7 @@ def _observe_linux_process(pid: int, uid: int, runtime_id: str) -> RuntimeObserv
         runtime_id=runtime_id,
         operating_system_user=operating_system_user,
         executable_checksum=f"sha256:{executable_checksum}",
-        instance_nonce=f"linux-pid-start:{process_start_ticks}",
+        instance_nonce=f"linux-pid:{pid}-start:{process_start_ticks}",
     )
 
 

@@ -16,7 +16,7 @@ from .contracts import (
 )
 from .gateway import ActionGateway, MockPublisher
 from .ledger import InMemoryActionLedger
-from .runtime_security import fictional_credential_broker, fictional_runtime
+from .runtime_security import fictional_credential_broker
 from .store import Principal, TenantStore
 
 
@@ -254,25 +254,23 @@ def run_fictional_article() -> VerticalSliceResult:
     )
     capability_registry.register(principals["director"], capability)
     publisher = MockPublisher()
-    runtime_boundary = fictional_runtime(principals["publisher"])
+    gateway = ActionGateway(
+        capability_id=capability["capability_id"],
+        capability_registry=capability_registry,
+        credential_broker=fictional_credential_broker(capability),
+        publisher=publisher,
+        approval_store=store,
+        approval_authorities={brand_id: {"brand_owner": ["human_owner"]}},
+        action_ledger=InMemoryActionLedger(),
+    )
     try:
-        gateway = ActionGateway(
-            capability_id=capability["capability_id"],
-            capability_registry=capability_registry,
-            runtime_boundary=runtime_boundary,
-            credential_broker=fictional_credential_broker(capability),
-            publisher=publisher,
-            approval_store=store,
-            approval_authorities={brand_id: {"brand_owner": ["human_owner"]}},
-            action_ledger=InMemoryActionLedger(),
-        )
         receipt = gateway.publish(
             manifest=manifest,
             approval_id=approval["approval_id"],
             idempotency_key="idem_guide_v1",
         )
     finally:
-        runtime_boundary.close()
+        gateway.close()
     store.put(principals["publisher"], receipt)
     records["receipt"] = receipt
 

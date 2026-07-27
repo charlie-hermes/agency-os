@@ -118,24 +118,28 @@ permissions and storage-identity tests.
 
 **Status:** in progress.
 
-Derive worker, role and brand identity in a separate local supervisor from
-operating-system peer identity, executable checksum and process-start facts;
-do not accept a caller-supplied identity callback. Use one-use runtime
-assertions with a hard 30-second maximum and reject missing, overlong, expired,
-replayed or changed-runtime assertions. Allow the mock adapter to obtain only
-the exact short-lived fictional credential approved for the authenticated
-identity, client, destination, environment and operation. Deny credential
-scope drift, unapproved destinations, direct adapter access and non-allowlisted
-egress.
+Provision one fictional worker identity per operating-system process outside
+worker input. Derive that worker, role and brand identity in a separate local
+supervisor from peer PID/user, executable checksum and PID-bound process-start
+facts; do not accept a caller-supplied identity callback, principal, runtime ID,
+observation, time, or boundary wiring. Seal gateway security wiring after
+provisioning. Use one-use runtime assertions with a hard 30-second maximum and
+reject missing, overlong, expired, replayed, other-process or changed-runtime
+assertions. Allow the mock adapter to obtain only the exact short-lived
+fictional credential approved for the authenticated identity, client,
+destination, environment and operation. Deny credential scope drift,
+unapproved destinations, direct adapter access and non-allowlisted egress.
 
 This gate remains fictional and local: no real passwords and no network calls.
 
-**Exit evidence:** allowed mock dispatch plus adversarial missing, overlong,
-expired, replayed, changed-runtime, substituted-boundary, wrong-worker,
-wrong-role, cross-brand, credential-scope, destination and bypass tests. Final
-credential consumption must also deny approval, schedule or capability expiry
-and any suspension that completes after adapter entry but before credential
-release.
+**Exit evidence:** Linux-only repository gate enforced in CI; allowed mock
+dispatch plus adversarial missing, overlong, expired, replayed, changed-runtime,
+another-process, caller-created/substituted-boundary, wrong-role, cross-brand,
+credential-scope, destination and bypass tests. Final credential consumption
+must also deny approval, schedule or capability expiry and any suspension that
+completes after adapter entry but before credential release. Production remains
+blocked on separately provisioned worker processes/UIDs and an authority-owned
+persistent identity catalogue for every real role and tenant.
 
 ### Gate 5 — authoritative platform adapters and tenant data foundation
 

@@ -1,6 +1,19 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+if [[ "$(uname -s)" != "Linux" ]] || [[ ! -e "/proc/$$/exe" ]] || [[ ! -r "/proc/$$/stat" ]]; then
+  echo "Agency OS verification requires Linux with a mounted /proc filesystem." >&2
+  exit 1
+fi
+
+python3 - <<'PY'
+import socket
+import sys
+
+if not hasattr(socket, "SO_PEERCRED"):
+    sys.exit("Agency OS verification requires Linux SO_PEERCRED support.")
+PY
+
 python3 -m compileall -q agency_os tests
 python3 -m unittest discover -s tests -v
 python3 -m agency_os.demo

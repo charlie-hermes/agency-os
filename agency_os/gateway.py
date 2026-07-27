@@ -28,9 +28,8 @@ from .ledger import ActionLedger, LedgerError
 from .runtime_security import (
     CredentialBrokerError,
     FictionalCredentialBroker,
-    RuntimeBoundary,
     RuntimeIdentityError,
-    SupervisorRuntimeBoundary,
+    fictional_runtime,
 )
 from .store import Principal, TenantStore
 
@@ -89,12 +88,28 @@ class MockPublisher:
 
 
 class ActionGateway:
+    """A gateway whose security-critical wiring is sealed at provisioning."""
+
+    __slots__ = (
+        "_capability_id",
+        "_capability_registry",
+        "_runtime_boundary",
+        "_credential_broker",
+        "_publisher",
+        "_approval_store",
+        "_approval_authorities",
+        "_action_ledger",
+        "_clock",
+        "_closed",
+        "audit",
+    )
+    _IMMUTABLE_WIRING = frozenset(__slots__) - {"_closed", "audit"}
+
     def __init__(
         self,
         *,
         capability_id: str,
         capability_registry: CapabilityRegistry,
-        runtime_boundary: RuntimeBoundary,
         credential_broker: FictionalCredentialBroker,
         publisher: MockPublisher,
         approval_store: TenantStore,
@@ -102,18 +117,34 @@ class ActionGateway:
         action_ledger: ActionLedger,
         clock: Callable[[], datetime] | None = None,
     ) -> None:
-        if type(runtime_boundary) is not SupervisorRuntimeBoundary:
-            raise RuntimeIdentityError("RUNTIME_SUPERVISOR_BOUNDARY_REQUIRED")
-        self.capability_id = capability_id
-        self.capability_registry = capability_registry
-        self.runtime_boundary = runtime_boundary
-        self.credential_broker = credential_broker
-        self.publisher = publisher
-        self.approval_store = approval_store
-        self.approval_authorities = copy.deepcopy(dict(approval_authorities))
-        self.action_ledger = action_ledger
+        self._capability_id = capability_id
+        self._capability_registry = capability_registry
+        self._credential_broker = credential_broker
+        self._publisher = publisher
+        self._approval_store = approval_store
+        self._approval_authorities = copy.deepcopy(dict(approval_authorities))
+        self._action_ledger = action_ledger
         self._clock = clock or (lambda: datetime.now(timezone.utc))
+        self._runtime_boundary = fictional_runtime()
+        self._closed = False
         self.audit: list[dict[str, Any]] = []
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        if name in self._IMMUTABLE_WIRING and hasattr(self, name):
+            raise RuntimeIdentityError("GATEWAY_SECURITY_WIRING_IMMUTABLE")
+        object.__setattr__(self, name, value)
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._runtime_boundary.close()
+        self._closed = True
+
+    def __enter__(self) -> "ActionGateway":
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        self.close()
 
     def publish(
         self,
@@ -124,7 +155,7 @@ class ActionGateway:
     ) -> dict[str, Any]:
         current_time = self._clock()
         try:
-            principal = self.runtime_boundary.authenticate()
+            principal = self._runtime_boundary.authenticate()
         except RuntimeIdentityError as exc:
             self._deny(exc.code, {"brand_id": None}, cause=exc)
         except Exception as exc:
@@ -133,7 +164,7 @@ class ActionGateway:
             self._deny("RUNTIME_IDENTITY_INVALID", {"brand_id": None})
         capability, capability_status = self._resolve_capability(principal)
         try:
-            approval, approval_provenance = self.approval_store.resolve_approval(
+            approval, approval_provenance = self._approval_store.resolve_approval(
                 principal.brand_id, approval_id
             )
         except (KeyError, ContractError) as exc:
@@ -167,7 +198,7 @@ class ActionGateway:
         }
         request_checksum = canonical_checksum(request_binding)
         try:
-            reservation = self.action_ledger.reserve(
+            reservation = self._action_ledger.reserve(
                 principal.brand_id, idempotency_key, request_checksum
             )
         except LedgerError as exc:
@@ -203,19 +234,19 @@ class ActionGateway:
         if reservation.status != "RESERVED":
             self._deny("LEDGER_UNAVAILABLE", request_binding)
         try:
-            external = self.capability_registry.authorized_dispatch(
+            external = self._capability_registry.authorized_dispatch(
                 principal.brand_id,
-                self.capability_id,
+                self._capability_id,
                 capability["content_checksum"],
                 clock=self._clock,
                 pre_dispatch=lambda dispatch_time: self._validate_time_windows(
                     manifest, approval, dispatch_time
                 ),
-                dispatch=lambda authorization_guard: self.credential_broker.dispatch(
+                dispatch=lambda authorization_guard: self._credential_broker.dispatch(
                     principal=principal,
                     capability=capability,
                     manifest=manifest,
-                    publisher=self.publisher,
+                    publisher=self._publisher,
                     public_fields=manifest["public_fields"],
                     idempotency_key=idempotency_key,
                     authorization_guard=authorization_guard,
@@ -237,7 +268,7 @@ class ActionGateway:
             if isinstance(exc.__cause__, CredentialBrokerError):
                 self._deny(exc.__cause__.code, request_binding, cause=exc)
             try:
-                self.action_ledger.mark_unknown(
+                self._action_ledger.mark_unknown(
                     principal.brand_id, idempotency_key, request_checksum
                 )
             except LedgerError:
@@ -278,12 +309,12 @@ class ActionGateway:
             }
         )
         try:
-            self.action_ledger.complete(
+            self._action_ledger.complete(
                 principal.brand_id, idempotency_key, request_checksum, receipt
             )
         except LedgerError as exc:
             try:
-                self.action_ledger.mark_unknown(
+                self._action_ledger.mark_unknown(
                     principal.brand_id, idempotency_key, request_checksum
                 )
             except LedgerError:
@@ -325,7 +356,7 @@ class ActionGateway:
             or approval_provenance.get("role_id") != "human-approver"
         ):
             self._deny("APPROVAL_PROVENANCE_INVALID", dict(manifest))
-        brand_policy = self.approval_authorities.get(principal.brand_id, {})
+        brand_policy = self._approval_authorities.get(principal.brand_id, {})
         allowed_approvers = brand_policy.get(str(approval.get("authority_role")), ())
         if approval.get("approver_id") not in allowed_approvers:
             self._deny("APPROVAL_AUTHORITY_DENIED", dict(manifest))
@@ -373,8 +404,8 @@ class ActionGateway:
         self, principal: Principal
     ) -> tuple[dict[str, Any], str]:
         try:
-            return self.capability_registry.resolve(
-                principal.brand_id, self.capability_id
+            return self._capability_registry.resolve(
+                principal.brand_id, self._capability_id
             )
         except (KeyError, ContractError, CapabilityError) as exc:
             self._deny(

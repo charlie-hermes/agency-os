@@ -65,6 +65,18 @@ class RepositoryContractTests(unittest.TestCase):
             self.assertTrue(criterion["release_blocker"])
             self.assertTrue(criterion["command"].startswith("python3 -m unittest "))
 
+    def test_linux_verification_contract_is_explicit_and_ci_enforced(self) -> None:
+        readme = (ROOT / "README.md").read_text()
+        verifier = (ROOT / "scripts/verify").read_text()
+        workflow = (ROOT / ".github/workflows/verify.yml").read_text()
+        self.assertIn("supported on **Linux only**", readme)
+        self.assertIn("SO_PEERCRED", readme)
+        self.assertIn('"$(uname -s)" != "Linux"', verifier)
+        self.assertIn("/proc/$$/exe", verifier)
+        self.assertIn('hasattr(socket, "SO_PEERCRED")', verifier)
+        self.assertIn("runs-on: ubuntu-latest", workflow)
+        self.assertIn("run: ./scripts/verify", workflow)
+
 
 if __name__ == "__main__":
     unittest.main()

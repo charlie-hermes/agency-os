@@ -2,17 +2,21 @@
 
 ## Phase 0/1 enforcement
 
-- The gateway no longer accepts a worker-supplied `Principal` or a structural
-  identity callback. It accepts only the concrete client of a separate local
-  supervisor process. The supervisor owns the assertion signer, derives the
-  caller PID and operating-system user from Linux `SO_PEERCRED`, and derives the
-  executable checksum and process-start nonce from `/proc`; the worker sends no
-  identity or time claim. The runtime authority maps those pinned facts to an
-  immutable `Principal` through a signed, one-use assertion whose hard maximum
-  lifetime is 30 seconds. Missing, malformed, future, overlong, expired,
-  replayed, unregistered, or changed-runtime assertions fail before capability
-  or action resolution. The local socket lives in a private directory and has
-  mode `0600`.
+- The gateway accepts neither a worker-supplied `Principal` nor a worker-supplied
+  runtime boundary. During gateway provisioning it creates the concrete client
+  of a separate local supervisor, and its security-critical wiring cannot then
+  be replaced through normal attribute assignment. The worker-visible runtime
+  factory accepts no principal, role, brand, runtime ID, observation, or time.
+  The fictional authority owns one pre-provisioned mapping from the publisher
+  runtime ID to the Lantern publisher `Principal`. The supervisor owns the
+  assertion signer, derives caller PID and operating-system user from Linux
+  `SO_PEERCRED`, and derives the executable checksum plus a PID-bound
+  process-start nonce from `/proc`. It matches those live facts to the
+  provisioned process before returning the mapped principal through a signed,
+  one-use assertion whose hard maximum lifetime is 30 seconds. Missing,
+  malformed, future, overlong, expired, replayed, unregistered, another-process,
+  or changed-runtime assertions fail before capability or action resolution.
+  The local socket lives in a private directory and has mode `0600`.
 - The tenant store checks the principal's `brand_id` on every read and write.
 - Role read and write permissions are allowlisted by record type. The publishing
   operator can retrieve the public Publication Manifest but not draft or
@@ -71,7 +75,13 @@
 - The only Phase 0/1 destination is a local mock. Real egress is explicitly
   denied. The separate Linux supervisor process, local authority and fictional
   credential broker are reference controls, not claims of production VM
-  enforcement or a production service boundary.
+  enforcement or a production service boundary. Gate 4 supports one worker
+  identity per operating-system process; several roles sharing a process are
+  explicitly unsupported because peer credentials cannot distinguish them.
+- The complete Gate 4 repository verifier is Linux-only. It fails before tests
+  unless Linux, `/proc`, and `SO_PEERCRED` are available, and the same command is
+  required in Ubuntu GitHub Actions. macOS and Windows are not supported
+  validation hosts for this gate.
 - Audit records contain identifiers, checksums, state, and reason codes, never
   credentials or client content.
 

@@ -125,9 +125,36 @@
       "phase": 1,
       "owner": "platform-assurance-reviewer",
       "release_blocker": true,
-      "fixture": "runtime enrollments for the wrong worker and client",
+      "fixture": "authority-owned publisher enrollment and an attempted caller-selected principal",
       "command": "python3 -m unittest tests.test_gateway.GatewayTests.test_runtime_enrollment_not_worker_input_drives_identity",
-      "expected_evidence": "worker input cannot select identity and enrolled actor/client mismatches fail closed"
+      "expected_evidence": "the worker-visible factory accepts no principal, role, brand, runtime ID, observation, or time"
+    },
+    {
+      "id": "RUNTIME-WIRING-001",
+      "phase": 1,
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "fixture": "structural and concrete caller-created boundaries plus public and private replacement attempts",
+      "command": "python3 -m unittest tests.test_gateway.GatewayTests.test_worker_cannot_supply_or_replace_runtime_boundary",
+      "expected_evidence": "gateway provisioning accepts no runtime boundary and sealed wiring rejects replacement before credential release or dispatch"
+    },
+    {
+      "id": "RUNTIME-PEER-001",
+      "phase": 1,
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "fixture": "a second local process connects directly to the private supervisor socket",
+      "command": "python3 -m unittest tests.test_gateway.GatewayTests.test_other_process_cannot_use_supervisor_or_access_signer",
+      "expected_evidence": "the other PID is denied and the worker-side client exposes no assertion authority or signing key"
+    },
+    {
+      "id": "RUNTIME-CLEANUP-001",
+      "phase": 1,
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "fixture": "a closed supervisor and removed private socket directory",
+      "command": "python3 -m unittest tests.test_gateway.GatewayTests.test_supervisor_cleanup_fails_closed_without_dispatch",
+      "expected_evidence": "the supervisor terminates, local socket material is removed, and later publication fails before credential release or dispatch"
     },
     {
       "id": "CREDENTIAL-EGRESS-001",
