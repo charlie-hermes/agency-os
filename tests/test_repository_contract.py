@@ -50,6 +50,12 @@ class RepositoryContractTests(unittest.TestCase):
             "ApprovalRecord",
             "PublicationReceipt",
             "CapabilityRecord",
+            "ApproverPolicy",
+            "PaperclipTask",
+            "PaperclipTaskApproval",
+            "BuzzContextPacket",
+            "BuzzDecisionSummary",
+            "EvidenceRecord",
             "LearningContextManifest",
             "FailureObservation",
             "CandidateLearning",
@@ -59,7 +65,9 @@ class RepositoryContractTests(unittest.TestCase):
 
     def test_acceptance_matrix_commands_are_release_blocking(self) -> None:
         matrix = json.loads((ROOT / "acceptance/matrix.json").read_text())
-        self.assertEqual(matrix["candidate_phase"], "0/1-fictional")
+        self.assertEqual(
+            matrix["candidate_phase"], "gate-5-foundation-fictional"
+        )
         self.assertGreaterEqual(len(matrix["criteria"]), 10)
         for criterion in matrix["criteria"]:
             self.assertTrue(criterion["release_blocker"])

@@ -3,13 +3,17 @@
 Agency OS is a contract-first, tenant-isolated reference implementation of the
 Hermes + Paperclip digital marketing agency design.
 
-This initial Phase 0/1 release deliberately does three things:
+This fictional reference deliberately does four things:
 
 1. preserves the verified 12-role source library and implementation blueprint;
 2. reconciles the role, artifact, approval, learning, security, and operations
-   contracts into one authoritative build specification; and
+   contracts into one authoritative build specification;
 3. proves one fictional article flow through a local, fail-closed publication
-   gateway.
+   gateway; and
+4. begins Gate 5 with a protected local Platform Authority host, principal-bound
+   worker clients, durable typed tasks, versioned approver policy, host-attested
+   approvals, deadline-enforced restartable collaboration decisions, and tenant
+   evidence boundaries.
 
 It does **not** install agents on a VM, connect real client data, call a real
 provider, or publish externally.
@@ -24,14 +28,18 @@ provider, or publish externally.
   blueprint and role library differ.
 - `docs/master-plan.md` — living gate-by-gate roadmap from the current
   fictional controls through the complete production system.
+- `docs/gate-5-platform-foundation.md` — exact authority boundaries, denial
+  evidence and remaining work for the first persistent Gate 5 slice.
 - `docs/security-operations.md` — enforceable Phase 0/1 controls and production
   promotion blockers.
 - `schemas/` — versioned JSON Schemas for lifecycle and learning records.
 - `agency_os/` — standard-library-only reference controls, including an
   authoritative capability registry and an injectable in-memory or durable
   local-process action ledger, a protected fictional gateway/identity host with
-  a worker-only IPC client, mock credential broker and deny-by-default mock
-  egress boundary.
+  a worker-only IPC client, mock credential broker, deny-by-default mock egress
+  boundary, a protected fictional Platform Authority host with principal-bound
+  worker clients, typed Buzz context, and a persistent tenant-evidence
+  authority.
 - `fixtures/` — fictional tenant input.
 - `acceptance/matrix.json` — release criteria mapped to executable evidence.
 - `tests/` — allowed-path, denied-path, recovery, and vertical-slice tests.

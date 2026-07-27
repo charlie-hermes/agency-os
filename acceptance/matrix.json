@@ -1,6 +1,6 @@
 {
   "schema_version": "1.0",
-  "candidate_phase": "0/1-fictional",
+  "candidate_phase": "gate-5-foundation-fictional",
   "release_command": "./scripts/verify",
   "criteria": [
     {
@@ -281,6 +281,114 @@
       "fixture": "fixtures/fictional_brand.json",
       "command": "python3 -m unittest tests.test_workflow.WorkflowTests.test_complete_fictional_flow",
       "expected_evidence": "draft through measured publication receipt passes with no real write"
+    },
+    {
+      "id": "PAPERCLIP-AUTHORITY-001",
+      "phase": 5,
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "fixture": "versioned fictional tasks with dependencies, budgets and closure evidence",
+      "command": "python3 -m unittest tests.test_platform_adapters.PlatformAdapterTests.test_dependencies_budget_closure_and_restart_are_authoritative",
+      "expected_evidence": "dependency and budget denials hold while valid closure survives restart"
+    },
+    {
+      "id": "PAPERCLIP-APPROVAL-001",
+      "phase": 5,
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "fixture": "missing, rejected and checksum-stale task approvals",
+      "command": "python3 -m unittest tests.test_platform_adapters.PlatformAdapterTests.test_approval_is_exact_fresh_and_required_for_closure",
+      "expected_evidence": "no approval alternative can close the protected task"
+    },
+    {
+      "id": "PAPERCLIP-APPROVER-POLICY-001",
+      "phase": 5,
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "fixture": "unlisted actor, named approver and changed brand approver-policy revision",
+      "command": "python3 -m unittest tests.test_platform_adapters.PlatformAdapterTests.test_approver_catalogue_and_policy_drift_control_closure",
+      "expected_evidence": "unlisted and stale-policy approvals cannot mutate task or closure audit; a current named approver can close"
+    },
+    {
+      "id": "PAPERCLIP-APPROVAL-LEGACY-001",
+      "phase": 5,
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "fixture": "checksum-valid legacy approval without policy binding plus a forged unlisted approver record",
+      "command": "python3 -m unittest tests.test_platform_adapters.PlatformAdapterTests.test_legacy_approval_without_policy_binding_is_rejected",
+      "expected_evidence": "legacy and forged approvals both leave task and closure audit unchanged"
+    },
+    {
+      "id": "PAPERCLIP-APPROVAL-ATTESTATION-001",
+      "phase": 5,
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "fixture": "checksum-valid direct SQL approval impersonating a listed approver with a forged authority attestation",
+      "command": "python3 -m unittest tests.test_platform_adapters.PlatformAdapterTests.test_listed_approver_sql_forgery_lacks_authority_attestation",
+      "expected_evidence": "authority verification rejects the impersonation with unchanged task and audit state"
+    },
+    {
+      "id": "PAPERCLIP-AUTHORITY-HOST-001",
+      "phase": 5,
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "fixture": "director client, same authority ID with another key, caller-selected principal and base-setter socket replacement",
+      "command": "python3 -m unittest tests.test_platform_adapters.PlatformAdapterTests.test_worker_cannot_self_provision_or_replace_approval_authority",
+      "expected_evidence": "only the protected host owns Paperclip state and approval signing; self-provision, principal substitution and client redirection leave authoritative task and audit byte-identical"
+    },
+    {
+      "id": "PAPERCLIP-APPROVAL-BINDING-001",
+      "phase": 5,
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "fixture": "legitimate approval with each business and attestation field altered, checksum recomputed, and a convincing same-ID signature produced by another key",
+      "command": "python3 -m unittest tests.test_platform_adapters.PlatformAdapterTests.test_approval_attestation_binds_every_field_and_honest_key",
+      "expected_evidence": "every mutation and alternate-key signature is denied with byte-identical task and audit state; the honest signing key is absent from SQLite"
+    },
+    {
+      "id": "BUZZ-AUTHORITY-001",
+      "phase": 5,
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "fixture": "persisted typed Buzz context resumed by a fresh adapter before immutable Paperclip decision write-back",
+      "command": "python3 -m unittest tests.test_platform_adapters.PlatformAdapterTests.test_buzz_decision_is_written_to_paperclip_without_task_mutation",
+      "expected_evidence": "fresh Buzz and Paperclip adapters resume context and persist the decision while task authority remains byte-for-byte unchanged"
+    },
+    {
+      "id": "BUZZ-DEADLINE-001",
+      "phase": 5,
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "fixture": "expired adapter decision plus direct backdated Paperclip write-back",
+      "command": "python3 -m unittest tests.test_platform_adapters.PlatformAdapterTests.test_buzz_deadline_is_enforced_by_buzz_and_paperclip",
+      "expected_evidence": "both paths deny after the authority deadline with no decision or audit mutation"
+    },
+    {
+      "id": "BUZZ-ARCHIVE-RESTART-001",
+      "phase": 5,
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "fixture": "archived persisted context opened through fresh Buzz and Paperclip adapters",
+      "command": "python3 -m unittest tests.test_platform_adapters.PlatformAdapterTests.test_archived_buzz_context_remains_closed_after_restart",
+      "expected_evidence": "archive state survives restart and later decision write-back remains absent"
+    },
+    {
+      "id": "EVIDENCE-PERSISTENCE-001",
+      "phase": 5,
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "fixture": "two fictional tenants and a restarted SQLite evidence authority",
+      "command": "python3 -m unittest tests.test_platform_adapters.PlatformAdapterTests.test_evidence_is_persistent_immutable_and_tenant_isolated",
+      "expected_evidence": "same-tenant evidence survives restart; conflict and cross-tenant access fail"
+    },
+    {
+      "id": "PLATFORM-STORAGE-IDENTITY-001",
+      "phase": 5,
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "fixture": "a running authority whose SQLite path is replaced",
+      "command": "python3 -m unittest tests.test_platform_adapters.PlatformAdapterTests.test_replaced_storage_identity_is_rejected_by_both_authorities",
+      "expected_evidence": "Paperclip and evidence operations both fail closed after replacement"
     }
   ]
 }

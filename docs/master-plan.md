@@ -116,7 +116,7 @@ permissions and storage-identity tests.
 
 ### Gate 4 — authenticated runtime, credential broker and restricted egress
 
-**Status:** in progress.
+**Status:** complete and merged.
 
 Observe and catalogue one already-running fictional worker identity per
 operating-system process before giving that worker an endpoint. Run the identity
@@ -145,9 +145,24 @@ release. Production remains blocked on an authority service account, separately
 provisioned worker processes/UIDs and a persistent identity catalogue for every
 real role and tenant.
 
+**Merged evidence:** PR #5, reviewed commit
+`478d4acf79831c14a0d2d5b2a9d2ec1b8bc8ba54`, merge commit
+`621e54ca54e8b3ad7b753496919a9947e07989a5`, and Ubuntu repository gate
+`30303260880` with 77 tests and no real external write.
+
 ### Gate 5 — authoritative platform adapters and tenant data foundation
 
-**Status:** pending Gate 4.
+**Status:** in progress.
+
+The first fictional local slice adds an independently started Platform Authority
+host that alone owns Paperclip-shaped SQLite state, the approval signer and
+verifier, tenant evidence, and an exact principal-to-client catalogue. Workers
+receive only principal-bound IPC clients. The slice also adds versioned brand
+approver policy, deadline-enforced and restartable non-authoritative Buzz
+context with decision write-back, and tenant-scoped audit events. It is
+documented in
+`docs/gate-5-platform-foundation.md`. This is reference behavior, not evidence
+against installed Paperclip or Buzz services.
 
 Implement:
 
@@ -167,7 +182,7 @@ target VM before activation claims are made.
 
 ### Gate 6 — governed product-decision workshop
 
-**Status:** pending Gate 4; design recommendation received.
+**Status:** pending Gate 5; design recommendation received.
 
 Use OpenAI Responses API and Agents SDK for structured, evidence-backed
 research behind a self-owned, read-only Agency OS Decision MCP broker.
@@ -298,11 +313,12 @@ governed DecisionPacket workshop.
 
 ## Current checkpoint
 
-- Approved base: `main` after durable capability authority.
-- Active gate: Gate 4, authenticated runtime, credential broker and restricted
-  egress.
-- Next dependent work: Gate 5 platform adapters and tenant foundation, then
-  Gate 6 governed product decisions and Gate 7 full fictional Core workflow.
+- Approved base: `main` after the merged Gate 4 fictional runtime/egress
+  boundary.
+- Active gate: Gate 5, authoritative platform adapters and tenant data
+  foundation.
+- Next dependent work: finish Gate 5, then Gate 6 governed product decisions
+  and Gate 7 full fictional Core workflow.
 - Explicit guardrail: finish the bounded safety gate, then advance the agency
   workflow. Do not keep polishing the mock publication gateway in place of
   proving the product.
