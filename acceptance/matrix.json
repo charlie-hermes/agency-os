@@ -328,6 +328,24 @@
       "expected_evidence": "authority verification rejects the impersonation with unchanged task and audit state"
     },
     {
+      "id": "PAPERCLIP-AUTHORITY-HOST-001",
+      "phase": 5,
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "fixture": "director client, same authority ID with another key, caller-selected principal and base-setter socket replacement",
+      "command": "python3 -m unittest tests.test_platform_adapters.PlatformAdapterTests.test_worker_cannot_self_provision_or_replace_approval_authority",
+      "expected_evidence": "only the protected host owns Paperclip state and approval signing; self-provision, principal substitution and client redirection leave authoritative task and audit byte-identical"
+    },
+    {
+      "id": "PAPERCLIP-APPROVAL-BINDING-001",
+      "phase": 5,
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "fixture": "legitimate approval with each business and attestation field altered, checksum recomputed, and a convincing same-ID signature produced by another key",
+      "command": "python3 -m unittest tests.test_platform_adapters.PlatformAdapterTests.test_approval_attestation_binds_every_field_and_honest_key",
+      "expected_evidence": "every mutation and alternate-key signature is denied with byte-identical task and audit state; the honest signing key is absent from SQLite"
+    },
+    {
       "id": "BUZZ-AUTHORITY-001",
       "phase": 5,
       "owner": "platform-assurance-reviewer",

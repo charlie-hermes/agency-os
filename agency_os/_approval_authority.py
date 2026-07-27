@@ -16,13 +16,24 @@ from typing import Any, Mapping
 from .contracts import ContractError, canonical_bytes, finalize_record, verify_record
 
 
-class FictionalApprovalAuthority:
+_APPROVAL_AUTHORITY_TOKEN = object()
+
+
+class _FictionalApprovalAuthority:
     """Attest and verify canonical approvals outside their SQLite record store."""
 
     _ALGORITHM = "HMAC-SHA256"
     _DOMAIN = b"agency-os.paperclip-task-approval.v1\x00"
 
-    def __init__(self, *, authority_id: str, signing_key: bytes) -> None:
+    def __init__(
+        self,
+        *,
+        authority_id: str,
+        signing_key: bytes,
+        _construction_token: object,
+    ) -> None:
+        if _construction_token is not _APPROVAL_AUTHORITY_TOKEN:
+            raise ContractError("approval authority construction is denied")
         if not authority_id:
             raise ValueError("approval authority_id is required")
         if not isinstance(signing_key, bytes) or len(signing_key) < 32:

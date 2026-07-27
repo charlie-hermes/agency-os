@@ -10,9 +10,10 @@ This fictional reference deliberately does four things:
    contracts into one authoritative build specification;
 3. proves one fictional article flow through a local, fail-closed publication
    gateway; and
-4. begins Gate 5 with durable typed task, versioned approver-policy and
-   separately attested approval authority, deadline-enforced restartable
-   collaboration decisions, and tenant evidence boundaries.
+4. begins Gate 5 with a protected local Platform Authority host, principal-bound
+   worker clients, durable typed tasks, versioned approver policy, host-attested
+   approvals, deadline-enforced restartable collaboration decisions, and tenant
+   evidence boundaries.
 
 It does **not** install agents on a VM, connect real client data, call a real
 provider, or publish externally.
@@ -36,8 +37,9 @@ provider, or publish externally.
   authoritative capability registry and an injectable in-memory or durable
   local-process action ledger, a protected fictional gateway/identity host with
   a worker-only IPC client, mock credential broker, deny-by-default mock egress
-  boundary, typed fictional Paperclip/Buzz adapters and a persistent
-  tenant-evidence authority.
+  boundary, a protected fictional Platform Authority host with principal-bound
+  worker clients, typed Buzz context, and a persistent tenant-evidence
+  authority.
 - `fixtures/` — fictional tenant input.
 - `acceptance/matrix.json` — release criteria mapped to executable evidence.
 - `tests/` — allowed-path, denied-path, recovery, and vertical-slice tests.

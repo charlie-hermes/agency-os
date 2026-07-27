@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
-from .approval_authority import FictionalApprovalAuthority
+from ._approval_authority import _FictionalApprovalAuthority
 from .contracts import (
     ContractError,
     canonical_bytes,
@@ -404,7 +404,10 @@ class _SQLitePlatformDatabase:
             raise self.error_type("could not open platform authority") from exc
 
 
-class FictionalPaperclipAdapter:
+_AUTHORITY_ADAPTER_TOKEN = object()
+
+
+class _AuthorityPaperclipAdapter:
     """Durable, typed local stand-in for Paperclip's authoritative state."""
 
     def __init__(
@@ -413,8 +416,13 @@ class FictionalPaperclipAdapter:
         *,
         timeout_seconds: float = 5.0,
         clock: Callable[[], datetime] | None = None,
-        approval_authority: FictionalApprovalAuthority | None = None,
+        approval_authority: _FictionalApprovalAuthority,
+        _construction_token: object,
     ) -> None:
+        if _construction_token is not _AUTHORITY_ADAPTER_TOKEN:
+            raise PlatformAdapterError(
+                "Paperclip authority construction is denied"
+            )
         self._database = _SQLitePlatformDatabase(
             database_path,
             timeout_seconds=timeout_seconds,
@@ -630,8 +638,6 @@ class FictionalPaperclipAdapter:
         decided_at: str,
         expires_at: str,
     ) -> dict[str, Any]:
-        if self._approval_authority is None:
-            raise PlatformAdapterError("Paperclip approval authority is unavailable")
         if principal.role_id != "human-approver":
             raise AuthorizationError("only a human approver may record approval")
         if not approval_id:
@@ -1170,7 +1176,7 @@ class FictionalPaperclipAdapter:
         connection: sqlite3.Connection, task: Mapping[str, Any]
     ) -> None:
         for dependency_id in task["dependencies"]:
-            dependency = FictionalPaperclipAdapter._read_current_task(
+            dependency = _AuthorityPaperclipAdapter._read_current_task(
                 connection, task["brand_id"], dependency_id
             )
             if dependency["status"] != "done":
@@ -1217,8 +1223,6 @@ class FictionalPaperclipAdapter:
         if row is None:
             raise ContractError("Paperclip approval is missing")
         approval = json.loads(row[0])
-        if self._approval_authority is None:
-            raise PlatformAdapterError("Paperclip approval authority is unavailable")
         self._approval_authority.verify(approval)
         policy_id = approval.get("policy_id")
         if not isinstance(policy_id, str) or not policy_id:
@@ -1273,7 +1277,7 @@ class FictionalBuzzAdapter:
 
     def __init__(
         self,
-        paperclip: FictionalPaperclipAdapter,
+        paperclip: Any,
         *,
         clock: Callable[[], datetime] | None = None,
     ) -> None:
@@ -1354,7 +1358,7 @@ class FictionalBuzzAdapter:
         self._paperclip.archive_buzz_context(principal, context_id)
 
 
-class SQLiteTenantEvidenceStore:
+class _AuthorityTenantEvidenceStore:
     """Persistent immutable evidence partitioned by brand and Paperclip issue."""
 
     def __init__(
@@ -1362,7 +1366,12 @@ class SQLiteTenantEvidenceStore:
         database_path: str | os.PathLike[str],
         *,
         timeout_seconds: float = 5.0,
+        _construction_token: object,
     ) -> None:
+        if _construction_token is not _AUTHORITY_ADAPTER_TOKEN:
+            raise EvidenceStoreError(
+                "tenant evidence authority construction is denied"
+            )
         self._database = _SQLitePlatformDatabase(
             database_path,
             timeout_seconds=timeout_seconds,
@@ -1419,7 +1428,7 @@ class SQLiteTenantEvidenceStore:
                     record["retrieved_at"],
                 ),
             )
-            FictionalPaperclipAdapter._insert_audit(
+            _AuthorityPaperclipAdapter._insert_audit(
                 connection, principal, "evidence.recorded", evidence_id
             )
             connection.commit()

@@ -92,22 +92,32 @@
   unless Linux, `/proc`, and `SO_PEERCRED` are available, and the same command is
   required in Ubuntu GitHub Actions. macOS and Windows are not supported
   validation hosts for this gate.
-- The fictional Gate 5 Paperclip boundary accepts a task approval only from an
-  actor named in the current immutable brand approver-policy revision and only
-  when a separately provisioned authority has attested the canonical approval.
-  Its standard-library HMAC key is held outside SQLite and is not exported from
-  the worker-facing package; closure verifies the attestation before trusting
-  any claimed approver. Each brand has one append-only policy lineage. Approval
-  creation and task closure both re-read that active revision; alternate IDs,
-  unlisted actors, legacy unbound records, revision drift and direct database
-  impersonation of a listed actor fail without task or closure-audit mutation.
-  This is not production key custody: the real Paperclip signer, rotation and
-  recovery must run under an authority service identity unavailable to workers.
-  The fictional Buzz boundary persists context and archive state in
-  Paperclip-shaped storage, derives decision time from authority clocks, resumes
-  retained context after adapter restart, rejects expired or future-dated
-  activity, and prevents elapsed-deadline bypass through backdated direct
-  write-back without adding a decision or audit record.
+- The fictional Gate 5 Platform Authority starts as a separate protected local
+  process and alone receives the Paperclip SQLite path, HMAC signing key,
+  signer/verifier, tenant evidence authority and exact principal catalogue.
+  Worker-facing code receives only a `PlatformAuthorityClient` containing a
+  private socket path, one authority-bound `Principal` and one opaque random
+  token. Requests do not carry caller-selected actor, role or tenant fields; the
+  host resolves identity from its token catalogue before dispatch.
+- Approval creation accepts only a client bound to an actor named in the current
+  immutable brand approver-policy revision. Signing and verification both stay
+  inside the host. The root worker-facing package exports no Paperclip adapter,
+  evidence-store constructor, signer or host bootstrap. Same-ID/different-key
+  self-provision, direct constructor use, principal substitution through
+  `object.__setattr__`, client socket redirection, unlisted actors, legacy
+  records, policy drift and direct SQL fault injection all fail without task or
+  closure-audit mutation. Redirecting a client can affect only that client; it
+  cannot replace the running host or its key.
+- This local HMAC/process proof is not production service-account isolation. The
+  private bootstrap and clients remain in one source tree and tests use one
+  local account. Production must package and run the host under a separate
+  authority identity that alone owns the socket directory, database, principal
+  catalogue and key, with durable rotation, recovery and client provisioning.
+- The fictional Buzz boundary persists context and archive state through the
+  protected host, derives decision time from authority clocks, resumes retained
+  context through a fresh client, rejects expired or future-dated activity, and
+  prevents elapsed-deadline bypass through backdated direct write-back without
+  adding a decision or audit record.
 - Audit records contain identifiers, checksums, state, and reason codes, never
   credentials or client content.
 

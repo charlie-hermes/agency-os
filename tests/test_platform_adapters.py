@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import copy
+import hashlib
+import hmac
 import os
 import sqlite3
 import tempfile
@@ -8,14 +10,19 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from agency_os.approval_authority import FictionalApprovalAuthority
+import agency_os
+from agency_os._approval_authority import _FictionalApprovalAuthority
 from agency_os.contracts import ContractError, canonical_bytes, finalize_record
+from agency_os.platform_authority_host import (
+    PlatformAuthorityClient,
+    PlatformAuthorityUnavailable,
+    _provision_platform_authority_host,
+)
 from agency_os.platform_adapters import (
+    _AuthorityPaperclipAdapter,
     EvidenceStoreError,
     FictionalBuzzAdapter,
-    FictionalPaperclipAdapter,
     PlatformAdapterError,
-    SQLiteTenantEvidenceStore,
     make_approver_policy,
     make_buzz_context_packet,
     make_evidence_record,
@@ -30,16 +37,6 @@ class PlatformAdapterTests(unittest.TestCase):
         self.addCleanup(temporary_directory.cleanup)
         self.database_path = Path(temporary_directory.name) / "platform.sqlite3"
         self.now = datetime(2026, 7, 27, 20, 45, tzinfo=timezone.utc)
-        self.approval_authority = FictionalApprovalAuthority(
-            authority_id="fictional_paperclip_approval_authority",
-            signing_key=os.urandom(32),
-        )
-        self.paperclip = FictionalPaperclipAdapter(
-            self.database_path,
-            clock=lambda: self.now,
-            approval_authority=self.approval_authority,
-        )
-        self.evidence = SQLiteTenantEvidenceStore(self.database_path)
         self.director = Principal(
             "agent_director", "agency-director", "brand_lantern"
         )
@@ -49,9 +46,41 @@ class PlatformAdapterTests(unittest.TestCase):
         self.approver = Principal(
             "human_owner", "human-approver", "brand_lantern"
         )
+        self.unlisted_approver = Principal(
+            "unlisted_human", "human-approver", "brand_lantern"
+        )
         self.strategist = Principal(
             "agent_strategist", "search-content-strategist", "brand_lantern"
         )
+        self.publisher = Principal(
+            "agent_publisher", "publishing-operator", "brand_lantern"
+        )
+        self.provisioned_principals = (
+            self.director,
+            self.foreign_director,
+            self.approver,
+            self.unlisted_approver,
+            self.strategist,
+            self.publisher,
+        )
+        self.approval_signing_key = os.urandom(32)
+        self.platform_host = _provision_platform_authority_host(
+            self.database_path,
+            authority_id="fictional_paperclip_approval_authority",
+            approval_signing_key=self.approval_signing_key,
+            initial_time=self.now,
+            principals=self.provisioned_principals,
+        )
+        self.addCleanup(self.platform_host.close)
+        self.paperclip = self.platform_host.client(self.director)
+        self.approval_client = self.platform_host.client(self.approver)
+        self.unlisted_approval_client = self.platform_host.client(
+            self.unlisted_approver
+        )
+        self.foreign_paperclip = self.platform_host.client(self.foreign_director)
+        self.strategist_paperclip = self.platform_host.client(self.strategist)
+        self.publisher_paperclip = self.platform_host.client(self.publisher)
+        self.evidence = self.strategist_paperclip.evidence()
 
     def _task(
         self,
@@ -163,9 +192,7 @@ class PlatformAdapterTests(unittest.TestCase):
             evidence_refs=("evidence_primary",),
         )
 
-        restarted = FictionalPaperclipAdapter(
-            self.database_path, clock=lambda: self.now
-        )
+        restarted = self.platform_host.client(self.director)
         self.assertEqual(restarted.get_task(self.director, "issue_asset"), closed)
         self.assertEqual(closed["status"], "done")
         self.assertEqual(closed["budget"]["spent_minor"], 750)
@@ -186,7 +213,7 @@ class PlatformAdapterTests(unittest.TestCase):
                 evidence_refs=("evidence_approval",),
             )
 
-        rejected = self.paperclip.record_approval(
+        rejected = self.approval_client.record_approval(
             self.approver,
             approval_id="approval_rejected",
             issue_id="issue_approval",
@@ -208,7 +235,7 @@ class PlatformAdapterTests(unittest.TestCase):
                 approval_id="approval_rejected",
             )
 
-        self.paperclip.record_approval(
+        self.approval_client.record_approval(
             self.approver,
             approval_id="approval_allowed",
             issue_id="issue_approval",
@@ -264,7 +291,7 @@ class PlatformAdapterTests(unittest.TestCase):
         before_task = self.paperclip.get_task(self.director, "issue_policy")
         before_audit = self.paperclip.audit_events(self.director)
         with self.assertRaises(AuthorizationError):
-            self.paperclip.record_approval(
+            self.unlisted_approval_client.record_approval(
                 unlisted,
                 approval_id="approval_unlisted",
                 issue_id="issue_policy",
@@ -282,7 +309,7 @@ class PlatformAdapterTests(unittest.TestCase):
         self.assertEqual(self.paperclip.audit_events(self.director), before_audit)
 
         with self.assertRaises(ContractError):
-            self.paperclip.record_approval(
+            self.approval_client.record_approval(
                 self.approver,
                 approval_id="approval_future",
                 issue_id="issue_policy",
@@ -296,7 +323,7 @@ class PlatformAdapterTests(unittest.TestCase):
             )
         self.assertEqual(self.paperclip.audit_events(self.director), before_audit)
 
-        self.paperclip.record_approval(
+        self.approval_client.record_approval(
             self.approver,
             approval_id="approval_policy_1",
             issue_id="issue_policy",
@@ -331,7 +358,7 @@ class PlatformAdapterTests(unittest.TestCase):
             self.paperclip.audit_events(self.director), before_drift_audit
         )
 
-        approval = self.paperclip.record_approval(
+        approval = self.approval_client.record_approval(
             self.approver,
             approval_id="approval_policy_2",
             issue_id="issue_policy",
@@ -347,11 +374,7 @@ class PlatformAdapterTests(unittest.TestCase):
             approval["approval_attestation"]["authority_id"],
             "fictional_paperclip_approval_authority",
         )
-        restarted = FictionalPaperclipAdapter(
-            self.database_path,
-            clock=lambda: self.now,
-            approval_authority=self.approval_authority,
-        )
+        restarted = self.platform_host.client(self.director)
         closed = restarted.close_task(
             self.director,
             "issue_policy",
@@ -541,7 +564,239 @@ class PlatformAdapterTests(unittest.TestCase):
             [event["event_type"] for event in before_audit],
         )
 
-    def test_missing_approval_authority_fails_closed(self) -> None:
+    def test_approval_attestation_binds_every_field_and_honest_key(self) -> None:
+        self.paperclip.create_task(
+            self.director,
+            self._task("issue_attestation_binding", approval_required=True),
+        )
+        self.evidence.put(
+            self.strategist,
+            self._evidence(
+                "evidence_attestation_binding",
+                issue_id="issue_attestation_binding",
+            ),
+        )
+        policy = self.paperclip.register_approver_policy(
+            self.director, self._policy()
+        )
+        current = self._advance_to_in_progress("issue_attestation_binding")
+        legitimate = self.approval_client.record_approval(
+            self.approver,
+            approval_id="approval_attestation_binding",
+            issue_id="issue_attestation_binding",
+            expected_task_checksum=current["content_checksum"],
+            policy_id=policy["policy_id"],
+            policy_revision=policy["revision"],
+            policy_checksum=policy["content_checksum"],
+            decision="APPROVED",
+            decided_at=self.now.isoformat(),
+            expires_at=(self.now + timedelta(minutes=10)).isoformat(),
+        )
+        before_task = self.paperclip.get_task(
+            self.director, "issue_attestation_binding"
+        )
+        before_audit = self.paperclip.audit_events(self.director)
+
+        replacements = {
+            "approval_id": "approval_attestation_changed",
+            "brand_id": "brand_ember",
+            "paperclip_issue_id": "issue_other",
+            "task_checksum": "sha256:" + "1" * 64,
+            "policy_id": "other_policy",
+            "policy_revision": 2,
+            "policy_checksum": "sha256:" + "2" * 64,
+            "decision": "REJECTED",
+            "approver_id": "another_approver",
+            "authority_role": "agency-director",
+            "decided_at": (self.now - timedelta(minutes=1)).isoformat(),
+            "expires_at": (self.now + timedelta(minutes=11)).isoformat(),
+        }
+        forged_records: list[dict] = []
+        for field, replacement in replacements.items():
+            forged = copy.deepcopy(legitimate)
+            forged.pop("content_checksum")
+            forged[field] = replacement
+            forged_records.append(finalize_record(forged))
+
+        without_attestation = copy.deepcopy(legitimate)
+        without_attestation.pop("content_checksum")
+        without_attestation.pop("approval_attestation")
+        forged_records.append(finalize_record(without_attestation))
+
+        malformed_attestation = copy.deepcopy(legitimate)
+        malformed_attestation.pop("content_checksum")
+        malformed_attestation["approval_attestation"] = "not-an-attestation"
+        forged_records.append(finalize_record(malformed_attestation))
+
+        for attestation_field, replacement in (
+            ("authority_id", "attacker_authority"),
+            ("algorithm", "HMAC-SHA512"),
+            ("signature", "f" * 64),
+        ):
+            forged = copy.deepcopy(legitimate)
+            forged.pop("content_checksum")
+            forged["approval_attestation"][attestation_field] = replacement
+            forged_records.append(finalize_record(forged))
+
+        attacker_body = copy.deepcopy(legitimate)
+        attacker_body.pop("content_checksum")
+        attacker_body.pop("approval_attestation")
+        attacker_signature = hmac.new(
+            os.urandom(32),
+            b"agency-os.paperclip-task-approval.v1\x00"
+            + canonical_bytes(attacker_body),
+            hashlib.sha256,
+        ).hexdigest()
+        attacker_body["approval_attestation"] = {
+            "authority_id": "fictional_paperclip_approval_authority",
+            "algorithm": "HMAC-SHA256",
+            "signature": attacker_signature,
+        }
+        forged_records.append(finalize_record(attacker_body))
+
+        for forged in forged_records:
+            connection = sqlite3.connect(self.database_path)
+            try:
+                connection.execute(
+                    """
+                    UPDATE paperclip_approvals SET record_json = ?
+                    WHERE brand_id = ? AND approval_id = ?
+                    """,
+                    (
+                        canonical_bytes(forged).decode("utf-8"),
+                        "brand_lantern",
+                        legitimate["approval_id"],
+                    ),
+                )
+                connection.commit()
+            finally:
+                connection.close()
+            with self.assertRaises(ContractError):
+                self.paperclip.close_task(
+                    self.director,
+                    "issue_attestation_binding",
+                    current["content_checksum"],
+                    evidence_refs=("evidence_attestation_binding",),
+                    approval_id=legitimate["approval_id"],
+                )
+            self.assertEqual(
+                self.paperclip.get_task(self.director, "issue_attestation_binding"),
+                before_task,
+            )
+            self.assertEqual(self.paperclip.audit_events(self.director), before_audit)
+
+        self.assertNotIn(self.approval_signing_key, self.database_path.read_bytes())
+
+    def test_worker_cannot_self_provision_or_replace_approval_authority(self) -> None:
+        self.paperclip.create_task(
+            self.director,
+            self._task("issue_authority_boundary", approval_required=True),
+        )
+        self.evidence.put(
+            self.strategist,
+            self._evidence(
+                "evidence_authority_boundary",
+                issue_id="issue_authority_boundary",
+            ),
+        )
+        policy = self.paperclip.register_approver_policy(
+            self.director, self._policy()
+        )
+        current = self._advance_to_in_progress("issue_authority_boundary")
+        before_task = self.paperclip.get_task(
+            self.director, "issue_authority_boundary"
+        )
+        before_audit = self.paperclip.audit_events(self.director)
+
+        self.assertIsInstance(self.paperclip, PlatformAuthorityClient)
+        self.assertEqual(
+            PlatformAuthorityClient.__slots__,
+            ("_socket_path", "_principal", "_client_token"),
+        )
+        for forbidden_export in (
+            "FictionalApprovalAuthority",
+            "FictionalPaperclipAdapter",
+            "SQLiteTenantEvidenceStore",
+            "provision_platform_authority_host",
+        ):
+            self.assertFalse(hasattr(agency_os, forbidden_export))
+
+        with self.assertRaises(ContractError):
+            _FictionalApprovalAuthority(
+                authority_id="fictional_paperclip_approval_authority",
+                signing_key=os.urandom(32),
+                _construction_token=object(),
+            )
+        with self.assertRaises(PlatformAdapterError):
+            _AuthorityPaperclipAdapter(
+                self.database_path,
+                approval_authority=object(),
+                _construction_token=object(),
+            )
+
+        forged_identity = self.platform_host.client(self.director)
+        object.__setattr__(forged_identity, "_principal", self.approver)
+        with self.assertRaises(AuthorizationError):
+            forged_identity.record_approval(
+                self.approver,
+                approval_id="attacker_self_signed",
+                issue_id="issue_authority_boundary",
+                expected_task_checksum=current["content_checksum"],
+                policy_id=policy["policy_id"],
+                policy_revision=policy["revision"],
+                policy_checksum=policy["content_checksum"],
+                decision="APPROVED",
+                decided_at=self.now.isoformat(),
+                expires_at=(self.now + timedelta(minutes=10)).isoformat(),
+            )
+
+        with self.assertRaises(AuthorizationError):
+            self.platform_host.client(
+                Principal("attacker", "human-approver", "brand_lantern")
+            )
+        invented_client = PlatformAuthorityClient(
+            object.__getattribute__(self.paperclip, "_socket_path"),
+            self.approver,
+            "0" * 64,
+        )
+        with self.assertRaises(AuthorizationError):
+            invented_client.record_approval(
+                self.approver,
+                approval_id="attacker_invented_client",
+                issue_id="issue_authority_boundary",
+                expected_task_checksum=current["content_checksum"],
+                policy_id=policy["policy_id"],
+                policy_revision=policy["revision"],
+                policy_checksum=policy["content_checksum"],
+                decision="APPROVED",
+                decided_at=self.now.isoformat(),
+                expires_at=(self.now + timedelta(minutes=10)).isoformat(),
+            )
+
+        forged_token = self.platform_host.client(self.director)
+        object.__setattr__(forged_token, "_client_token", "0" * 64)
+        with self.assertRaises(AuthorizationError):
+            forged_token.get_task(self.director, "issue_authority_boundary")
+
+        redirected = self.platform_host.client(self.director)
+        with self.assertRaises(AttributeError):
+            object.__setattr__(redirected, "_approval_authority", object())
+        object.__setattr__(redirected, "_socket_path", str(self.database_path))
+        with self.assertRaises(PlatformAuthorityUnavailable):
+            redirected.close_task(
+                self.director,
+                "issue_authority_boundary",
+                current["content_checksum"],
+                evidence_refs=("evidence_authority_boundary",),
+                approval_id="attacker_self_signed",
+            )
+        self.assertEqual(
+            self.paperclip.get_task(self.director, "issue_authority_boundary"),
+            before_task,
+        )
+        self.assertEqual(self.paperclip.audit_events(self.director), before_audit)
+
+    def test_unavailable_platform_authority_fails_closed(self) -> None:
         self.paperclip.create_task(
             self.director, self._task("issue_unprovisioned", approval_required=True)
         )
@@ -549,13 +804,12 @@ class PlatformAdapterTests(unittest.TestCase):
             self.director, self._policy()
         )
         current = self._advance_to_in_progress("issue_unprovisioned")
-        unprovisioned = FictionalPaperclipAdapter(
-            self.database_path, clock=lambda: self.now
-        )
         before_task = self.paperclip.get_task(self.director, "issue_unprovisioned")
         before_audit = self.paperclip.audit_events(self.director)
-        with self.assertRaises(PlatformAdapterError):
-            unprovisioned.record_approval(
+        unavailable_client = self.approval_client
+        self.platform_host.close()
+        with self.assertRaises(PlatformAuthorityUnavailable):
+            unavailable_client.record_approval(
                 self.approver,
                 approval_id="approval_unprovisioned",
                 issue_id="issue_unprovisioned",
@@ -567,6 +821,15 @@ class PlatformAdapterTests(unittest.TestCase):
                 decided_at=self.now.isoformat(),
                 expires_at=(self.now + timedelta(minutes=10)).isoformat(),
             )
+        self.platform_host = _provision_platform_authority_host(
+            self.database_path,
+            authority_id="fictional_paperclip_approval_authority",
+            approval_signing_key=self.approval_signing_key,
+            initial_time=self.now,
+            principals=self.provisioned_principals,
+        )
+        self.addCleanup(self.platform_host.close)
+        self.paperclip = self.platform_host.client(self.director)
         self.assertEqual(
             self.paperclip.get_task(self.director, "issue_unprovisioned"), before_task
         )
@@ -576,9 +839,9 @@ class PlatformAdapterTests(unittest.TestCase):
         task = self._task("issue_asset")
         self.paperclip.create_task(self.director, task)
         with self.assertRaises(KeyError):
-            self.paperclip.get_task(self.foreign_director, "issue_asset")
+            self.foreign_paperclip.get_task(self.foreign_director, "issue_asset")
         with self.assertRaises(AuthorizationError):
-            self.paperclip.create_task(self.foreign_director, task)
+            self.foreign_paperclip.create_task(self.foreign_director, task)
 
         current = self.paperclip.set_status(
             self.director, "issue_asset", task["content_checksum"], "ready"
@@ -614,9 +877,7 @@ class PlatformAdapterTests(unittest.TestCase):
             created_at=self.now.isoformat(),
         )
         buzz.post_context(self.director, context)
-        restarted = FictionalPaperclipAdapter(
-            self.database_path, clock=lambda: self.now
-        )
+        restarted = self.platform_host.client(self.director)
         restarted_buzz = FictionalBuzzAdapter(restarted, clock=lambda: self.now)
         decision = restarted_buzz.collect_decision(
             self.director,
@@ -650,9 +911,7 @@ class PlatformAdapterTests(unittest.TestCase):
 
     def test_buzz_deadline_is_enforced_by_buzz_and_paperclip(self) -> None:
         authority_time = [self.now]
-        paperclip = FictionalPaperclipAdapter(
-            self.database_path, clock=lambda: authority_time[0]
-        )
+        paperclip = self.paperclip
         paperclip.create_task(self.director, self._task("issue_asset"))
         buzz = FictionalBuzzAdapter(paperclip, clock=lambda: authority_time[0])
         context = make_buzz_context_packet(
@@ -673,6 +932,7 @@ class PlatformAdapterTests(unittest.TestCase):
         buzz.post_context(self.director, context)
         before_audit = paperclip.audit_events(self.director)
         authority_time[0] = self.now + timedelta(minutes=2)
+        self.platform_host.set_time(authority_time[0])
 
         with self.assertRaises(ContractError):
             paperclip.record_buzz_context(self.director, context)
@@ -730,9 +990,7 @@ class PlatformAdapterTests(unittest.TestCase):
         buzz.post_context(self.director, context)
         buzz.archive(self.director, "context_archived")
 
-        restarted = FictionalPaperclipAdapter(
-            self.database_path, clock=lambda: self.now
-        )
+        restarted = self.platform_host.client(self.director)
         restarted_buzz = FictionalBuzzAdapter(restarted, clock=lambda: self.now)
         with self.assertRaises(ContractError):
             restarted_buzz.collect_decision(
@@ -775,7 +1033,7 @@ class PlatformAdapterTests(unittest.TestCase):
                 source_event_ids=("buzz_event_1",),
             )
         with self.assertRaises(KeyError):
-            self.paperclip.get_buzz_decision(
+            self.foreign_paperclip.get_buzz_decision(
                 self.foreign_director, "decision_asset"
             )
 
@@ -783,15 +1041,17 @@ class PlatformAdapterTests(unittest.TestCase):
         self.paperclip.create_task(self.director, self._task("issue_asset"))
         evidence = self._evidence()
         self.evidence.put(self.strategist, evidence)
-        restarted = SQLiteTenantEvidenceStore(self.database_path)
+        restarted = self.platform_host.client(self.strategist).evidence()
         self.assertEqual(restarted.get(self.strategist, "evidence_primary"), evidence)
         self.assertEqual(
             restarted.list_for_issue(self.strategist, "issue_asset"), [evidence]
         )
         with self.assertRaises(KeyError):
-            restarted.get(self.foreign_director, "evidence_primary")
+            self.foreign_paperclip.evidence().get(
+                self.foreign_director, "evidence_primary"
+            )
         with self.assertRaises(AuthorizationError):
-            restarted.put(self.foreign_director, evidence)
+            self.foreign_paperclip.evidence().put(self.foreign_director, evidence)
 
         changed = copy.deepcopy(evidence)
         changed["claim"] = "A changed claim."
@@ -803,11 +1063,8 @@ class PlatformAdapterTests(unittest.TestCase):
         evidence = self._evidence()
         with self.assertRaises(ContractError):
             self.evidence.put(self.strategist, evidence)
-        publisher = Principal(
-            "agent_publisher", "publishing-operator", "brand_lantern"
-        )
         with self.assertRaises(AuthorizationError):
-            self.evidence.put(publisher, evidence)
+            self.publisher_paperclip.evidence().put(self.publisher, evidence)
         forged = copy.deepcopy(evidence)
         forged["created_by"] = "another_actor"
         forged = finalize_record(forged)
@@ -817,7 +1074,14 @@ class PlatformAdapterTests(unittest.TestCase):
     def test_replaced_storage_identity_is_rejected_by_both_authorities(self) -> None:
         self.paperclip.create_task(self.director, self._task("issue_asset"))
         replacement_path = self.database_path.with_name("replacement.sqlite3")
-        FictionalPaperclipAdapter(replacement_path)
+        replacement_host = _provision_platform_authority_host(
+            replacement_path,
+            authority_id="fictional_paperclip_approval_authority",
+            approval_signing_key=os.urandom(32),
+            initial_time=self.now,
+            principals=self.provisioned_principals,
+        )
+        replacement_host.close()
         replacement_path.replace(self.database_path)
 
         with self.assertRaises(PlatformAdapterError):
@@ -828,17 +1092,14 @@ class PlatformAdapterTests(unittest.TestCase):
     def test_audit_is_persistent_and_tenant_scoped(self) -> None:
         self.paperclip.create_task(self.director, self._task("issue_asset"))
         self.evidence.put(self.strategist, self._evidence())
-        events = FictionalPaperclipAdapter(self.database_path).audit_events(
-            self.director
-        )
+        restarted = self.platform_host.client(self.director)
+        events = restarted.audit_events(self.director)
         self.assertEqual(
             [event["event_type"] for event in events],
             ["paperclip.task.created", "evidence.recorded"],
         )
         self.assertEqual(
-            FictionalPaperclipAdapter(self.database_path).audit_events(
-                self.foreign_director
-            ),
+            self.foreign_paperclip.audit_events(self.foreign_director),
             [],
         )
 

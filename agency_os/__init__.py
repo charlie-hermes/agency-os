@@ -10,12 +10,15 @@ from .contracts import (
 )
 from .gateway import GatewayDenied, MockPublisher
 from .gateway_host import ActionGatewayClient, fictional_runtime
+from .platform_authority_host import (
+    PlatformAuthorityClient,
+    PlatformAuthorityUnavailable,
+    TenantEvidenceClient,
+)
 from .platform_adapters import (
     EvidenceStoreError,
     FictionalBuzzAdapter,
-    FictionalPaperclipAdapter,
     PlatformAdapterError,
-    SQLiteTenantEvidenceStore,
     make_approver_policy,
     make_buzz_context_packet,
     make_evidence_record,
@@ -43,11 +46,12 @@ __all__ = [
     "FictionalCredentialBroker",
     "FictionalCredentialGrant",
     "FictionalBuzzAdapter",
-    "FictionalPaperclipAdapter",
     "EvidenceStoreError",
+    "PlatformAuthorityClient",
+    "PlatformAuthorityUnavailable",
     "PlatformAdapterError",
     "RuntimeIdentityError",
-    "SQLiteTenantEvidenceStore",
+    "TenantEvidenceClient",
     "fictional_credential_broker",
     "fictional_credential_grant",
     "fictional_runtime",
