@@ -11,6 +11,7 @@ from .capabilities import (
     CapabilityDriftError,
     CapabilityError,
     CapabilityExpiredError,
+    FinalDispatchDenied,
     CapabilityInactiveError,
     CapabilityNotYetEffectiveError,
     CapabilityRegistry,
@@ -29,6 +30,7 @@ from .runtime_security import (
     FictionalCredentialBroker,
     RuntimeBoundary,
     RuntimeIdentityError,
+    SupervisorRuntimeBoundary,
 )
 from .store import Principal, TenantStore
 
@@ -100,6 +102,8 @@ class ActionGateway:
         action_ledger: ActionLedger,
         clock: Callable[[], datetime] | None = None,
     ) -> None:
+        if type(runtime_boundary) is not SupervisorRuntimeBoundary:
+            raise RuntimeIdentityError("RUNTIME_SUPERVISOR_BOUNDARY_REQUIRED")
         self.capability_id = capability_id
         self.capability_registry = capability_registry
         self.runtime_boundary = runtime_boundary
@@ -120,7 +124,7 @@ class ActionGateway:
     ) -> dict[str, Any]:
         current_time = self._clock()
         try:
-            principal = self.runtime_boundary.authenticate(now=current_time)
+            principal = self.runtime_boundary.authenticate()
         except RuntimeIdentityError as exc:
             self._deny(exc.code, {"brand_id": None}, cause=exc)
         except Exception as exc:
@@ -207,15 +211,18 @@ class ActionGateway:
                 pre_dispatch=lambda dispatch_time: self._validate_time_windows(
                     manifest, approval, dispatch_time
                 ),
-                dispatch=lambda: self.credential_broker.dispatch(
+                dispatch=lambda authorization_guard: self.credential_broker.dispatch(
                     principal=principal,
                     capability=capability,
                     manifest=manifest,
                     publisher=self.publisher,
                     public_fields=manifest["public_fields"],
                     idempotency_key=idempotency_key,
+                    authorization_guard=authorization_guard,
                 ),
             )
+        except FinalDispatchDenied as exc:
+            self._deny(exc.code, request_binding, cause=exc)
         except CapabilityNotYetEffectiveError as exc:
             self._deny("CAPABILITY_NOT_YET_EFFECTIVE", request_binding, cause=exc)
         except CapabilityExpiredError as exc:

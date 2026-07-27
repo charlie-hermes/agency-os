@@ -10,7 +10,7 @@ import threading
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Mapping, TypeVar
+from typing import Any, Callable, Mapping, Protocol, TypeVar
 
 from .contracts import (
     ContractError,
@@ -52,7 +52,23 @@ class CapabilityDispatchError(RuntimeError):
     """The authorized external dispatch failed or returned an unknown result."""
 
 
+class FinalDispatchDenied(PermissionError):
+    """Final authorization changed before credential release."""
+
+    def __init__(self, code: str) -> None:
+        super().__init__(code)
+        self.code = code
+
+
 DispatchResult = TypeVar("DispatchResult")
+
+
+class DispatchAuthorizationGuard(Protocol):
+    """Holds capability authority from credential release through dispatch."""
+
+    def acquire(self) -> None: ...
+
+    def release(self) -> None: ...
 
 
 class CapabilityRegistry:
@@ -137,7 +153,7 @@ class CapabilityRegistry:
         return capability_id
 
     def suspend(self, issuer: Principal, brand_id: str, capability_id: str) -> None:
-        if getattr(self._dispatch_context, "active", False):
+        if getattr(self._dispatch_context, "guard_held", False):
             raise CapabilityError(
                 "capability suspension cannot run inside authorized dispatch"
             )
@@ -168,53 +184,50 @@ class CapabilityRegistry:
         *,
         clock: Callable[[], datetime],
         pre_dispatch: Callable[[datetime], None],
-        dispatch: Callable[[], DispatchResult],
+        dispatch: Callable[[DispatchAuthorizationGuard], DispatchResult],
     ) -> DispatchResult:
-        """Atomically validate live authority and invoke the egress adapter.
+        """Validate, then bind final authority to credential release and dispatch.
 
-        Suspension and dispatch use the same lock. If suspension acquires it
-        first, dispatch is denied. If dispatch acquires it first, the authority
-        samples its clock, validates the grant window, validates other caller
-        windows, and invokes the adapter before suspension can take effect.
+        A suspension that completes before credential consumption wins. Final
+        authorization then holds the same lock until the adapter returns, so a
+        later suspension is serialized after the external result.
         """
 
-        if getattr(self._dispatch_context, "active", False):
+        if getattr(self._dispatch_context, "authorizing", False):
             raise CapabilityError("nested authorized dispatch is denied")
         with self._dispatch_lock:
-            self._dispatch_context.active = True
-            try:
-                with self._lock:
-                    record, status = self._resolve_locked(brand_id, capability_id)
-                    if record.get("status") != "active" or status != "active":
-                        raise CapabilityInactiveError("capability is inactive")
-                    if record.get("content_checksum") != expected_checksum:
-                        raise CapabilityDriftError("capability checksum changed")
-                    try:
-                        dispatch_time = clock()
-                    except Exception as exc:
-                        raise CapabilityError("dispatch clock is unavailable") from exc
-                    if (
-                        not isinstance(dispatch_time, datetime)
-                        or dispatch_time.tzinfo is None
-                    ):
-                        raise CapabilityError(
-                            "dispatch clock must be timezone-aware"
-                        )
-                    if parse_time(record["not_before"]) > dispatch_time:
-                        raise CapabilityNotYetEffectiveError(
-                            "capability is not yet effective"
-                        )
-                    if parse_time(record["expires_at"]) <= dispatch_time:
-                        raise CapabilityExpiredError("capability is expired")
-                pre_dispatch(dispatch_time)
-                try:
-                    return dispatch()
-                except Exception as exc:
-                    raise CapabilityDispatchError(
-                        "authorized external dispatch failed"
-                    ) from exc
-            finally:
-                self._dispatch_context.active = False
+            with self._lock:
+                record, status = self._resolve_locked(brand_id, capability_id)
+                dispatch_time = _validate_dispatch_authority(
+                    record, status, expected_checksum, clock
+                )
+            pre_dispatch(dispatch_time)
+        guard = _InMemoryDispatchAuthorizationGuard(
+            self,
+            brand_id,
+            capability_id,
+            expected_checksum,
+            clock,
+            pre_dispatch,
+        )
+        self._dispatch_context.authorizing = True
+        try:
+            return dispatch(guard)
+        except (
+            CapabilityNotYetEffectiveError,
+            CapabilityExpiredError,
+            CapabilityInactiveError,
+            CapabilityDriftError,
+            FinalDispatchDenied,
+        ):
+            raise
+        except Exception as exc:
+            raise CapabilityDispatchError(
+                "authorized external dispatch failed"
+            ) from exc
+        finally:
+            guard.release()
+            self._dispatch_context.authorizing = False
 
     def _resolve_locked(
         self, brand_id: str, capability_id: str
@@ -243,6 +256,52 @@ class CapabilityRegistry:
                 "outcome": outcome,
             }
         )
+
+
+class _InMemoryDispatchAuthorizationGuard:
+    def __init__(
+        self,
+        registry: CapabilityRegistry,
+        brand_id: str,
+        capability_id: str,
+        expected_checksum: str,
+        clock: Callable[[], datetime],
+        pre_dispatch: Callable[[datetime], None],
+    ) -> None:
+        self._registry = registry
+        self._brand_id = brand_id
+        self._capability_id = capability_id
+        self._expected_checksum = expected_checksum
+        self._clock = clock
+        self._pre_dispatch = pre_dispatch
+        self._acquired = False
+
+    def acquire(self) -> None:
+        if self._acquired:
+            raise CapabilityError("dispatch authorization guard is one-use")
+        self._registry._dispatch_lock.acquire()
+        self._registry._dispatch_context.guard_held = True
+        try:
+            with self._registry._lock:
+                record, status = self._registry._resolve_locked(
+                    self._brand_id, self._capability_id
+                )
+                dispatch_time = _validate_dispatch_authority(
+                    record, status, self._expected_checksum, self._clock
+                )
+            _validate_final_windows(self._pre_dispatch, dispatch_time)
+            self._acquired = True
+        except Exception:
+            self._registry._dispatch_context.guard_held = False
+            self._registry._dispatch_lock.release()
+            raise
+
+    def release(self) -> None:
+        if not self._acquired:
+            return
+        self._acquired = False
+        self._registry._dispatch_context.guard_held = False
+        self._registry._dispatch_lock.release()
 
 
 class SQLiteCapabilityRegistry(CapabilityRegistry):
@@ -312,7 +371,7 @@ class SQLiteCapabilityRegistry(CapabilityRegistry):
         return capability_id
 
     def suspend(self, issuer: Principal, brand_id: str, capability_id: str) -> None:
-        if getattr(self._dispatch_context, "active", False):
+        if getattr(self._dispatch_context, "guard_held", False):
             raise CapabilityError(
                 "capability suspension cannot run inside authorized dispatch"
             )
@@ -382,15 +441,12 @@ class SQLiteCapabilityRegistry(CapabilityRegistry):
         *,
         clock: Callable[[], datetime],
         pre_dispatch: Callable[[datetime], None],
-        dispatch: Callable[[], DispatchResult],
+        dispatch: Callable[[DispatchAuthorizationGuard], DispatchResult],
     ) -> DispatchResult:
-        if getattr(self._dispatch_context, "active", False):
+        if getattr(self._dispatch_context, "authorizing", False):
             raise CapabilityError("nested authorized dispatch is denied")
         connection = self._connect()
-        dispatched = False
-        self._dispatch_context.active = True
         try:
-            connection.execute("BEGIN IMMEDIATE")
             row = connection.execute(
                 """
                 SELECT record_json, state
@@ -404,51 +460,42 @@ class SQLiteCapabilityRegistry(CapabilityRegistry):
             record, status = _validated_durable_capability(
                 brand_id, capability_id, row[0], row[1]
             )
-            if record.get("status") != "active" or status != "active":
-                raise CapabilityInactiveError("capability is inactive")
-            if record.get("content_checksum") != expected_checksum:
-                raise CapabilityDriftError("capability checksum changed")
-            try:
-                dispatch_time = clock()
-            except Exception as exc:
-                raise CapabilityError("dispatch clock is unavailable") from exc
-            if not isinstance(dispatch_time, datetime) or dispatch_time.tzinfo is None:
-                raise CapabilityError("dispatch clock must be timezone-aware")
-            if parse_time(record["not_before"]) > dispatch_time:
-                raise CapabilityNotYetEffectiveError("capability is not yet effective")
-            if parse_time(record["expires_at"]) <= dispatch_time:
-                raise CapabilityExpiredError("capability is expired")
+            dispatch_time = _validate_dispatch_authority(
+                record, status, expected_checksum, clock
+            )
             pre_dispatch(dispatch_time)
-            try:
-                result = dispatch()
-                dispatched = True
-            except Exception as exc:
-                raise CapabilityDispatchError(
-                    "authorized external dispatch failed"
-                ) from exc
-            try:
-                connection.commit()
-            except sqlite3.Error as exc:
-                raise CapabilityDispatchError(
-                    "could not finish authorized dispatch"
-                ) from exc
-            return result
-        except CapabilityDispatchError:
-            _rollback_capability(connection)
-            raise
         except (KeyError, CapabilityError, ContractError):
-            _rollback_capability(connection)
             raise
         except (json.JSONDecodeError, sqlite3.Error, TypeError, ValueError) as exc:
-            _rollback_capability(connection)
-            if dispatched:
-                raise CapabilityDispatchError(
-                    "authorized external result is unknown"
-                ) from exc
             raise CapabilityError("could not authorize durable dispatch") from exc
         finally:
-            self._dispatch_context.active = False
             connection.close()
+        guard = _SQLiteDispatchAuthorizationGuard(
+            self,
+            brand_id,
+            capability_id,
+            expected_checksum,
+            clock,
+            pre_dispatch,
+        )
+        self._dispatch_context.authorizing = True
+        try:
+            return dispatch(guard)
+        except (
+            CapabilityNotYetEffectiveError,
+            CapabilityExpiredError,
+            CapabilityInactiveError,
+            CapabilityDriftError,
+            FinalDispatchDenied,
+        ):
+            raise
+        except Exception as exc:
+            raise CapabilityDispatchError(
+                "authorized external dispatch failed"
+            ) from exc
+        finally:
+            guard.release()
+            self._dispatch_context.authorizing = False
 
     def _initialize(self) -> None:
         deadline = time.monotonic() + self.timeout_seconds
@@ -510,6 +557,104 @@ class SQLiteCapabilityRegistry(CapabilityRegistry):
             if connection is not None:
                 connection.close()
             raise CapabilityError("could not open capability registry") from exc
+
+
+class _SQLiteDispatchAuthorizationGuard:
+    def __init__(
+        self,
+        registry: SQLiteCapabilityRegistry,
+        brand_id: str,
+        capability_id: str,
+        expected_checksum: str,
+        clock: Callable[[], datetime],
+        pre_dispatch: Callable[[datetime], None],
+    ) -> None:
+        self._registry = registry
+        self._brand_id = brand_id
+        self._capability_id = capability_id
+        self._expected_checksum = expected_checksum
+        self._clock = clock
+        self._pre_dispatch = pre_dispatch
+        self._connection: sqlite3.Connection | None = None
+
+    def acquire(self) -> None:
+        if self._connection is not None:
+            raise CapabilityError("dispatch authorization guard is one-use")
+        connection = self._registry._connect()
+        self._registry._dispatch_context.guard_held = True
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                """
+                SELECT record_json, state
+                FROM capability_registry
+                WHERE brand_id = ? AND capability_id = ?
+                """,
+                (self._brand_id, self._capability_id),
+            ).fetchone()
+            if row is None:
+                raise KeyError(self._capability_id)
+            record, status = _validated_durable_capability(
+                self._brand_id, self._capability_id, row[0], row[1]
+            )
+            dispatch_time = _validate_dispatch_authority(
+                record, status, self._expected_checksum, self._clock
+            )
+            _validate_final_windows(self._pre_dispatch, dispatch_time)
+            self._connection = connection
+        except Exception:
+            _rollback_capability(connection)
+            connection.close()
+            self._registry._dispatch_context.guard_held = False
+            raise
+
+    def release(self) -> None:
+        if self._connection is None:
+            return
+        connection = self._connection
+        self._connection = None
+        self._registry._dispatch_context.guard_held = False
+        try:
+            connection.commit()
+        except sqlite3.Error as exc:
+            _rollback_capability(connection)
+            raise CapabilityDispatchError(
+                "could not finish authorized dispatch"
+            ) from exc
+        finally:
+            connection.close()
+
+
+def _validate_dispatch_authority(
+    record: Mapping[str, Any],
+    status: str,
+    expected_checksum: str,
+    clock: Callable[[], datetime],
+) -> datetime:
+    if record.get("status") != "active" or status != "active":
+        raise CapabilityInactiveError("capability is inactive")
+    if record.get("content_checksum") != expected_checksum:
+        raise CapabilityDriftError("capability checksum changed")
+    try:
+        dispatch_time = clock()
+    except Exception as exc:
+        raise CapabilityError("dispatch clock is unavailable") from exc
+    if not isinstance(dispatch_time, datetime) or dispatch_time.tzinfo is None:
+        raise CapabilityError("dispatch clock must be timezone-aware")
+    if parse_time(record["not_before"]) > dispatch_time:
+        raise CapabilityNotYetEffectiveError("capability is not yet effective")
+    if parse_time(record["expires_at"]) <= dispatch_time:
+        raise CapabilityExpiredError("capability is expired")
+    return dispatch_time
+
+
+def _validate_final_windows(
+    pre_dispatch: Callable[[datetime], None], dispatch_time: datetime
+) -> None:
+    try:
+        pre_dispatch(dispatch_time)
+    except Exception as exc:
+        raise FinalDispatchDenied(str(exc)) from exc
 
 
 def _validated_durable_capability(

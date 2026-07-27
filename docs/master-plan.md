@@ -118,8 +118,10 @@ permissions and storage-identity tests.
 
 **Status:** in progress.
 
-Derive worker, role and brand identity from a verified local runtime boundary.
-Use one-use, short-lived runtime assertions and reject missing, expired,
+Derive worker, role and brand identity in a separate local supervisor from
+operating-system peer identity, executable checksum and process-start facts;
+do not accept a caller-supplied identity callback. Use one-use runtime
+assertions with a hard 30-second maximum and reject missing, overlong, expired,
 replayed or changed-runtime assertions. Allow the mock adapter to obtain only
 the exact short-lived fictional credential approved for the authenticated
 identity, client, destination, environment and operation. Deny credential
@@ -128,9 +130,12 @@ egress.
 
 This gate remains fictional and local: no real passwords and no network calls.
 
-**Exit evidence:** allowed mock dispatch plus adversarial missing, expired,
-replayed, changed-runtime, wrong-worker, wrong-role, cross-brand,
-credential-scope, destination and bypass tests.
+**Exit evidence:** allowed mock dispatch plus adversarial missing, overlong,
+expired, replayed, changed-runtime, substituted-boundary, wrong-worker,
+wrong-role, cross-brand, credential-scope, destination and bypass tests. Final
+credential consumption must also deny approval, schedule or capability expiry
+and any suspension that completes after adapter entry but before credential
+release.
 
 ### Gate 5 — authoritative platform adapters and tenant data foundation
 

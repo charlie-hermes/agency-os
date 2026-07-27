@@ -46,7 +46,7 @@ class AmbiguousPublisher(MockPublisher):
         raise TimeoutError("synthetic timeout")
 
 
-class BlockingPublisher(MockPublisher):
+class PreAuthorizationBlockingPublisher(MockPublisher):
     def __init__(self) -> None:
         super().__init__()
         self.entered = threading.Event()
@@ -56,6 +56,44 @@ class BlockingPublisher(MockPublisher):
         self.entered.set()
         if not self.release.wait(timeout=2):
             raise TimeoutError("test did not release publisher")
+        return super().publish(
+            public_fields=public_fields,
+            idempotency_key=idempotency_key,
+            credential_lease=credential_lease,
+        )
+
+
+class BlockingPublisher(MockPublisher):
+    def __init__(self) -> None:
+        super().__init__()
+        self.entered = threading.Event()
+        self.release = threading.Event()
+
+    def publish(self, *, public_fields, idempotency_key, credential_lease=None):
+        self._authorize_dispatch(credential_lease)
+        self.entered.set()
+        if not self.release.wait(timeout=2):
+            raise TimeoutError("test did not release publisher")
+        self.calls += 1
+        external_id = f"mock_{len(self.objects) + 1}"
+        result = {
+            "external_id": external_id,
+            "external_url": f"mock://published/{external_id}",
+            "state": "PUBLISHED",
+            "rendered_public_fields": copy.deepcopy(dict(public_fields)),
+        }
+        self.objects[idempotency_key] = result
+        return copy.deepcopy(result)
+
+
+class AdvancingBeforeCredentialPublisher(MockPublisher):
+    def __init__(self, clock: "MutableClock", delay: timedelta) -> None:
+        super().__init__()
+        self.clock = clock
+        self.delay = delay
+
+    def publish(self, *, public_fields, idempotency_key, credential_lease=None):
+        self.clock.advance(self.delay)
         return super().publish(
             public_fields=public_fields,
             idempotency_key=idempotency_key,
@@ -241,10 +279,15 @@ class GatewayTests(unittest.TestCase):
         credential_broker: FictionalCredentialBroker | None = None,
     ) -> ActionGateway:
         runtime_principal = principal or self.principal
+        selected_runtime_boundary = runtime_boundary or fictional_runtime(
+            runtime_principal
+        )
+        if runtime_boundary is None:
+            self.addCleanup(selected_runtime_boundary.close)
         return ActionGateway(
             capability_id=capability_id,
             capability_registry=capability_registry or self.capability_registry,
-            runtime_boundary=runtime_boundary or fictional_runtime(runtime_principal),
+            runtime_boundary=selected_runtime_boundary,
             credential_broker=credential_broker
             or fictional_credential_broker(self.capability, clock=clock),
             publisher=publisher,
@@ -275,87 +318,48 @@ class GatewayTests(unittest.TestCase):
         authority = RuntimeIdentityAuthority(signing_key=b"r" * 32)
         authority.enroll(observation, self.principal)
 
-        missing_publisher = MockPublisher()
         missing_boundary = VerifiedRuntimeBoundary(
             authority,
             observation_source=lambda: observation,
             assertion_source=lambda: None,
         )
-        missing_gateway = self._gateway(
-            missing_publisher,
-            InMemoryActionLedger(),
-            runtime_boundary=missing_boundary,
-        )
-        with self.assertRaisesRegex(GatewayDenied, "RUNTIME_ASSERTION_MISSING"):
-            missing_gateway.publish(
-                manifest=self.manifest,
-                approval_id=self.approval["approval_id"],
-                idempotency_key="missing-runtime",
-            )
+        with self.assertRaisesRegex(RuntimeIdentityError, "RUNTIME_ASSERTION_MISSING"):
+            missing_boundary.authenticate(now=self.now)
 
         expired_assertion = authority.issue_assertion(
             observation,
             now=self.now - timedelta(minutes=2),
             ttl=timedelta(seconds=30),
         )
-        expired_gateway = self._gateway(
-            MockPublisher(),
-            InMemoryActionLedger(),
-            runtime_boundary=VerifiedRuntimeBoundary(
-                authority,
-                observation_source=lambda: observation,
-                assertion_source=lambda: expired_assertion,
-            ),
+        expired_boundary = VerifiedRuntimeBoundary(
+            authority,
+            observation_source=lambda: observation,
+            assertion_source=lambda: expired_assertion,
         )
-        with self.assertRaisesRegex(GatewayDenied, "RUNTIME_ASSERTION_EXPIRED"):
-            expired_gateway.publish(
-                manifest=self.manifest,
-                approval_id=self.approval["approval_id"],
-                idempotency_key="expired-runtime",
-            )
+        with self.assertRaisesRegex(RuntimeIdentityError, "RUNTIME_ASSERTION_EXPIRED"):
+            expired_boundary.authenticate(now=self.now)
 
         replay_assertion = authority.issue_assertion(observation, now=self.now)
-        replay_publisher = MockPublisher()
-        replay_gateway = self._gateway(
-            replay_publisher,
-            InMemoryActionLedger(),
-            runtime_boundary=VerifiedRuntimeBoundary(
-                authority,
-                observation_source=lambda: observation,
-                assertion_source=lambda: replay_assertion,
-            ),
+        replay_boundary = VerifiedRuntimeBoundary(
+            authority,
+            observation_source=lambda: observation,
+            assertion_source=lambda: replay_assertion,
         )
-        replay_gateway.publish(
-            manifest=self.manifest,
-            approval_id=self.approval["approval_id"],
-            idempotency_key="runtime-once",
-        )
-        with self.assertRaisesRegex(GatewayDenied, "RUNTIME_ASSERTION_REPLAYED"):
-            replay_gateway.publish(
-                manifest=self.manifest,
-                approval_id=self.approval["approval_id"],
-                idempotency_key="runtime-twice",
-            )
+        self.assertEqual(replay_boundary.authenticate(now=self.now), self.principal)
+        with self.assertRaisesRegex(RuntimeIdentityError, "RUNTIME_ASSERTION_REPLAYED"):
+            replay_boundary.authenticate(now=self.now)
 
         changed_observation = self._runtime_observation(
             instance_nonce="replaced-instance"
         )
         changed_assertion = authority.issue_assertion(observation, now=self.now)
-        changed_gateway = self._gateway(
-            MockPublisher(),
-            InMemoryActionLedger(),
-            runtime_boundary=VerifiedRuntimeBoundary(
-                authority,
-                observation_source=lambda: changed_observation,
-                assertion_source=lambda: changed_assertion,
-            ),
+        changed_boundary = VerifiedRuntimeBoundary(
+            authority,
+            observation_source=lambda: changed_observation,
+            assertion_source=lambda: changed_assertion,
         )
-        with self.assertRaisesRegex(GatewayDenied, "RUNTIME_IDENTITY_CHANGED"):
-            changed_gateway.publish(
-                manifest=self.manifest,
-                approval_id=self.approval["approval_id"],
-                idempotency_key="changed-runtime",
-            )
+        with self.assertRaisesRegex(RuntimeIdentityError, "RUNTIME_IDENTITY_CHANGED"):
+            changed_boundary.authenticate(now=self.now)
 
         pre_restart_assertion = authority.issue_assertion(observation, now=self.now)
         restarted_authority = RuntimeIdentityAuthority(signing_key=b"r" * 32)
@@ -365,8 +369,24 @@ class GatewayTests(unittest.TestCase):
                 pre_restart_assertion, observation, now=self.now
             )
 
-        self.assertEqual(missing_publisher.calls, 0)
-        self.assertEqual(replay_publisher.calls, 1)
+        with self.assertRaisesRegex(ValueError, "ttl exceeds"):
+            authority.issue_assertion(
+                observation, now=self.now, ttl=timedelta(seconds=31)
+            )
+
+    def test_structural_runtime_boundary_cannot_supply_gateway_identity(self) -> None:
+        class CallerControlledBoundary:
+            def authenticate(self):
+                return self.principal
+
+        with self.assertRaisesRegex(
+            RuntimeIdentityError, "RUNTIME_SUPERVISOR_BOUNDARY_REQUIRED"
+        ):
+            self._gateway(
+                MockPublisher(),
+                InMemoryActionLedger(),
+                runtime_boundary=CallerControlledBoundary(),
+            )
 
     def test_runtime_enrollment_not_worker_input_drives_identity(self) -> None:
         publish_parameters = inspect.signature(ActionGateway.publish).parameters
@@ -481,6 +501,14 @@ class GatewayTests(unittest.TestCase):
         self.assertNotIn("fictional-credential-lantern", repr(receipt))
         self.assertNotIn("fictional-credential-lantern", repr(gateway.audit))
         self.assertNotIn("fictional-credential-lantern", repr(broker.audit))
+
+        grant = fictional_credential_grant(self.capability)
+        with self.assertRaisesRegex(ValueError, "30 seconds or less"):
+            FictionalCredentialBroker(
+                [grant],
+                egress_allowlist={grant.destination_ref: grant.endpoint},
+                lease_ttl=timedelta(seconds=31),
+            )
 
         expired_grant = replace(
             fictional_credential_grant(self.capability),
@@ -798,6 +826,111 @@ class GatewayTests(unittest.TestCase):
         self.assertEqual(str(denied.exception), "SCHEDULE_WINDOW_EXPIRED")
         self.assertEqual(publisher.calls, 0)
 
+    def test_final_authorization_rechecks_windows_at_credential_release(self) -> None:
+        for window_name in ("approval", "schedule", "capability"):
+            with self.subTest(window=window_name):
+                clock = MutableClock(self.now)
+                manifest = copy.deepcopy(self.manifest)
+                approval = copy.deepcopy(self.approval)
+                capability = self.capability
+                registry = self.capability_registry
+                capability_id = capability["capability_id"]
+                expected_reason = {
+                    "approval": "APPROVAL_EXPIRED",
+                    "schedule": "SCHEDULE_WINDOW_EXPIRED",
+                    "capability": "CAPABILITY_EXPIRED",
+                }[window_name]
+
+                if window_name == "approval":
+                    approval["approval_id"] = "approval_final_expiry"
+                    approval["expires_at"] = (
+                        self.now + timedelta(seconds=1)
+                    ).isoformat()
+                    approval = finalize_record(approval)
+                    self._persist_approval(approval)
+                elif window_name == "schedule":
+                    manifest["schedule_window"] = {
+                        "starts_at": (self.now - timedelta(minutes=1)).isoformat(),
+                        "ends_at": (self.now + timedelta(seconds=1)).isoformat(),
+                    }
+                    manifest = finalize_record(manifest)
+                    approval.update(
+                        {
+                            "approval_id": "approval_final_schedule",
+                            "manifest_checksum": manifest["content_checksum"],
+                            "schedule_window": copy.deepcopy(
+                                manifest["schedule_window"]
+                            ),
+                            "expires_at": (
+                                self.now + timedelta(minutes=30)
+                            ).isoformat(),
+                        }
+                    )
+                    approval = finalize_record(approval)
+                    self._persist_approval(approval)
+                else:
+                    capability = self._capability(
+                        "cap_final_expiry",
+                        expires_at=(self.now + timedelta(seconds=1)).isoformat(),
+                    )
+                    registry = CapabilityRegistry()
+                    registry.register(self.director, capability)
+                    capability_id = capability["capability_id"]
+
+                publisher = AdvancingBeforeCredentialPublisher(
+                    clock, timedelta(seconds=2)
+                )
+                broker = fictional_credential_broker(capability, clock=clock)
+                gateway = self._gateway(
+                    publisher,
+                    InMemoryActionLedger(),
+                    capability_id=capability_id,
+                    capability_registry=registry,
+                    clock=clock,
+                    credential_broker=broker,
+                )
+                with self.assertRaises(GatewayDenied) as denied:
+                    gateway.publish(
+                        manifest=manifest,
+                        approval_id=approval["approval_id"],
+                        idempotency_key=f"final-{window_name}",
+                    )
+                self.assertEqual(str(denied.exception), expected_reason)
+                self.assertEqual(publisher.calls, 0)
+                self.assertEqual(publisher.credential_ids, [])
+                self.assertEqual(broker.audit, [])
+
+    def test_suspension_before_credential_release_prevents_adapter_call(self) -> None:
+        registry = TrackingSuspendRegistry()
+        registry.register(self.director, self.capability)
+        publisher = PreAuthorizationBlockingPublisher()
+        gateway = self._gateway(
+            publisher,
+            InMemoryActionLedger(),
+            capability_registry=registry,
+        )
+
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(
+                gateway.publish,
+                manifest=self.manifest,
+                approval_id=self.approval["approval_id"],
+                idempotency_key="suspended-before-credential",
+            )
+            self.assertTrue(publisher.entered.wait(timeout=1))
+            registry.suspend(
+                self.director,
+                "brand_lantern",
+                self.capability["capability_id"],
+            )
+            publisher.release.set()
+            with self.assertRaises(GatewayDenied) as denied:
+                future.result(timeout=1)
+
+        self.assertEqual(str(denied.exception), "CAPABILITY_INACTIVE")
+        self.assertEqual(publisher.calls, 0)
+        self.assertEqual(publisher.credential_ids, [])
+
     def test_suspension_winning_dispatch_race_prevents_adapter_call(self) -> None:
         registry = PausingDispatchRegistry()
         registry.register(self.director, self.capability)
@@ -881,12 +1014,12 @@ class GatewayTests(unittest.TestCase):
                 idempotency_key="reentrant-suspension",
             )
 
-        self.assertEqual(str(denied.exception), "EXTERNAL_RESULT_UNKNOWN")
+        self.assertEqual(str(denied.exception), "CAPABILITY_INACTIVE")
         self.assertEqual(publisher.calls, 0)
         _, status = self.capability_registry.resolve(
             "brand_lantern", self.capability["capability_id"]
         )
-        self.assertEqual(status, "active")
+        self.assertEqual(status, "suspended")
 
     def test_unknown_result_requires_reconciliation_before_retry(self) -> None:
         publisher = AmbiguousPublisher()

@@ -2,12 +2,17 @@
 
 ## Phase 0/1 enforcement
 
-- The gateway no longer accepts a worker-supplied `Principal`. A trusted local
-  supervisor observes a pinned runtime ID, operating-system user, executable
-  checksum, and instance nonce. The runtime authority derives the immutable
-  `Principal` from that enrollment after authenticating a signed, short-lived,
-  one-use assertion. Missing, malformed, future, expired, replayed, unregistered,
-  or changed-runtime assertions fail before capability or action resolution.
+- The gateway no longer accepts a worker-supplied `Principal` or a structural
+  identity callback. It accepts only the concrete client of a separate local
+  supervisor process. The supervisor owns the assertion signer, derives the
+  caller PID and operating-system user from Linux `SO_PEERCRED`, and derives the
+  executable checksum and process-start nonce from `/proc`; the worker sends no
+  identity or time claim. The runtime authority maps those pinned facts to an
+  immutable `Principal` through a signed, one-use assertion whose hard maximum
+  lifetime is 30 seconds. Missing, malformed, future, overlong, expired,
+  replayed, unregistered, or changed-runtime assertions fail before capability
+  or action resolution. The local socket lives in a private directory and has
+  mode `0600`.
 - The tenant store checks the principal's `brand_id` on every read and write.
 - Role read and write permissions are allowlisted by record type. The publishing
   operator can retrieve the public Publication Manifest but not draft or
@@ -24,10 +29,12 @@
   and data class for a bounded time. Missing, suspended, expired, future,
   checksum-invalid, or mismatched grants fail closed. The gateway resolves the
   grant by ID rather than accepting caller-supplied grant content. After action
-  reservation, the authority samples a trusted dispatch-time clock and
-  serializes final active, checksum, and capability-window checks with adapter
-  invocation. The same sampled time revalidates approval expiry and the schedule
-  window. The fictional in-memory implementation coordinates threads. The
+  reservation, the authority checks once before adapter entry. At credential
+  consumption it re-reads active state and checksum, resamples the trusted clock,
+  and revalidates capability, approval and schedule windows. A suspension that
+  completes before credential consumption wins; successful final authorization
+  is then held through adapter return. The fictional in-memory implementation
+  coordinates threads. The
   durable SQLite implementation persists grants and suspensions and orders
   dispatch with suspension across processes on one host. Its database must be a
   non-symlink regular file owned by the service account with mode `0600`. Its
@@ -56,13 +63,15 @@
   capability authority.
 - The fictional credential broker binds one mock credential to the exact live
   capability checksum, authenticated actor, role, brand, environment,
-  destination and operation. It creates a one-use lease of at most 30 seconds
-  and releases the mock value only inside the adapter call. The adapter rejects
+  destination and operation. It rejects configuration above a hard 30-second
+  lease maximum, creates a one-use lease, and releases the mock value only after
+  the final authorization guard succeeds inside the adapter call. The adapter rejects
   direct calls without a broker lease. Destination-to-endpoint mapping is
   allowlisted and this candidate refuses every endpoint except `mock://`.
 - The only Phase 0/1 destination is a local mock. Real egress is explicitly
-  denied. The supervisor, in-memory runtime authority and fictional credential
-  broker are reference controls, not claims of production VM enforcement.
+  denied. The separate Linux supervisor process, local authority and fictional
+  credential broker are reference controls, not claims of production VM
+  enforcement or a production service boundary.
 - Audit records contain identifiers, checksums, state, and reason codes, never
   credentials or client content.
 

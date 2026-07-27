@@ -254,21 +254,25 @@ def run_fictional_article() -> VerticalSliceResult:
     )
     capability_registry.register(principals["director"], capability)
     publisher = MockPublisher()
-    gateway = ActionGateway(
-        capability_id=capability["capability_id"],
-        capability_registry=capability_registry,
-        runtime_boundary=fictional_runtime(principals["publisher"]),
-        credential_broker=fictional_credential_broker(capability),
-        publisher=publisher,
-        approval_store=store,
-        approval_authorities={brand_id: {"brand_owner": ["human_owner"]}},
-        action_ledger=InMemoryActionLedger(),
-    )
-    receipt = gateway.publish(
-        manifest=manifest,
-        approval_id=approval["approval_id"],
-        idempotency_key="idem_guide_v1",
-    )
+    runtime_boundary = fictional_runtime(principals["publisher"])
+    try:
+        gateway = ActionGateway(
+            capability_id=capability["capability_id"],
+            capability_registry=capability_registry,
+            runtime_boundary=runtime_boundary,
+            credential_broker=fictional_credential_broker(capability),
+            publisher=publisher,
+            approval_store=store,
+            approval_authorities={brand_id: {"brand_owner": ["human_owner"]}},
+            action_ledger=InMemoryActionLedger(),
+        )
+        receipt = gateway.publish(
+            manifest=manifest,
+            approval_id=approval["approval_id"],
+            idempotency_key="idem_guide_v1",
+        )
+    finally:
+        runtime_boundary.close()
     store.put(principals["publisher"], receipt)
     records["receipt"] = receipt
 
