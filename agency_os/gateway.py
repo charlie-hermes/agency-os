@@ -4,13 +4,15 @@ from __future__ import annotations
 
 import copy
 from datetime import datetime, timezone
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 
 from .capabilities import (
     CapabilityDispatchError,
     CapabilityDriftError,
     CapabilityError,
+    CapabilityExpiredError,
     CapabilityInactiveError,
+    CapabilityNotYetEffectiveError,
     CapabilityRegistry,
 )
 from .contracts import (
@@ -61,6 +63,7 @@ class ActionGateway:
         approval_store: TenantStore,
         approval_authorities: Mapping[str, Mapping[str, list[str] | tuple[str, ...]]],
         action_ledger: ActionLedger,
+        clock: Callable[[], datetime] | None = None,
     ) -> None:
         self.capability_id = capability_id
         self.capability_registry = capability_registry
@@ -68,6 +71,7 @@ class ActionGateway:
         self.approval_store = approval_store
         self.approval_authorities = copy.deepcopy(dict(approval_authorities))
         self.action_ledger = action_ledger
+        self._clock = clock or (lambda: datetime.now(timezone.utc))
         self.audit: list[dict[str, Any]] = []
 
     def publish(
@@ -79,7 +83,7 @@ class ActionGateway:
         idempotency_key: str,
         now: datetime | None = None,
     ) -> dict[str, Any]:
-        current_time = now or datetime.now(timezone.utc)
+        current_time = now or self._clock()
         capability, capability_status = self._resolve_capability(principal)
         try:
             approval, approval_provenance = self.approval_store.resolve_approval(
@@ -156,11 +160,19 @@ class ActionGateway:
                 principal.brand_id,
                 self.capability_id,
                 capability["content_checksum"],
-                lambda: self.publisher.publish(
+                clock=self._clock,
+                pre_dispatch=lambda dispatch_time: self._validate_time_windows(
+                    manifest, approval, dispatch_time
+                ),
+                dispatch=lambda: self.publisher.publish(
                     public_fields=manifest["public_fields"],
                     idempotency_key=idempotency_key,
                 ),
             )
+        except CapabilityNotYetEffectiveError as exc:
+            self._deny("CAPABILITY_NOT_YET_EFFECTIVE", request_binding, cause=exc)
+        except CapabilityExpiredError as exc:
+            self._deny("CAPABILITY_EXPIRED", request_binding, cause=exc)
         except CapabilityInactiveError as exc:
             self._deny("CAPABILITY_INACTIVE", request_binding, cause=exc)
         except CapabilityDriftError as exc:
@@ -284,6 +296,14 @@ class ActionGateway:
             self._deny("APPROVAL_MANIFEST_CHECKSUM_MISMATCH", dict(manifest))
         if approval.get("artifact_checksum") != manifest.get("qa_package_checksum"):
             self._deny("APPROVAL_ARTIFACT_CHECKSUM_MISMATCH", dict(manifest))
+        self._validate_time_windows(manifest, approval, now)
+
+    def _validate_time_windows(
+        self,
+        manifest: Mapping[str, Any],
+        approval: Mapping[str, Any],
+        now: datetime,
+    ) -> None:
         if parse_time(approval["decided_at"]) > now:
             self._deny("APPROVAL_NOT_YET_EFFECTIVE", dict(manifest))
         if parse_time(approval["expires_at"]) <= now:

@@ -85,6 +85,29 @@ class SuspendingLedger(InMemoryActionLedger):
         return reservation
 
 
+class MutableClock:
+    def __init__(self, current: datetime) -> None:
+        self.current = current
+
+    def __call__(self) -> datetime:
+        return self.current
+
+    def advance(self, delay: timedelta) -> None:
+        self.current += delay
+
+
+class AdvancingLedger(InMemoryActionLedger):
+    def __init__(self, clock: MutableClock, delay: timedelta) -> None:
+        super().__init__()
+        self.clock = clock
+        self.delay = delay
+
+    def reserve(self, brand_id, idempotency_key, request_checksum):
+        reservation = super().reserve(brand_id, idempotency_key, request_checksum)
+        self.clock.advance(self.delay)
+        return reservation
+
+
 class PausingDispatchRegistry(CapabilityRegistry):
     def __init__(self) -> None:
         super().__init__()
@@ -92,13 +115,25 @@ class PausingDispatchRegistry(CapabilityRegistry):
         self.release_dispatch = threading.Event()
 
     def authorized_dispatch(
-        self, brand_id, capability_id, expected_checksum, dispatch
+        self,
+        brand_id,
+        capability_id,
+        expected_checksum,
+        *,
+        clock,
+        pre_dispatch,
+        dispatch,
     ):
         self.dispatch_ready.set()
         if not self.release_dispatch.wait(timeout=2):
             raise TimeoutError("test did not release authorized dispatch")
         return super().authorized_dispatch(
-            brand_id, capability_id, expected_checksum, dispatch
+            brand_id,
+            capability_id,
+            expected_checksum,
+            clock=clock,
+            pre_dispatch=pre_dispatch,
+            dispatch=dispatch,
         )
 
 
@@ -181,6 +216,7 @@ class GatewayTests(unittest.TestCase):
         ledger,
         capability_id="cap_mock_publish",
         capability_registry=None,
+        clock=None,
     ) -> ActionGateway:
         return ActionGateway(
             capability_id=capability_id,
@@ -189,6 +225,7 @@ class GatewayTests(unittest.TestCase):
             approval_store=self.store,
             approval_authorities=self.approval_authorities,
             action_ledger=ledger,
+            clock=clock,
         )
 
     def _persist_approval(self, approval: dict) -> None:
@@ -418,6 +455,99 @@ class GatewayTests(unittest.TestCase):
             )
 
         self.assertEqual(str(denied.exception), "CAPABILITY_INACTIVE")
+        self.assertEqual(publisher.calls, 0)
+
+    def test_capability_expiring_during_reservation_prevents_dispatch(self) -> None:
+        clock = MutableClock(self.now)
+        capability = self._capability(
+            "cap_short_lived",
+            expires_at=(self.now + timedelta(milliseconds=20)).isoformat(),
+        )
+        registry = CapabilityRegistry()
+        registry.register(self.director, capability)
+        publisher = MockPublisher()
+        gateway = self._gateway(
+            publisher,
+            AdvancingLedger(clock, timedelta(milliseconds=80)),
+            capability_id=capability["capability_id"],
+            capability_registry=registry,
+            clock=clock,
+        )
+
+        with self.assertRaises(GatewayDenied) as denied:
+            gateway.publish(
+                principal=self.principal,
+                manifest=self.manifest,
+                approval_id=self.approval["approval_id"],
+                idempotency_key="capability-expired-during-reservation",
+            )
+
+        self.assertEqual(str(denied.exception), "CAPABILITY_EXPIRED")
+        self.assertEqual(publisher.calls, 0)
+
+    def test_approval_expiring_during_reservation_prevents_dispatch(self) -> None:
+        clock = MutableClock(self.now)
+        approval = copy.deepcopy(self.approval)
+        approval["approval_id"] = "approval_short_lived"
+        approval["expires_at"] = (
+            self.now + timedelta(milliseconds=20)
+        ).isoformat()
+        approval = finalize_record(approval)
+        self._persist_approval(approval)
+        publisher = MockPublisher()
+        gateway = self._gateway(
+            publisher,
+            AdvancingLedger(clock, timedelta(milliseconds=80)),
+            clock=clock,
+        )
+
+        with self.assertRaises(GatewayDenied) as denied:
+            gateway.publish(
+                principal=self.principal,
+                manifest=self.manifest,
+                approval_id=approval["approval_id"],
+                idempotency_key="approval-expired-during-reservation",
+            )
+
+        self.assertEqual(str(denied.exception), "APPROVAL_EXPIRED")
+        self.assertEqual(publisher.calls, 0)
+
+    def test_schedule_expiring_during_reservation_prevents_dispatch(self) -> None:
+        clock = MutableClock(self.now)
+        manifest = copy.deepcopy(self.manifest)
+        manifest["schedule_window"] = {
+            "starts_at": (self.now - timedelta(minutes=1)).isoformat(),
+            "ends_at": (self.now + timedelta(milliseconds=20)).isoformat(),
+        }
+        manifest = finalize_record(manifest)
+        approval = copy.deepcopy(self.approval)
+        approval.update(
+            {
+                "approval_id": "approval_short_schedule",
+                "manifest_checksum": manifest["content_checksum"],
+                "schedule_window": copy.deepcopy(manifest["schedule_window"]),
+                "decided_at": (self.now - timedelta(minutes=1)).isoformat(),
+                "expires_at": (self.now + timedelta(minutes=30)).isoformat(),
+            }
+        )
+        approval = finalize_record(approval)
+        self._persist_approval(approval)
+        publisher = MockPublisher()
+        gateway = self._gateway(
+            publisher,
+            AdvancingLedger(clock, timedelta(milliseconds=80)),
+            clock=clock,
+        )
+
+        with self.assertRaises(GatewayDenied) as denied:
+            gateway.publish(
+                principal=self.principal,
+                manifest=manifest,
+                approval_id=approval["approval_id"],
+                idempotency_key="schedule-expired-during-reservation",
+            )
+
+        self.assertEqual(str(denied.exception), "SCHEDULE_WINDOW_EXPIRED")
         self.assertEqual(publisher.calls, 0)
 
     def test_suspension_winning_dispatch_race_prevents_adapter_call(self) -> None:

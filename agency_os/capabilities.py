@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import threading
+from datetime import datetime
 from typing import Any, Callable, Mapping, TypeVar
 
 from .contracts import ContractError, parse_time, require_fields, verify_record
@@ -15,7 +16,15 @@ class CapabilityError(ValueError):
 
 
 class CapabilityInactiveError(CapabilityError):
-    """The capability was suspended before dispatch acquired authority."""
+    """The capability is not live at the dispatch boundary."""
+
+
+class CapabilityNotYetEffectiveError(CapabilityInactiveError):
+    """The capability validity window has not started at dispatch."""
+
+
+class CapabilityExpiredError(CapabilityInactiveError):
+    """The capability validity window ended before dispatch."""
 
 
 class CapabilityDriftError(CapabilityError):
@@ -139,26 +148,48 @@ class CapabilityRegistry:
         brand_id: str,
         capability_id: str,
         expected_checksum: str,
+        *,
+        clock: Callable[[], datetime],
+        pre_dispatch: Callable[[datetime], None],
         dispatch: Callable[[], DispatchResult],
     ) -> DispatchResult:
-        """Atomically validate active authority and invoke the egress adapter.
+        """Atomically validate live authority and invoke the egress adapter.
 
         Suspension and dispatch use the same lock. If suspension acquires it
-        first, dispatch is denied. If dispatch acquires it first, suspension
-        becomes authoritative only after the adapter invocation finishes.
+        first, dispatch is denied. If dispatch acquires it first, the authority
+        samples its clock, validates the grant window, validates other caller
+        windows, and invokes the adapter before suspension can take effect.
         """
 
         if getattr(self._dispatch_context, "active", False):
             raise CapabilityError("nested authorized dispatch is denied")
         with self._dispatch_lock:
-            with self._lock:
-                record, status = self._resolve_locked(brand_id, capability_id)
-                if record.get("status") != "active" or status != "active":
-                    raise CapabilityInactiveError("capability is inactive")
-                if record.get("content_checksum") != expected_checksum:
-                    raise CapabilityDriftError("capability checksum changed")
             self._dispatch_context.active = True
             try:
+                with self._lock:
+                    record, status = self._resolve_locked(brand_id, capability_id)
+                    if record.get("status") != "active" or status != "active":
+                        raise CapabilityInactiveError("capability is inactive")
+                    if record.get("content_checksum") != expected_checksum:
+                        raise CapabilityDriftError("capability checksum changed")
+                    try:
+                        dispatch_time = clock()
+                    except Exception as exc:
+                        raise CapabilityError("dispatch clock is unavailable") from exc
+                    if (
+                        not isinstance(dispatch_time, datetime)
+                        or dispatch_time.tzinfo is None
+                    ):
+                        raise CapabilityError(
+                            "dispatch clock must be timezone-aware"
+                        )
+                    if parse_time(record["not_before"]) > dispatch_time:
+                        raise CapabilityNotYetEffectiveError(
+                            "capability is not yet effective"
+                        )
+                    if parse_time(record["expires_at"]) <= dispatch_time:
+                        raise CapabilityExpiredError("capability is expired")
+                pre_dispatch(dispatch_time)
                 try:
                     return dispatch()
                 except Exception as exc:
