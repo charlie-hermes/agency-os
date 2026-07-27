@@ -120,6 +120,14 @@
   adding a decision or audit record.
 - Audit records contain identifiers, checksums, state, and reason codes, never
   credentials or client content.
+- The installed-platform manifest is produced from read-only target-host facts
+  and rejects any field whose name could carry a token, credential, secret,
+  password, private key or auth tag. Admission requires Paperclip's exact
+  versioned paths and source hashes, `paperclip:paperclip` service identity,
+  strict hardening, private authenticated ready health, and the pinned Buzz
+  binary/command surface. Buzz broadcast and task mutation remain denied.
+- The live verifier reads package files, systemd properties, private health and
+  CLI help only. It performs no authenticated write and captures no secret value.
 
 ## Queue and retry semantics
 
@@ -176,8 +184,9 @@ real persistent deployment meets them.
 - deploy the durable action ledger on storage suited to the worker topology and
   prove its access controls, backup, restore, contention, and reconciliation;
 - verified 12-agent runtime bundles and fresh-session load tests;
-- adapters verified against the installed Paperclip and Buzz services (the
-  current typed adapters are local fictional references only);
+- authenticated lifecycle adapters verified against the admitted Paperclip and
+  Buzz services (only the exact read-only installed contract is admitted; the
+  current typed lifecycle adapters remain local fictional references);
 - deployed row-level or physically isolated tenant storage with backup,
   restore and offboarding evidence (the current evidence authority is local
   SQLite only);

@@ -3,7 +3,7 @@
 Agency OS is a contract-first, tenant-isolated reference implementation of the
 Hermes + Paperclip digital marketing agency design.
 
-This fictional reference deliberately does four things:
+This fictional reference deliberately does five things:
 
 1. preserves the verified 12-role source library and implementation blueprint;
 2. reconciles the role, artifact, approval, learning, security, and operations
@@ -13,10 +13,12 @@ This fictional reference deliberately does four things:
 4. begins Gate 5 with a protected local Platform Authority host, principal-bound
    worker clients, durable typed tasks, versioned approver policy, host-attested
    approvals, deadline-enforced restartable collaboration decisions, and tenant
-   evidence boundaries.
+   evidence boundaries; and
+5. admits one exact installed Paperclip/Buzz command contract from read-only,
+   checksum-pinned target-host evidence while failing closed on drift.
 
-It does **not** install agents on a VM, connect real client data, call a real
-provider, or publish externally.
+It does **not** install agents on a VM, make authenticated platform mutations,
+connect real client data, call a real provider, or publish externally.
 
 ## Repository map
 
@@ -40,6 +42,9 @@ provider, or publish externally.
   boundary, a protected fictional Platform Authority host with principal-bound
   worker clients, typed Buzz context, and a persistent tenant-evidence
   authority.
+- `config/installed-platforms.json` — non-secret, read-only target-host version,
+  service, checksum, health, API-route and Buzz command-surface evidence.
+- `scripts/verify-installed-platforms` — explicit read-only live drift check.
 - `fixtures/` — fictional tenant input.
 - `acceptance/matrix.json` — release criteria mapped to executable evidence.
 - `tests/` — allowed-path, denied-path, recovery, and vertical-slice tests.
@@ -63,3 +68,12 @@ python3 -m agency_os.demo
 ```
 
 The demonstration writes only to in-memory stores and a local mock destination.
+
+On the recorded target VM only, re-run the installed-platform admission check:
+
+```bash
+./scripts/verify-installed-platforms
+```
+
+That command reads package files, systemd properties, the private Paperclip
+health endpoint and Buzz help output. It does not send a message or mutate task state.
