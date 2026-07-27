@@ -155,9 +155,10 @@ real role and tenant.
 **Status:** in progress.
 
 The first fictional local slice adds typed Paperclip task authority with a
-versioned brand approver policy, deadline-enforced and restartable
-non-authoritative Buzz context with decision write-back, persistent tenant
-evidence and tenant-scoped audit events. It is documented in
+versioned brand approver policy and an authority-attested approval whose signing
+key remains outside SQLite, deadline-enforced and restartable non-authoritative
+Buzz context with decision write-back, persistent tenant evidence and
+tenant-scoped audit events. It is documented in
 `docs/gate-5-platform-foundation.md`. This is reference behavior, not evidence
 against installed Paperclip or Buzz services.
 

@@ -103,7 +103,10 @@
         "policy_checksum",
         "decision",
         "approver_id",
+        "authority_role",
+        "decided_at",
         "expires_at",
+        "approval_attestation",
         "content_checksum"
       ],
       "properties": {
@@ -112,6 +115,19 @@
         "policy_revision": {"type": "integer", "minimum": 1},
         "policy_checksum": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"},
         "decision": {"enum": ["APPROVED", "REJECTED"]},
+        "authority_role": {"const": "human-approver"},
+        "decided_at": {"type": "string", "format": "date-time"},
+        "expires_at": {"type": "string", "format": "date-time"},
+        "approval_attestation": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["authority_id", "algorithm", "signature"],
+          "properties": {
+            "authority_id": {"type": "string", "minLength": 1},
+            "algorithm": {"const": "HMAC-SHA256"},
+            "signature": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+          }
+        },
         "content_checksum": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"}
       }
     },

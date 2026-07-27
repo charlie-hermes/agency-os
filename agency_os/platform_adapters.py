@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
+from .approval_authority import FictionalApprovalAuthority
 from .contracts import (
     ContractError,
     canonical_bytes,
@@ -412,6 +413,7 @@ class FictionalPaperclipAdapter:
         *,
         timeout_seconds: float = 5.0,
         clock: Callable[[], datetime] | None = None,
+        approval_authority: FictionalApprovalAuthority | None = None,
     ) -> None:
         self._database = _SQLitePlatformDatabase(
             database_path,
@@ -419,6 +421,7 @@ class FictionalPaperclipAdapter:
             error_type=PlatformAdapterError,
         )
         self._clock = clock or (lambda: datetime.now(timezone.utc))
+        self._approval_authority = approval_authority
 
     def create_task(self, principal: Principal, task: Mapping[str, Any]) -> str:
         self._require_director(principal)
@@ -627,6 +630,8 @@ class FictionalPaperclipAdapter:
         decided_at: str,
         expires_at: str,
     ) -> dict[str, Any]:
+        if self._approval_authority is None:
+            raise PlatformAdapterError("Paperclip approval authority is unavailable")
         if principal.role_id != "human-approver":
             raise AuthorizationError("only a human approver may record approval")
         if not approval_id:
@@ -661,7 +666,7 @@ class FictionalPaperclipAdapter:
                 raise ContractError("Paperclip approver policy is stale or ineffective")
             if principal.actor_id not in policy["permitted_approver_ids"]:
                 raise AuthorizationError("actor is not permitted by approver policy")
-            approval = finalize_record(
+            approval = self._approval_authority.attest(
                 {
                     "schema_version": "1.0",
                     "artifact_type": "paperclip_task_approval",
@@ -1212,7 +1217,9 @@ class FictionalPaperclipAdapter:
         if row is None:
             raise ContractError("Paperclip approval is missing")
         approval = json.loads(row[0])
-        verify_record(approval)
+        if self._approval_authority is None:
+            raise PlatformAdapterError("Paperclip approval authority is unavailable")
+        self._approval_authority.verify(approval)
         policy_id = approval.get("policy_id")
         if not isinstance(policy_id, str) or not policy_id:
             raise ContractError("Paperclip approval has no approver policy binding")

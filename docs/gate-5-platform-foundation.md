@@ -8,7 +8,9 @@ Gate 5 boundaries:
 1. `FictionalPaperclipAdapter` owns versioned task state, dependency admission,
    budget consumption, a versioned brand approver policy, exact task approvals,
    evidence-bound closure, Buzz decision summaries and tenant-scoped audit
-   events.
+   events. A separately provisioned `FictionalApprovalAuthority` attests each
+   approval with key material that is never stored in SQLite or exported from
+   the worker-facing package.
 2. `FictionalBuzzAdapter` accepts a typed, time-bounded context packet. Its
    authority clock enforces the deadline, and its persisted context and archive
    state can be resumed after adapter restart. It writes an immutable decision
@@ -27,7 +29,7 @@ Paperclip or Buzz version.
 |---|---|
 | task status, dependency and closure | fictional Paperclip adapter |
 | task budget and spend | fictional Paperclip adapter |
-| task approval | exact immutable Paperclip approval record bound to the active brand approver-policy revision |
+| task approval | exact immutable Paperclip approval record bound to the active brand approver-policy revision and an authority-owned attestation outside SQLite |
 | Buzz discussion context | persisted, deadline-bound fictional Buzz context; non-authoritative |
 | Buzz decision | immutable summary written into Paperclip |
 | evidence and provenance | tenant evidence store |
@@ -40,8 +42,17 @@ task marked `approval_required` also needs a fresh approved record bound to the
 exact task checksum and the current immutable brand approver-policy revision.
 Only a named actor in that policy may record the approval. Each brand has one
 append-only policy lineage, so an alternate policy ID cannot bypass its current
-revision. A newer revision invalidates an older approval, and a legacy or forged
-approval outside the policy cannot close work.
+revision. The protected approval authority signs the canonical record with a
+domain-separated HMAC before persistence, and closure verifies that attestation
+before trusting the claimed approver. A newer revision invalidates an older
+approval; a legacy, unsigned or directly inserted record impersonating even a
+listed actor cannot close work. Missing authority provisioning fails closed.
+
+The standard-library HMAC is a fictional local proof, not production key
+custody. The authority object and its key must be created and held outside the
+worker process and SQLite boundary. A real integration must replace it with the
+installed Paperclip approval service under a separate service identity, durable
+key custody, rotation and recovery controls.
 
 Buzz context, open/archive state and decisions are stored in Paperclip-shaped
 persistence. A restarted Buzz adapter hydrates that exact retained context rather
@@ -58,7 +69,9 @@ All denials leave no decision or audit event.
 - Evidence writers are explicit roles and `created_by` must equal the
   authenticated actor.
 - Records are canonical JSON with a SHA-256 content checksum.
-- Evidence, approvals and Buzz decisions are immutable.
+- Evidence, approvals and Buzz decisions are immutable. Approval provenance is
+  additionally authenticated by authority-owned signing material outside the
+  database; record checksums alone are not treated as proof of origin.
 - The SQLite file is owner-only, its parent cannot be group/other writable, and
   both the parent and database filesystem identities are pinned. Replacement or
   symlink storage fails closed.
@@ -73,6 +86,9 @@ All denials leave no decision or audit event.
 - stale task checksum;
 - missing, rejected and checksum-stale approval;
 - unlisted approvers, legacy unbound approvals and approver-policy revision drift;
+- direct SQL insertion impersonating a listed approver, with no task or closure
+  audit mutation when the authority attestation is absent or forged, and denial
+  when the approval authority is not provisioned;
 - cross-tenant task, Buzz and evidence access;
 - a non-director attempting authoritative Buzz write-back;
 - expired and backdated Buzz decisions through both adapter layers;
@@ -89,6 +105,8 @@ Gate 5 can complete, the project still needs:
 
 - adapters tested against the actual installed Paperclip and Buzz versions,
   with their host paths and service identities recorded;
+- production Paperclip approval signing, protected key custody, rotation and
+  recovery under an authority service account unavailable to workers;
 - persistent artifact and learning authorities integrated with this evidence
   boundary;
 - queue leases, retries, dead-letter handling and reconciliation;

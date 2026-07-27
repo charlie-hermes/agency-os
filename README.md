@@ -10,9 +10,9 @@ This fictional reference deliberately does four things:
    contracts into one authoritative build specification;
 3. proves one fictional article flow through a local, fail-closed publication
    gateway; and
-4. begins Gate 5 with durable typed task and versioned approver-policy
-   authority, deadline-enforced restartable collaboration decisions, and tenant
-   evidence boundaries.
+4. begins Gate 5 with durable typed task, versioned approver-policy and
+   separately attested approval authority, deadline-enforced restartable
+   collaboration decisions, and tenant evidence boundaries.
 
 It does **not** install agents on a VM, connect real client data, call a real
 provider, or publish externally.

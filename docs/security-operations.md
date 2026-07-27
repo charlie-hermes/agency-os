@@ -93,11 +93,17 @@
   required in Ubuntu GitHub Actions. macOS and Windows are not supported
   validation hosts for this gate.
 - The fictional Gate 5 Paperclip boundary accepts a task approval only from an
-  actor named in the current immutable brand approver-policy revision. Each
-  brand has one append-only policy lineage. Approval creation and task closure
-  both re-read that active revision; alternate IDs, unlisted actors, legacy
-  unbound records and revision drift fail without task or closure-audit
-  mutation. The fictional Buzz boundary persists context and archive state in
+  actor named in the current immutable brand approver-policy revision and only
+  when a separately provisioned authority has attested the canonical approval.
+  Its standard-library HMAC key is held outside SQLite and is not exported from
+  the worker-facing package; closure verifies the attestation before trusting
+  any claimed approver. Each brand has one append-only policy lineage. Approval
+  creation and task closure both re-read that active revision; alternate IDs,
+  unlisted actors, legacy unbound records, revision drift and direct database
+  impersonation of a listed actor fail without task or closure-audit mutation.
+  This is not production key custody: the real Paperclip signer, rotation and
+  recovery must run under an authority service identity unavailable to workers.
+  The fictional Buzz boundary persists context and archive state in
   Paperclip-shaped storage, derives decision time from authority clocks, resumes
   retained context after adapter restart, rejects expired or future-dated
   activity, and prevents elapsed-deadline bypass through backdated direct

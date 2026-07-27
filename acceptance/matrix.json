@@ -319,6 +319,15 @@
       "expected_evidence": "legacy and forged approvals both leave task and closure audit unchanged"
     },
     {
+      "id": "PAPERCLIP-APPROVAL-ATTESTATION-001",
+      "phase": 5,
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "fixture": "checksum-valid direct SQL approval impersonating a listed approver with a forged authority attestation",
+      "command": "python3 -m unittest tests.test_platform_adapters.PlatformAdapterTests.test_listed_approver_sql_forgery_lacks_authority_attestation",
+      "expected_evidence": "authority verification rejects the impersonation with unchanged task and audit state"
+    },
+    {
       "id": "BUZZ-AUTHORITY-001",
       "phase": 5,
       "owner": "platform-assurance-reviewer",
