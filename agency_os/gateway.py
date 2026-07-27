@@ -219,6 +219,11 @@ class ActionGateway:
             self._deny("APPROVAL_AUTHORITY_DENIED", dict(manifest))
         if approval.get("decision") != "APPROVED":
             self._deny("NOT_APPROVED", dict(manifest))
+        conditions = approval.get("conditions")
+        if not isinstance(conditions, list):
+            self._deny("APPROVAL_CONDITIONS_INVALID", dict(manifest))
+        if conditions:
+            self._deny("APPROVAL_CONDITIONS_UNEVALUATED", dict(manifest))
         bindings = (
             "brand_id",
             "destination_ref",

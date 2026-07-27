@@ -231,6 +231,28 @@ class GatewayTests(unittest.TestCase):
             )
         self.assertEqual(self.publisher.calls, 0)
 
+    def test_non_empty_approval_conditions_fail_closed_without_dispatch(self) -> None:
+        conditional = copy.deepcopy(self.approval)
+        conditional["approval_id"] = "approval_pending_legal"
+        conditional["conditions"] = ["DO NOT PUBLISH UNTIL LEGAL SIGN-OFF"]
+        conditional = finalize_record(conditional)
+        self._persist_approval(conditional)
+
+        with self.assertRaises(GatewayDenied) as denied:
+            self.gateway.publish(
+                principal=self.principal,
+                manifest=self.manifest,
+                approval_id=conditional["approval_id"],
+                idempotency_key="pending-legal",
+                now=self.now,
+            )
+
+        self.assertEqual(str(denied.exception), "APPROVAL_CONDITIONS_UNEVALUATED")
+        self.assertEqual(self.publisher.calls, 0)
+        self.assertEqual(
+            self.gateway.audit[-1]["reason"], "APPROVAL_CONDITIONS_UNEVALUATED"
+        )
+
     def test_stored_approval_cannot_be_replaced(self) -> None:
         replacement = copy.deepcopy(self.approval)
         replacement["conditions"] = ["replacement attempt"]

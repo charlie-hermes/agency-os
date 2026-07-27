@@ -15,7 +15,10 @@
 - Public fields and internal notes are separate values; only public fields
   cross the publication adapter.
 - The action gateway checks role, brand, environment, destination, operation,
-  approval expiry, manifest checksum, artifact checksum, and schedule.
+  approval expiry, manifest checksum, artifact checksum, and schedule. Because
+  Phase 0/1 has no typed condition evaluator, an Approval Record with missing,
+  malformed, or non-empty `conditions` fails closed before adapter dispatch;
+  only an explicit empty array is currently publishable.
 - The Phase 0/1 in-process idempotency reservation is atomic and written before
   adapter dispatch. Reuse with a different request fingerprint is denied; exact
   replay returns the original receipt without a second write. Production
