@@ -96,7 +96,9 @@ Capability content is resolved by ID from an authoritative registry; immutable
 grant bindings and mutable suspension state are not accepted from the caller.
 
 Before dispatch, it revalidates capability, approval, checksum, destination,
-schedule, and idempotency. An allow decision is single-use for the bound
+schedule, and idempotency. The fictional in-process authority orders suspension
+and adapter invocation under one dispatch lock, so whichever acquires authority
+first defines the boundary. An allow decision is single-use for the bound
 request. Unknown or partial external results must be reconciled before retry.
 
 ## Phase boundary

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import copy
 import threading
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping, TypeVar
 
 from .contracts import ContractError, parse_time, require_fields, verify_record
 from .store import Principal
@@ -14,13 +14,30 @@ class CapabilityError(ValueError):
     """A capability record or lifecycle transition is invalid."""
 
 
+class CapabilityInactiveError(CapabilityError):
+    """The capability was suspended before dispatch acquired authority."""
+
+
+class CapabilityDriftError(CapabilityError):
+    """The authoritative capability no longer matches the admitted grant."""
+
+
+class CapabilityDispatchError(RuntimeError):
+    """The authorized external dispatch failed or returned an unknown result."""
+
+
+DispatchResult = TypeVar("DispatchResult")
+
+
 class CapabilityRegistry:
-    """Thread-safe authority for immutable grants and immediate suspension."""
+    """Thread-safe authority for immutable grants and ordered suspension."""
 
     def __init__(self) -> None:
         self._records: dict[tuple[str, str], dict[str, Any]] = {}
         self._suspended: set[tuple[str, str]] = set()
         self._lock = threading.RLock()
+        self._dispatch_lock = threading.RLock()
+        self._dispatch_context = threading.local()
         self.audit: list[dict[str, str]] = []
 
     def register(self, issuer: Principal, record: Mapping[str, Any]) -> str:
@@ -94,6 +111,10 @@ class CapabilityRegistry:
         return capability_id
 
     def suspend(self, issuer: Principal, brand_id: str, capability_id: str) -> None:
+        if getattr(self._dispatch_context, "active", False):
+            raise CapabilityError(
+                "capability suspension cannot run inside authorized dispatch"
+            )
         if issuer.role_id != "agency-director":
             self._audit(issuer, capability_id, "DENY_SUSPEND_ROLE")
             raise CapabilityError("only the agency director may suspend capabilities")
@@ -101,18 +122,58 @@ class CapabilityRegistry:
             self._audit(issuer, capability_id, "DENY_SUSPEND_TENANT")
             raise CapabilityError("cross-tenant capability suspension denied")
         key = (brand_id, capability_id)
-        with self._lock:
-            if key not in self._records:
-                self._audit(issuer, capability_id, "DENY_NOT_FOUND")
-                raise KeyError(capability_id)
-            self._suspended.add(key)
+        with self._dispatch_lock:
+            with self._lock:
+                if key not in self._records:
+                    self._audit(issuer, capability_id, "DENY_NOT_FOUND")
+                    raise KeyError(capability_id)
+                self._suspended.add(key)
         self._audit(issuer, capability_id, "SUSPEND")
 
     def resolve(self, brand_id: str, capability_id: str) -> tuple[dict[str, Any], str]:
-        key = (brand_id, capability_id)
         with self._lock:
-            record = copy.deepcopy(self._records.get(key))
-            status = "suspended" if key in self._suspended else "active"
+            return self._resolve_locked(brand_id, capability_id)
+
+    def authorized_dispatch(
+        self,
+        brand_id: str,
+        capability_id: str,
+        expected_checksum: str,
+        dispatch: Callable[[], DispatchResult],
+    ) -> DispatchResult:
+        """Atomically validate active authority and invoke the egress adapter.
+
+        Suspension and dispatch use the same lock. If suspension acquires it
+        first, dispatch is denied. If dispatch acquires it first, suspension
+        becomes authoritative only after the adapter invocation finishes.
+        """
+
+        if getattr(self._dispatch_context, "active", False):
+            raise CapabilityError("nested authorized dispatch is denied")
+        with self._dispatch_lock:
+            with self._lock:
+                record, status = self._resolve_locked(brand_id, capability_id)
+                if record.get("status") != "active" or status != "active":
+                    raise CapabilityInactiveError("capability is inactive")
+                if record.get("content_checksum") != expected_checksum:
+                    raise CapabilityDriftError("capability checksum changed")
+            self._dispatch_context.active = True
+            try:
+                try:
+                    return dispatch()
+                except Exception as exc:
+                    raise CapabilityDispatchError(
+                        "authorized external dispatch failed"
+                    ) from exc
+            finally:
+                self._dispatch_context.active = False
+
+    def _resolve_locked(
+        self, brand_id: str, capability_id: str
+    ) -> tuple[dict[str, Any], str]:
+        key = (brand_id, capability_id)
+        record = copy.deepcopy(self._records.get(key))
+        status = "suspended" if key in self._suspended else "active"
         if record is None:
             raise KeyError(capability_id)
         verify_record(record)

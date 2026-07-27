@@ -85,6 +85,50 @@ class SuspendingLedger(InMemoryActionLedger):
         return reservation
 
 
+class PausingDispatchRegistry(CapabilityRegistry):
+    def __init__(self) -> None:
+        super().__init__()
+        self.dispatch_ready = threading.Event()
+        self.release_dispatch = threading.Event()
+
+    def authorized_dispatch(
+        self, brand_id, capability_id, expected_checksum, dispatch
+    ):
+        self.dispatch_ready.set()
+        if not self.release_dispatch.wait(timeout=2):
+            raise TimeoutError("test did not release authorized dispatch")
+        return super().authorized_dispatch(
+            brand_id, capability_id, expected_checksum, dispatch
+        )
+
+
+class TrackingSuspendRegistry(CapabilityRegistry):
+    def __init__(self) -> None:
+        super().__init__()
+        self.suspend_started = threading.Event()
+
+    def suspend(self, issuer, brand_id, capability_id):
+        self.suspend_started.set()
+        return super().suspend(issuer, brand_id, capability_id)
+
+
+class ReentrantSuspendingPublisher(MockPublisher):
+    def __init__(self, registry, issuer, brand_id, capability_id) -> None:
+        super().__init__()
+        self.registry = registry
+        self.issuer = issuer
+        self.brand_id = brand_id
+        self.capability_id = capability_id
+
+    def publish(self, *, public_fields, idempotency_key):
+        self.registry.suspend(
+            self.issuer, self.brand_id, self.capability_id
+        )
+        return super().publish(
+            public_fields=public_fields, idempotency_key=idempotency_key
+        )
+
+
 class GatewayTests(unittest.TestCase):
     def setUp(self) -> None:
         flow = run_fictional_article()
@@ -375,6 +419,102 @@ class GatewayTests(unittest.TestCase):
 
         self.assertEqual(str(denied.exception), "CAPABILITY_INACTIVE")
         self.assertEqual(publisher.calls, 0)
+
+    def test_suspension_winning_dispatch_race_prevents_adapter_call(self) -> None:
+        registry = PausingDispatchRegistry()
+        registry.register(self.director, self.capability)
+        publisher = MockPublisher()
+        gateway = self._gateway(
+            publisher,
+            InMemoryActionLedger(),
+            capability_registry=registry,
+        )
+
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(
+                gateway.publish,
+                principal=self.principal,
+                manifest=self.manifest,
+                approval_id=self.approval["approval_id"],
+                idempotency_key="suspension-wins",
+                now=self.now,
+            )
+            self.assertTrue(registry.dispatch_ready.wait(timeout=1))
+            registry.suspend(
+                self.director,
+                "brand_lantern",
+                self.capability["capability_id"],
+            )
+            registry.release_dispatch.set()
+            with self.assertRaises(GatewayDenied) as denied:
+                future.result(timeout=1)
+
+        self.assertEqual(str(denied.exception), "CAPABILITY_INACTIVE")
+        self.assertEqual(publisher.calls, 0)
+
+    def test_dispatch_winning_race_serializes_suspension_after_adapter(self) -> None:
+        registry = TrackingSuspendRegistry()
+        registry.register(self.director, self.capability)
+        publisher = BlockingPublisher()
+        gateway = self._gateway(
+            publisher,
+            InMemoryActionLedger(),
+            capability_registry=registry,
+        )
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            publish_future = pool.submit(
+                gateway.publish,
+                principal=self.principal,
+                manifest=self.manifest,
+                approval_id=self.approval["approval_id"],
+                idempotency_key="dispatch-wins",
+                now=self.now,
+            )
+            self.assertTrue(publisher.entered.wait(timeout=1))
+            suspend_future = pool.submit(
+                registry.suspend,
+                self.director,
+                "brand_lantern",
+                self.capability["capability_id"],
+            )
+            self.assertTrue(registry.suspend_started.wait(timeout=1))
+            self.assertFalse(suspend_future.done())
+            publisher.release.set()
+            receipt = publish_future.result(timeout=1)
+            suspend_future.result(timeout=1)
+
+        self.assertEqual(receipt["state"], "PUBLISHED")
+        self.assertEqual(publisher.calls, 1)
+        _, status = registry.resolve(
+            "brand_lantern", self.capability["capability_id"]
+        )
+        self.assertEqual(status, "suspended")
+
+    def test_adapter_cannot_suspend_and_then_send_reentrantly(self) -> None:
+        publisher = ReentrantSuspendingPublisher(
+            self.capability_registry,
+            self.director,
+            "brand_lantern",
+            self.capability["capability_id"],
+        )
+        gateway = self._gateway(publisher, InMemoryActionLedger())
+
+        with self.assertRaises(GatewayDenied) as denied:
+            gateway.publish(
+                principal=self.principal,
+                manifest=self.manifest,
+                approval_id=self.approval["approval_id"],
+                idempotency_key="reentrant-suspension",
+                now=self.now,
+            )
+
+        self.assertEqual(str(denied.exception), "EXTERNAL_RESULT_UNKNOWN")
+        self.assertEqual(publisher.calls, 0)
+        _, status = self.capability_registry.resolve(
+            "brand_lantern", self.capability["capability_id"]
+        )
+        self.assertEqual(status, "active")
 
     def test_unknown_result_requires_reconciliation_before_retry(self) -> None:
         publisher = AmbiguousPublisher()

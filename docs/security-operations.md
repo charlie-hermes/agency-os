@@ -19,8 +19,12 @@
   one actor and role to one environment, destination, operation, action class,
   and data class for a bounded time. Missing, suspended, expired, future,
   checksum-invalid, or mismatched grants fail closed. The gateway resolves the
-  grant by ID rather than accepting caller-supplied grant content and rechecks
-  it after action reservation immediately before adapter dispatch.
+  grant by ID rather than accepting caller-supplied grant content. After action
+  reservation, the in-process authority serializes the final active/checksum
+  check with adapter invocation: suspension that wins that lock prevents the
+  call, while suspension after dispatch starts becomes effective when the call
+  finishes. Production requires the equivalent enforcement at the credential
+  and egress boundary across deployed workers.
 - The action gateway also checks role, brand, environment, destination,
   operation, approval expiry, manifest checksum, artifact checksum, and
   schedule. Because Phase 0/1 has no typed condition evaluator, an Approval

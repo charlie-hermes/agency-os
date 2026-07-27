@@ -6,7 +6,13 @@ import copy
 from datetime import datetime, timezone
 from typing import Any, Mapping
 
-from .capabilities import CapabilityError, CapabilityRegistry
+from .capabilities import (
+    CapabilityDispatchError,
+    CapabilityDriftError,
+    CapabilityError,
+    CapabilityInactiveError,
+    CapabilityRegistry,
+)
 from .contracts import (
     ContractError,
     canonical_checksum,
@@ -145,18 +151,23 @@ class ActionGateway:
             return copy.deepcopy(receipt)
         if reservation.status != "RESERVED":
             self._deny("LEDGER_UNAVAILABLE", request_binding)
-        current_capability, current_status = self._resolve_capability(principal)
-        self._validate_capability(
-            principal, manifest, current_capability, current_status, current_time
-        )
-        if current_capability["content_checksum"] != capability["content_checksum"]:
-            self._deny("CAPABILITY_DRIFT", request_binding)
         try:
-            external = self.publisher.publish(
-                public_fields=manifest["public_fields"],
-                idempotency_key=idempotency_key,
+            external = self.capability_registry.authorized_dispatch(
+                principal.brand_id,
+                self.capability_id,
+                capability["content_checksum"],
+                lambda: self.publisher.publish(
+                    public_fields=manifest["public_fields"],
+                    idempotency_key=idempotency_key,
+                ),
             )
-        except Exception as exc:
+        except CapabilityInactiveError as exc:
+            self._deny("CAPABILITY_INACTIVE", request_binding, cause=exc)
+        except CapabilityDriftError as exc:
+            self._deny("CAPABILITY_DRIFT", request_binding, cause=exc)
+        except (KeyError, ContractError, CapabilityError) as exc:
+            self._deny("CAPABILITY_NOT_AUTHORITATIVE", request_binding, cause=exc)
+        except CapabilityDispatchError as exc:
             try:
                 self.action_ledger.mark_unknown(
                     principal.brand_id, idempotency_key, request_checksum
