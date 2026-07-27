@@ -23,14 +23,23 @@
   expired, replayed, unregistered, another-process or changed-runtime assertions
   fail before capability or action resolution. The local socket lives in a
   private directory and has mode `0600`.
-- The tenant store checks the principal's `brand_id` on every read and write.
+- Both the in-memory demonstration store and protected durable artifact authority
+  check the principal's `brand_id` on every read and write. Durable workers hold
+  only a principal-bound Platform Authority client, never a database path.
 - Role read and write permissions are allowlisted by record type. The publishing
   operator can retrieve the public Publication Manifest but not draft or
-  complete private asset packages, and tenant snapshots are director-only.
+  complete private asset packages, and tenant exports are director-only.
 - Records use an artifact-type-specific primary ID and reject conflicting
   replacement. Approval Records are resolved by ID from that immutable store,
   retain authenticated writer provenance, and must match the brand-scoped
   approver identity and authority-role policy.
+- Durable artifacts and learning use the protected authority SQLite database in
+  WAL/full-synchronous mode with pinned owner-only storage identity. Canonical
+  exports bind content and authenticated provenance to one checksum. Restore is
+  same-tenant and empty-target only. Artifact deletion needs the current export
+  checksum, tombstones reactivation and retains no deleted record content in its
+  receipt. This deletion does not yet cover Paperclip, evidence, Buzz or audit
+  tables.
 - Public fields and internal notes are separate values; only public fields
   cross the publication adapter.
 - Capability grants are immutable, brand-scoped records issued through an
@@ -162,6 +171,12 @@ Offboarding requires a human-approved plan that:
    to retention policy;
 6. verifies backups expire or are cryptographically erased as promised; and
 7. records deletion evidence without retaining deleted content.
+
+The current fictional authority implements a checksum-bound export and deletion
+receipt for artifact/learning rows only. It intentionally tombstones that tenant
+inside the artifact authority. It does not claim the full sequence above until
+Paperclip task/approval, evidence, Buzz, audit, credential and backup expiry are
+coordinated and tested together.
 
 ## Audit and service objectives
 

@@ -387,8 +387,35 @@
       "owner": "platform-assurance-reviewer",
       "release_blocker": true,
       "fixture": "a running authority whose SQLite path is replaced",
-      "command": "python3 -m unittest tests.test_platform_adapters.PlatformAdapterTests.test_replaced_storage_identity_is_rejected_by_both_authorities",
-      "expected_evidence": "Paperclip and evidence operations both fail closed after replacement"
+      "command": "python3 -m unittest tests.test_platform_adapters.PlatformAdapterTests.test_replaced_storage_identity_is_rejected_by_all_authorities",
+      "expected_evidence": "Paperclip, evidence and artifact/learning operations all fail closed after replacement"
+    },
+    {
+      "id": "ARTIFACT-DURABILITY-001",
+      "phase": 5,
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "fixture": "tenant artifacts and validated learning written through principal-bound Platform Authority clients",
+      "command": "python3 -m unittest tests.test_platform_adapters.PlatformAdapterTests.test_durable_artifacts_and_learning_survive_restart",
+      "expected_evidence": "immutable same-tenant records survive authority restart while cross-tenant and wrong-role reads deny"
+    },
+    {
+      "id": "ARTIFACT-RECOVERY-001",
+      "phase": 5,
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "fixture": "checksum-bound tenant artifact export restored into an empty authority",
+      "command": "python3 -m unittest tests.test_platform_adapters.PlatformAdapterTests.test_artifact_export_restore_is_integrity_and_tenant_bound",
+      "expected_evidence": "valid same-tenant restore succeeds; content, provenance, foreign-tenant and non-empty-target changes deny"
+    },
+    {
+      "id": "ARTIFACT-OFFBOARD-001",
+      "phase": 5,
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "fixture": "current export checksum and two fictional tenants in the artifact authority",
+      "command": "python3 -m unittest tests.test_platform_adapters.PlatformAdapterTests.test_artifact_offboarding_requires_current_export_and_is_durable",
+      "expected_evidence": "stale deletion denies; exact deletion survives restart, preserves the other tenant and retains only content-free deletion evidence"
     },
     {
       "id": "INSTALLED-PLATFORM-CONTRACT-001",

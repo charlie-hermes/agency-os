@@ -13,9 +13,11 @@ from .gateway_host import ActionGatewayClient, fictional_runtime
 from .platform_authority_host import (
     PlatformAuthorityClient,
     PlatformAuthorityUnavailable,
+    TenantArtifactClient,
     TenantEvidenceClient,
 )
 from .platform_adapters import (
+    ArtifactStoreError,
     EvidenceStoreError,
     FictionalBuzzAdapter,
     PlatformAdapterError,
@@ -36,6 +38,7 @@ from .store import AuthorizationError, Principal, TenantStore
 
 __all__ = [
     "ActionGatewayClient",
+    "ArtifactStoreError",
     "AuthorizationError",
     "CapabilityError",
     "CapabilityRegistry",
@@ -51,6 +54,7 @@ __all__ = [
     "PlatformAuthorityUnavailable",
     "PlatformAdapterError",
     "RuntimeIdentityError",
+    "TenantArtifactClient",
     "TenantEvidenceClient",
     "fictional_credential_broker",
     "fictional_credential_grant",

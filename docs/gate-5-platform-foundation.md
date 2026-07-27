@@ -6,10 +6,10 @@ This slice adds a standard-library-only, fictional local reference for three
 Gate 5 boundaries:
 
 1. An independently started protected Platform Authority host owns the SQLite
-   path, Paperclip adapter, tenant evidence store, approver-policy state, HMAC
-   signer and verification key. The public package exports only
-   `PlatformAuthorityClient` and `TenantEvidenceClient` for this authority; neither accepts a
-   database path, authority ID or signing key.
+   path, Paperclip adapter, tenant evidence store, durable artifact/learning
+   store, approver-policy state, HMAC signer and verification key. The public
+   package exports only principal-bound clients for this authority; none accepts
+   a database path, authority ID or signing key.
 2. `FictionalBuzzAdapter` accepts a typed, time-bounded context packet. Its
    authority clock enforces the deadline, and its persisted context and archive
    state can be resumed through a fresh client. It writes an immutable decision
@@ -101,6 +101,33 @@ boundary sample their authority clocks; expired or future-dated attempts fail,
 and a caller cannot evade an elapsed deadline by backdating direct write-back.
 All denials leave no decision or audit event.
 
+## Durable artifact, learning and recovery controls
+
+`TenantArtifactClient` is a constrained view of the same protected Platform
+Authority host. Workers receive only their existing principal-bound socket client
+and token; the SQLite path remains inside the host. Artifact and learning writes
+reuse the role matrix, require an exact `brand_id`, preserve authenticated actor
+and role provenance, and are immutable under a brand-scoped record ID. Validated,
+active, evidence-backed and unexpired learning is selected with the authority
+clock rather than caller time.
+
+The store uses the authority SQLite database with WAL, full synchronous writes,
+owner-only mode and pinned file/parent identity. Records survive host restart.
+Only the agency director may export or restore a tenant. The canonical export
+binds every record and its original actor, role and storage time to one SHA-256;
+restore requires the same tenant, valid record checksums and provenance, an empty
+target and no prior deletion tombstone.
+
+Artifact/learning deletion requires the checksum of the current export in the
+same immediate transaction. A stale export makes no deletion. A successful
+deletion removes that tenant's artifact and learning content, preserves other
+tenants, blocks later restore or reactivation, and retains only a checksum/count
+receipt without deleted record content. This is not yet full Platform Authority
+offboarding: task, approval, evidence, Buzz-context and audit export/deletion,
+retention timing and storage-media erasure remain separate Gate 5 work. Local
+IPC requests and responses are capped at 4 MiB; production bulk export requires
+a separately designed streaming or protected object-transfer path.
+
 ## Tenant and storage controls
 
 - Every query includes `brand_id`; a foreign read is indistinguishable from a
@@ -109,9 +136,10 @@ All denials leave no decision or audit event.
 - Evidence writers are explicit roles and `created_by` must equal the
   authenticated actor.
 - Records are canonical JSON with a SHA-256 content checksum.
-- Evidence, approvals and Buzz decisions are immutable. Approval provenance is
-  additionally authenticated by signing material held only in the host process;
-  record checksums alone are not treated as proof of origin.
+- Evidence, artifacts, learning, approvals and Buzz decisions are immutable.
+  Artifact/learning provenance comes from the bound authority client. Approval
+  provenance is additionally authenticated by signing material held only in the
+  host process; record checksums alone are not treated as proof of origin.
 - Worker clients contain only a socket path, exact bound principal and opaque
   token. They receive no SQLite path, signer, verifier, policy catalogue or host
   bootstrap handle.
@@ -135,30 +163,36 @@ All denials leave no decision or audit event.
   with no task or closure-audit mutation and the honest key absent from SQLite;
 - same-ID/different-key self-provision, caller-selected principal, base-setter
   principal substitution, client socket redirection and stopped-host denial;
-- cross-tenant task, Buzz and evidence access;
+- cross-tenant task, Buzz, evidence, artifact and learning access;
 - a non-director attempting authoritative Buzz write-back;
 - expired and backdated Buzz decisions through both adapter layers;
 - Buzz context and archive-state recovery across client reconstruction without
   any task-state mutation;
 - evidence client reconstruction persistence, immutable conflict and wrong
   actor/role;
+- artifact and validated-learning restart persistence, immutable conflict,
+  role/tenant denial and authority-clock freshness;
+- checksum-bound export and empty-authority restore, including tampered content,
+  forged provenance, foreign tenant and non-empty restore denial;
+- stale-export deletion denial, durable content-free deletion evidence,
+  reactivation denial and preservation of a second tenant;
 - tenant-scoped persistent audit; and
-- replacement of the running authority database.
+- replacement of the running authority database across every authority view.
 
 ## Recovery and remaining Gate 5 work
 
-This slice proves restart persistence, not a complete recovery plan. Before
-Gate 5 can complete, the project still needs:
+This slice proves artifact/learning restart, logical export/restore and bounded
+deletion, not a complete platform recovery plan. Before Gate 5 can complete, the
+project still needs:
 
 - authenticated task, dependency, approval, budget, closure, Buzz-context and
   decision write-back tests against the admitted installed services; version,
   path, service-identity and interface evidence is now recorded read-only;
 - production Paperclip approval signing, protected key custody, rotation and
   recovery under an authority service account unavailable to workers;
-- persistent artifact and learning authorities integrated with this evidence
-  boundary;
 - queue leases, retries, dead-letter handling and reconciliation;
-- backup, restore, retention, export and destructive offboarding drills;
+- full Platform Authority backup/restore, task/evidence/Buzz/audit export and
+  destructive offboarding, retention timing and storage-media erasure drills;
 - immutable audit-retention and tenant-scoped telemetry policy; and
 - verified runtime bundles and fresh-session load evidence for all roles.
 
