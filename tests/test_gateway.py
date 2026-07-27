@@ -2,9 +2,8 @@ from __future__ import annotations
 
 import copy
 import inspect
-import json
 import multiprocessing
-import socket
+import os
 import tempfile
 import threading
 import unittest
@@ -13,13 +12,20 @@ from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import agency_os
 from agency_os.capabilities import CapabilityRegistry, SQLiteCapabilityRegistry
 from agency_os.contracts import (
     ContractError,
     finalize_record,
     make_capability_record,
 )
-from agency_os.gateway import ActionGateway, GatewayDenied, MockPublisher
+from agency_os.gateway import _AuthorityActionGateway, GatewayDenied, MockPublisher
+from agency_os.gateway_host import (
+    ActionGatewayClient,
+    _authority_enrollment_for_process,
+    _provision_authority_gateway_host,
+    fictional_runtime,
+)
 from agency_os.ledger import (
     InMemoryActionLedger,
     LedgerError,
@@ -35,27 +41,47 @@ from agency_os.runtime_security import (
     VerifiedRuntimeBoundary,
     fictional_credential_broker,
     fictional_credential_grant,
-    fictional_runtime,
 )
 from agency_os.store import Principal
 from agency_os.workflow import run_fictional_article
 
 
-def _authenticate_supervisor_from_other_process(socket_path, result_queue):
+def _publish_from_other_process(socket_path, manifest, approval_id, result_queue):
     try:
-        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
-            client.settimeout(2)
-            client.connect(socket_path)
-            client.sendall(b'{"operation":"authenticate"}\n')
-            response = bytearray()
-            while b"\n" not in response:
-                chunk = client.recv(4096)
-                if not chunk:
-                    break
-                response.extend(chunk)
-        result_queue.put(json.loads(bytes(response).split(b"\n", 1)[0]))
+        client = fictional_runtime(socket_path)
+        client.publish(
+            manifest=manifest,
+            approval_id=approval_id,
+            idempotency_key="rogue-self-provision",
+        )
+        result_queue.put({"outcome": "ALLOW"})
     except Exception as exc:
-        result_queue.put({"error": type(exc).__name__, "detail": str(exc)})
+        result_queue.put(
+            {"outcome": "DENY", "error": type(exc).__name__, "code": str(exc)}
+        )
+
+
+class AuthorityGatewayHarness:
+    """Authority-side unit-test facade; never represents a worker API."""
+
+    def __init__(self, gateway, principal) -> None:
+        self.gateway = gateway
+        self.principal = principal
+
+    def publish(self, *, manifest, approval_id, idempotency_key):
+        return self.gateway.dispatch_authorized(
+            principal=self.principal,
+            manifest=manifest,
+            approval_id=approval_id,
+            idempotency_key=idempotency_key,
+        )
+
+    @property
+    def audit(self):
+        return self.gateway.audit
+
+    def close(self) -> None:
+        return None
 
 
 class AmbiguousPublisher(MockPublisher):
@@ -294,8 +320,8 @@ class GatewayTests(unittest.TestCase):
         capability_registry=None,
         clock=None,
         credential_broker: FictionalCredentialBroker | None = None,
-    ) -> ActionGateway:
-        gateway = ActionGateway(
+    ) -> AuthorityGatewayHarness:
+        gateway = _AuthorityActionGateway(
             capability_id=capability_id,
             capability_registry=capability_registry or self.capability_registry,
             credential_broker=credential_broker
@@ -306,8 +332,36 @@ class GatewayTests(unittest.TestCase):
             action_ledger=ledger,
             clock=clock,
         )
-        self.addCleanup(gateway.close)
-        return gateway
+        return AuthorityGatewayHarness(gateway, self.principal)
+
+    def _authority_host_for_process(
+        self,
+        pid,
+        *,
+        publisher=None,
+        credential_broker=None,
+    ):
+        selected_publisher = publisher or MockPublisher()
+        selected_broker = credential_broker or fictional_credential_broker(
+            self.capability
+        )
+        enrollment = _authority_enrollment_for_process(
+            pid,
+            self.principal,
+            runtime_id="runtime_agent_publisher",
+        )
+        host = _provision_authority_gateway_host(
+            enrollment=enrollment,
+            capability_id=self.capability["capability_id"],
+            capability_registry=self.capability_registry,
+            credential_broker=selected_broker,
+            publisher=selected_publisher,
+            approval_store=self.store,
+            approval_authorities=self.approval_authorities,
+            action_ledger=InMemoryActionLedger(),
+        )
+        self.addCleanup(host.close)
+        return host
 
     def _persist_approval(self, approval: dict) -> None:
         approver = Principal(
@@ -386,69 +440,62 @@ class GatewayTests(unittest.TestCase):
                 observation, now=self.now, ttl=timedelta(seconds=31)
             )
 
-    def test_worker_cannot_supply_or_replace_runtime_boundary(self) -> None:
-        class CallerControlledBoundary:
-            def authenticate(self):
-                return self.principal
-
-        constructor_parameters = inspect.signature(ActionGateway).parameters
-        self.assertNotIn("runtime_boundary", constructor_parameters)
-        publisher = MockPublisher()
-        broker = fictional_credential_broker(self.capability)
-        gateway_arguments = {
-            "capability_id": self.capability["capability_id"],
-            "capability_registry": self.capability_registry,
-            "credential_broker": broker,
-            "publisher": publisher,
-            "approval_store": self.store,
-            "approval_authorities": self.approval_authorities,
-            "action_ledger": InMemoryActionLedger(),
-        }
-        with self.assertRaisesRegex(TypeError, "runtime_boundary"):
-            ActionGateway(
-                **gateway_arguments, runtime_boundary=CallerControlledBoundary()
-            )
-
-        caller_created_boundary = fictional_runtime()
-        self.addCleanup(caller_created_boundary.close)
-        with self.assertRaisesRegex(TypeError, "runtime_boundary"):
-            ActionGateway(
-                **gateway_arguments, runtime_boundary=caller_created_boundary
-            )
-        with self.assertRaises(AttributeError):
-            self.gateway.runtime_boundary = caller_created_boundary
-        with self.assertRaisesRegex(
-            RuntimeIdentityError, "GATEWAY_SECURITY_WIRING_IMMUTABLE"
+    def test_worker_client_cannot_hold_or_replace_gateway_boundary(self) -> None:
+        self.assertFalse(hasattr(agency_os, "ActionGateway"))
+        self.assertFalse(hasattr(agency_os, "_AuthorityActionGateway"))
+        self.assertFalse(hasattr(agency_os, "_provision_authority_gateway_host"))
+        host = self._authority_host_for_process(os.getpid())
+        client = host.client()
+        self.assertIsInstance(client, ActionGatewayClient)
+        for forbidden in (
+            "gateway",
+            "broker",
+            "publisher",
+            "authority",
+            "signing_key",
+            "_signing_key",
+            "_runtime_boundary",
         ):
-            self.gateway._runtime_boundary = caller_created_boundary
-        self.assertEqual(publisher.calls, 0)
-        self.assertEqual(broker.audit, [])
+            self.assertFalse(hasattr(client, forbidden))
+        with self.assertRaises(AttributeError):
+            object.__setattr__(client, "_runtime_boundary", object())
+        with self.assertRaises(AttributeError):
+            object.__setattr__(client, "gateway", AuthorityGatewayHarness)
+        object.__setattr__(client, "_socket_path", f"{host.socket_path}.attacker")
+        with self.assertRaisesRegex(GatewayDenied, "GATEWAY_HOST_UNAVAILABLE"):
+            client.publish(
+                manifest=self.manifest,
+                approval_id=self.approval["approval_id"],
+                idempotency_key="base-setter-replacement",
+            )
+        snapshot = host.snapshot()
+        self.assertEqual(snapshot["publisher_calls"], 0)
+        self.assertEqual(snapshot["credential_audit"], [])
+        self.assertEqual(snapshot["authoritative_receipts"], [])
 
     def test_runtime_enrollment_not_worker_input_drives_identity(self) -> None:
-        publish_parameters = inspect.signature(ActionGateway.publish).parameters
+        publish_parameters = inspect.signature(ActionGatewayClient.publish).parameters
         runtime_parameters = inspect.signature(fictional_runtime).parameters
         self.assertNotIn("principal", publish_parameters)
         self.assertNotIn("now", publish_parameters)
-        self.assertEqual(runtime_parameters, {})
+        self.assertEqual(set(runtime_parameters), {"socket_path"})
+        host = self._authority_host_for_process(os.getpid())
+        client = fictional_runtime(host.socket_path)
+        self.assertIsInstance(client, ActionGatewayClient)
+        self.assertEqual(host.snapshot()["publisher_calls"], 0)
 
-        boundary = fictional_runtime()
-        self.addCleanup(boundary.close)
-        self.assertEqual(boundary.authenticate(), self.principal)
-        with self.assertRaises(TypeError):
-            fictional_runtime(self.director)
-
-    def test_other_process_cannot_use_supervisor_or_access_signer(self) -> None:
-        boundary = fictional_runtime()
-        self.addCleanup(boundary.close)
-        self.assertFalse(hasattr(boundary, "authority"))
-        self.assertFalse(hasattr(boundary, "signing_key"))
-        self.assertFalse(hasattr(boundary, "_signing_key"))
-
-        context = multiprocessing.get_context("fork")
+    def test_other_process_cannot_self_provision_or_access_authority_host(self) -> None:
+        host = self._authority_host_for_process(os.getpid())
+        context = multiprocessing.get_context("spawn")
         result_queue = context.Queue()
         process = context.Process(
-            target=_authenticate_supervisor_from_other_process,
-            args=(boundary._socket_path, result_queue),
+            target=_publish_from_other_process,
+            args=(
+                host.socket_path,
+                self.manifest,
+                self.approval["approval_id"],
+                result_queue,
+            ),
         )
         process.start()
         process.join(timeout=3)
@@ -456,25 +503,40 @@ class GatewayTests(unittest.TestCase):
         self.assertEqual(process.exitcode, 0)
         self.assertEqual(
             result_queue.get(timeout=1),
-            {"outcome": "DENY", "code": "RUNTIME_IDENTITY_CHANGED"},
+            {
+                "outcome": "DENY",
+                "error": "GatewayDenied",
+                "code": "RUNTIME_IDENTITY_CHANGED",
+            },
         )
+        snapshot = host.snapshot()
+        self.assertEqual(snapshot["publisher_calls"], 0)
+        self.assertEqual(snapshot["credential_audit"], [])
+        self.assertEqual(snapshot["authoritative_receipts"], [])
 
-    def test_supervisor_cleanup_fails_closed_without_dispatch(self) -> None:
-        boundary = self.gateway._runtime_boundary
-        supervisor_process = boundary._process
-        supervisor_directory = Path(boundary._socket_path).parent
+    def test_authority_host_cleanup_fails_closed_without_dispatch(self) -> None:
+        publisher = MockPublisher()
+        broker = fictional_credential_broker(self.capability)
+        host = self._authority_host_for_process(
+            os.getpid(), publisher=publisher, credential_broker=broker
+        )
+        client = host.client()
+        host_process = host._process
+        host_directory = Path(host.socket_path).parent
+        self.assertEqual(host.snapshot()["publisher_calls"], 0)
 
-        self.gateway.close()
+        host.close()
 
-        self.assertFalse(supervisor_process.is_alive())
-        self.assertFalse(supervisor_directory.exists())
-        with self.assertRaisesRegex(GatewayDenied, "RUNTIME_SUPERVISOR_UNAVAILABLE"):
-            self.gateway.publish(
+        self.assertFalse(host_process.is_alive())
+        self.assertFalse(host_directory.exists())
+        with self.assertRaisesRegex(GatewayDenied, "GATEWAY_HOST_UNAVAILABLE"):
+            client.publish(
                 manifest=self.manifest,
                 approval_id=self.approval["approval_id"],
-                idempotency_key="closed-supervisor",
+                idempotency_key="closed-authority-host",
             )
-        self.assertEqual(self.publisher.calls, 0)
+        self.assertEqual(publisher.calls, 0)
+        self.assertEqual(broker.audit, [])
 
     def test_credential_scope_allowlist_and_direct_bypass_fail_closed(self) -> None:
         wrong_scope = self._capability(actor_id="agent_other_publisher")

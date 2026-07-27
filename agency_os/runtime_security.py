@@ -1,10 +1,9 @@
 """Verified local-runtime identity and fictional credential/egress controls.
 
-The reference classes run the assertion signer in a separate local supervisor
-process and derive the caller from Linux peer credentials and ``/proc`` facts.
-They make no network calls and store no real credential. Production must replace
-the fictional process and mock adapter while preserving these fail-closed
-contracts.
+The protected host in ``gateway_host`` owns the assertion signer and derives the
+caller from Linux peer credentials and ``/proc`` facts. These controls make no
+network calls and store no real credential. Production must replace the
+fictional process and mock adapter while preserving the fail-closed contracts.
 """
 
 from __future__ import annotations
@@ -12,19 +11,15 @@ from __future__ import annotations
 import copy
 import hashlib
 import hmac
-import json
-import multiprocessing
 import os
 import pwd
 import secrets
 import socket
-import struct
-import tempfile
 import threading
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Callable, Mapping, Protocol
+from typing import Any, Callable, Mapping
 
 from .contracts import ContractError, canonical_bytes, parse_time
 from .store import Principal
@@ -196,12 +191,6 @@ class RuntimeIdentityAuthority:
             return enrollment[1]
 
 
-class RuntimeBoundary(Protocol):
-    """Read-only client for the protected local runtime supervisor."""
-
-    def authenticate(self) -> Principal: ...
-
-
 class VerifiedRuntimeBoundary:
     """Reads both assertion and observation from a trusted supervisor surface."""
 
@@ -220,85 +209,6 @@ class VerifiedRuntimeBoundary:
         return self._authority.authenticate(
             self._assertion_source(), self._observation_source(), now=now
         )
-
-
-_SUPERVISOR_BOUNDARY_TOKEN = object()
-
-
-class SupervisorRuntimeBoundary:
-    """Client for a separate local supervisor that derives OS peer identity."""
-
-    def __init__(
-        self,
-        socket_path: str,
-        *,
-        _construction_token: object,
-        process: multiprocessing.Process,
-        temporary_directory: tempfile.TemporaryDirectory[str],
-    ) -> None:
-        if _construction_token is not _SUPERVISOR_BOUNDARY_TOKEN:
-            raise RuntimeIdentityError("RUNTIME_SUPERVISOR_CONSTRUCTION_DENIED")
-        self._socket_path = socket_path
-        self._process = process
-        self._temporary_directory = temporary_directory
-        self._closed = False
-        self._lock = threading.RLock()
-
-    def authenticate(self) -> Principal:
-        response = self._request({"operation": "authenticate"})
-        if response.get("outcome") != "ALLOW":
-            code = str(response.get("code", "RUNTIME_IDENTITY_INVALID"))
-            raise RuntimeIdentityError(code)
-        principal = response.get("principal")
-        if not isinstance(principal, dict) or set(principal) != {
-            "actor_id",
-            "role_id",
-            "brand_id",
-        }:
-            raise RuntimeIdentityError("RUNTIME_IDENTITY_INVALID")
-        if any(not isinstance(principal.get(field), str) for field in principal):
-            raise RuntimeIdentityError("RUNTIME_IDENTITY_INVALID")
-        return Principal(
-            principal["actor_id"], principal["role_id"], principal["brand_id"]
-        )
-
-    def close(self) -> None:
-        with self._lock:
-            if self._closed:
-                return
-            try:
-                self._request({"operation": "shutdown"})
-            except (OSError, RuntimeIdentityError):
-                pass
-            self._process.join(timeout=2)
-            if self._process.is_alive():
-                self._process.terminate()
-                self._process.join(timeout=2)
-            self._temporary_directory.cleanup()
-            self._closed = True
-
-    def _request(self, request: Mapping[str, str]) -> dict[str, Any]:
-        with self._lock:
-            if self._closed or not self._process.is_alive():
-                raise RuntimeIdentityError("RUNTIME_SUPERVISOR_UNAVAILABLE")
-            try:
-                with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
-                    client.settimeout(2)
-                    client.connect(self._socket_path)
-                    client.sendall(canonical_bytes(dict(request)) + b"\n")
-                    response_bytes = _read_socket_line(client)
-                response = json.loads(response_bytes)
-            except (OSError, ValueError, json.JSONDecodeError) as exc:
-                raise RuntimeIdentityError("RUNTIME_SUPERVISOR_UNAVAILABLE") from exc
-            if not isinstance(response, dict):
-                raise RuntimeIdentityError("RUNTIME_IDENTITY_INVALID")
-            return response
-
-    def __enter__(self) -> "SupervisorRuntimeBoundary":
-        return self
-
-    def __exit__(self, *_: object) -> None:
-        self.close()
 
 
 @dataclass(frozen=True)
@@ -471,132 +381,6 @@ class FictionalCredentialBroker:
         return active[1]
 
 
-_FICTIONAL_RUNTIME_ID = "runtime_agent_publisher"
-_FICTIONAL_RUNTIME_PRINCIPAL = Principal(
-    "agent_publisher", "publishing-operator", "brand_lantern"
-)
-
-
-def fictional_runtime() -> SupervisorRuntimeBoundary:
-    """Start the pre-provisioned fictional publisher runtime supervisor.
-
-    The worker-visible factory accepts no principal, role, brand, runtime ID, or
-    observation. The authority process owns that mapping and binds it to the
-    operating-system identity of the process that provisions the gateway.
-    """
-
-    temporary_directory = tempfile.TemporaryDirectory(
-        prefix="agency-os-runtime-supervisor-"
-    )
-    socket_path = str(Path(temporary_directory.name) / "supervisor.sock")
-    expected_observation = _observe_linux_process(
-        os.getpid(),
-        os.getuid(),
-        _FICTIONAL_RUNTIME_ID,
-    )
-    context = multiprocessing.get_context("fork")
-    ready_parent, ready_child = context.Pipe(duplex=False)
-    process = context.Process(
-        target=_run_runtime_supervisor,
-        args=(socket_path, expected_observation, ready_child),
-        daemon=True,
-    )
-    process.start()
-    ready_child.close()
-    if not ready_parent.poll(3):
-        process.terminate()
-        process.join(timeout=2)
-        temporary_directory.cleanup()
-        raise RuntimeIdentityError("RUNTIME_SUPERVISOR_UNAVAILABLE")
-    outcome = ready_parent.recv()
-    ready_parent.close()
-    if outcome != "READY":
-        process.join(timeout=2)
-        temporary_directory.cleanup()
-        raise RuntimeIdentityError(str(outcome))
-    return SupervisorRuntimeBoundary(
-        socket_path,
-        _construction_token=_SUPERVISOR_BOUNDARY_TOKEN,
-        process=process,
-        temporary_directory=temporary_directory,
-    )
-
-
-def _run_runtime_supervisor(
-    socket_path: str,
-    expected_observation: RuntimeObservation,
-    ready: Any,
-) -> None:
-    authority = RuntimeIdentityAuthority()
-    principal = _principal_for_fictional_observation(expected_observation)
-    authority.enroll(expected_observation, principal)
-    try:
-        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as server:
-            server.bind(socket_path)
-            os.chmod(socket_path, 0o600)
-            server.listen(8)
-            ready.send("READY")
-            ready.close()
-            while True:
-                connection, _ = server.accept()
-                with connection:
-                    try:
-                        request = json.loads(_read_socket_line(connection))
-                        peer_pid, peer_uid, _ = struct.unpack(
-                            "3i",
-                            connection.getsockopt(
-                                socket.SOL_SOCKET,
-                                socket.SO_PEERCRED,
-                                struct.calcsize("3i"),
-                            ),
-                        )
-                        observation = _observe_linux_process(
-                            peer_pid, peer_uid, expected_observation.runtime_id
-                        )
-                        now = datetime.now(timezone.utc)
-                        assertion = authority.issue_assertion(observation, now=now)
-                        authenticated = authority.authenticate(
-                            assertion, observation, now=now
-                        )
-                        if request == {"operation": "shutdown"}:
-                            connection.sendall(b'{"outcome":"ALLOW"}\n')
-                            return
-                        if request != {"operation": "authenticate"}:
-                            raise RuntimeIdentityError("RUNTIME_REQUEST_INVALID")
-                        response = {
-                            "outcome": "ALLOW",
-                            "principal": {
-                                "actor_id": authenticated.actor_id,
-                                "role_id": authenticated.role_id,
-                                "brand_id": authenticated.brand_id,
-                            },
-                        }
-                    except RuntimeIdentityError as exc:
-                        response = {"outcome": "DENY", "code": exc.code}
-                    except Exception:
-                        response = {
-                            "outcome": "DENY",
-                            "code": "RUNTIME_IDENTITY_UNAVAILABLE",
-                        }
-                    connection.sendall(canonical_bytes(response) + b"\n")
-    except Exception:
-        try:
-            ready.send("RUNTIME_SUPERVISOR_UNAVAILABLE")
-            ready.close()
-        except (BrokenPipeError, OSError):
-            pass
-
-
-def _principal_for_fictional_observation(
-    observation: RuntimeObservation,
-) -> Principal:
-    """Resolve the authority-owned fictional OS-identity enrollment."""
-
-    if observation.runtime_id != _FICTIONAL_RUNTIME_ID:
-        raise RuntimeIdentityError("RUNTIME_NOT_ENROLLED")
-    return _FICTIONAL_RUNTIME_PRINCIPAL
-
-
 def _observe_linux_process(pid: int, uid: int, runtime_id: str) -> RuntimeObservation:
     try:
         executable = Path(f"/proc/{pid}/exe").resolve(strict=True)
@@ -613,6 +397,18 @@ def _observe_linux_process(pid: int, uid: int, runtime_id: str) -> RuntimeObserv
         executable_checksum=f"sha256:{executable_checksum}",
         instance_nonce=f"linux-pid:{pid}-start:{process_start_ticks}",
     )
+
+
+def _observe_linux_process_by_pid(
+    pid: int, runtime_id: str
+) -> RuntimeObservation:
+    """Authority-side observation that derives UID from Linux process state."""
+
+    try:
+        uid = Path(f"/proc/{pid}").stat().st_uid
+    except OSError as exc:
+        raise RuntimeIdentityError("RUNTIME_OS_IDENTITY_UNAVAILABLE") from exc
+    return _observe_linux_process(pid, uid, runtime_id)
 
 
 def _read_socket_line(connection: socket.socket, *, maximum: int = 16_384) -> bytes:

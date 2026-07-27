@@ -125,36 +125,36 @@
       "phase": 1,
       "owner": "platform-assurance-reviewer",
       "release_blocker": true,
-      "fixture": "authority-owned publisher enrollment and an attempted caller-selected principal",
+      "fixture": "authority-owned exact OS observation and a worker client with no identity inputs",
       "command": "python3 -m unittest tests.test_gateway.GatewayTests.test_runtime_enrollment_not_worker_input_drives_identity",
-      "expected_evidence": "the worker-visible factory accepts no principal, role, brand, runtime ID, observation, or time"
+      "expected_evidence": "the worker-visible factory creates only an IPC client and accepts no principal, role, brand, runtime ID, observation, or time"
     },
     {
       "id": "RUNTIME-WIRING-001",
       "phase": 1,
       "owner": "platform-assurance-reviewer",
       "release_blocker": true,
-      "fixture": "structural and concrete caller-created boundaries plus public and private replacement attempts",
-      "command": "python3 -m unittest tests.test_gateway.GatewayTests.test_worker_cannot_supply_or_replace_runtime_boundary",
-      "expected_evidence": "gateway provisioning accepts no runtime boundary and sealed wiring rejects replacement before credential release or dispatch"
+      "fixture": "a worker client subjected to ordinary and object.__setattr__ gateway/boundary replacement attempts",
+      "command": "python3 -m unittest tests.test_gateway.GatewayTests.test_worker_client_cannot_hold_or_replace_gateway_boundary",
+      "expected_evidence": "the worker client contains only a socket path; protected host publisher and credential audit remain untouched"
     },
     {
       "id": "RUNTIME-PEER-001",
       "phase": 1,
       "owner": "platform-assurance-reviewer",
       "release_blocker": true,
-      "fixture": "a second local process connects directly to the private supervisor socket",
-      "command": "python3 -m unittest tests.test_gateway.GatewayTests.test_other_process_cannot_use_supervisor_or_access_signer",
-      "expected_evidence": "the other PID is denied and the worker-side client exposes no assertion authority or signing key"
+      "fixture": "a second local process calls the public factory and attempts publication through the private host socket",
+      "command": "python3 -m unittest tests.test_gateway.GatewayTests.test_other_process_cannot_self_provision_or_access_authority_host",
+      "expected_evidence": "the unregistered PID is denied and protected-host credential and publisher counts remain zero"
     },
     {
       "id": "RUNTIME-CLEANUP-001",
       "phase": 1,
       "owner": "platform-assurance-reviewer",
       "release_blocker": true,
-      "fixture": "a closed supervisor and removed private socket directory",
-      "command": "python3 -m unittest tests.test_gateway.GatewayTests.test_supervisor_cleanup_fails_closed_without_dispatch",
-      "expected_evidence": "the supervisor terminates, local socket material is removed, and later publication fails before credential release or dispatch"
+      "fixture": "a closed authority host and removed private socket directory",
+      "command": "python3 -m unittest tests.test_gateway.GatewayTests.test_authority_host_cleanup_fails_closed_without_dispatch",
+      "expected_evidence": "the host terminates, local socket material is removed, and later publication fails before credential release or dispatch"
     },
     {
       "id": "CREDENTIAL-EGRESS-001",

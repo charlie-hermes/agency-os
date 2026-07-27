@@ -29,8 +29,9 @@ provider, or publish externally.
 - `schemas/` — versioned JSON Schemas for lifecycle and learning records.
 - `agency_os/` — standard-library-only reference controls, including an
   authoritative capability registry and an injectable in-memory or durable
-  local-process action ledger, verified fictional runtime identity, mock
-  credential broker and deny-by-default mock egress boundary.
+  local-process action ledger, a protected fictional gateway/identity host with
+  a worker-only IPC client, mock credential broker and deny-by-default mock
+  egress boundary.
 - `fixtures/` — fictional tenant input.
 - `acceptance/matrix.json` — release criteria mapped to executable evidence.
 - `tests/` — allowed-path, denied-path, recovery, and vertical-slice tests.

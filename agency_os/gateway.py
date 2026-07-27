@@ -25,12 +25,7 @@ from .contracts import (
     verify_record,
 )
 from .ledger import ActionLedger, LedgerError
-from .runtime_security import (
-    CredentialBrokerError,
-    FictionalCredentialBroker,
-    RuntimeIdentityError,
-    fictional_runtime,
-)
+from .runtime_security import CredentialBrokerError, FictionalCredentialBroker
 from .store import Principal, TenantStore
 
 
@@ -87,23 +82,20 @@ class MockPublisher:
         self.credential_ids.append(str(credential_lease.credential_id))
 
 
-class ActionGateway:
-    """A gateway whose security-critical wiring is sealed at provisioning."""
+class _AuthorityActionGateway:
+    """Authority-host core; worker processes must use the IPC client."""
 
     __slots__ = (
         "_capability_id",
         "_capability_registry",
-        "_runtime_boundary",
         "_credential_broker",
         "_publisher",
         "_approval_store",
         "_approval_authorities",
         "_action_ledger",
         "_clock",
-        "_closed",
         "audit",
     )
-    _IMMUTABLE_WIRING = frozenset(__slots__) - {"_closed", "audit"}
 
     def __init__(
         self,
@@ -125,41 +117,17 @@ class ActionGateway:
         self._approval_authorities = copy.deepcopy(dict(approval_authorities))
         self._action_ledger = action_ledger
         self._clock = clock or (lambda: datetime.now(timezone.utc))
-        self._runtime_boundary = fictional_runtime()
-        self._closed = False
         self.audit: list[dict[str, Any]] = []
 
-    def __setattr__(self, name: str, value: Any) -> None:
-        if name in self._IMMUTABLE_WIRING and hasattr(self, name):
-            raise RuntimeIdentityError("GATEWAY_SECURITY_WIRING_IMMUTABLE")
-        object.__setattr__(self, name, value)
-
-    def close(self) -> None:
-        if self._closed:
-            return
-        self._runtime_boundary.close()
-        self._closed = True
-
-    def __enter__(self) -> "ActionGateway":
-        return self
-
-    def __exit__(self, *_: object) -> None:
-        self.close()
-
-    def publish(
+    def dispatch_authorized(
         self,
         *,
+        principal: Principal,
         manifest: Mapping[str, Any],
         approval_id: str,
         idempotency_key: str,
     ) -> dict[str, Any]:
         current_time = self._clock()
-        try:
-            principal = self._runtime_boundary.authenticate()
-        except RuntimeIdentityError as exc:
-            self._deny(exc.code, {"brand_id": None}, cause=exc)
-        except Exception as exc:
-            self._deny("RUNTIME_IDENTITY_UNAVAILABLE", {"brand_id": None}, cause=exc)
         if not isinstance(principal, Principal):
             self._deny("RUNTIME_IDENTITY_INVALID", {"brand_id": None})
         capability, capability_status = self._resolve_capability(principal)

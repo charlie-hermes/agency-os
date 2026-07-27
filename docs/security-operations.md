@@ -2,21 +2,27 @@
 
 ## Phase 0/1 enforcement
 
-- The gateway accepts neither a worker-supplied `Principal` nor a worker-supplied
-  runtime boundary. During gateway provisioning it creates the concrete client
-  of a separate local supervisor, and its security-critical wiring cannot then
-  be replaced through normal attribute assignment. The worker-visible runtime
-  factory accepts no principal, role, brand, runtime ID, observation, or time.
-  The fictional authority owns one pre-provisioned mapping from the publisher
-  runtime ID to the Lantern publisher `Principal`. The supervisor owns the
-  assertion signer, derives caller PID and operating-system user from Linux
-  `SO_PEERCRED`, and derives the executable checksum plus a PID-bound
-  process-start nonce from `/proc`. It matches those live facts to the
-  provisioned process before returning the mapped principal through a signed,
-  one-use assertion whose hard maximum lifetime is 30 seconds. Missing,
-  malformed, future, overlong, expired, replayed, unregistered, another-process,
-  or changed-runtime assertions fail before capability or action resolution.
-  The local socket lives in a private directory and has mode `0600`.
+- Before a worker receives any endpoint, the fictional authority observes that
+  already-running worker's PID from outside the worker, derives its service UID,
+  executable checksum and PID-bound process-start identity from `/proc`, and
+  freezes the exact observation-to-`Principal` enrollment. It then starts a
+  separate protected host containing that catalogue, the assertion signer,
+  action gateway, capability authority, credential broker and publisher. The
+  fictional worker starts with Python's clean `spawn` method, rather than
+  inheriting the authority process memory through `fork`. It receives only an
+  `ActionGatewayClient` holding a Unix-socket path; the
+  public worker factory cannot create a host and accepts no principal, role,
+  brand, runtime ID, observation or time. On every request the host derives the
+  connecting PID and UID from Linux `SO_PEERCRED`, re-derives executable and
+  process-start facts from `/proc`, and requires an exact catalogue match before
+  a signed one-use assertion maps to the principal. The worker has no gateway,
+  broker, catalogue, publisher or signer object to replace, including through
+  Python's base `object.__setattr__`. The authority accepts the completed
+  publication receipt from the protected host's control channel, not from the
+  worker's return value. Missing, malformed, future, overlong,
+  expired, replayed, unregistered, another-process or changed-runtime assertions
+  fail before capability or action resolution. The local socket lives in a
+  private directory and has mode `0600`.
 - The tenant store checks the principal's `brand_id` on every read and write.
 - Role read and write permissions are allowlisted by record type. The publishing
   operator can retrieve the public Publication Manifest but not draft or
@@ -73,11 +79,15 @@
   direct calls without a broker lease. Destination-to-endpoint mapping is
   allowlisted and this candidate refuses every endpoint except `mock://`.
 - The only Phase 0/1 destination is a local mock. Real egress is explicitly
-  denied. The separate Linux supervisor process, local authority and fictional
-  credential broker are reference controls, not claims of production VM
-  enforcement or a production service boundary. Gate 4 supports one worker
-  identity per operating-system process; several roles sharing a process are
-  explicitly unsupported because peer credentials cannot distinguish them.
+  denied. The separate Linux host, local authority and fictional credential
+  broker are reference controls, not claims of production VM enforcement. This
+  repository demonstrates the process boundary with one fictional enrollment
+  under the current local service account. Production still requires the host
+  and persistent identity catalogue to run under an authority-owned service
+  identity unavailable to workers, plus separately provisioned worker UIDs or
+  equivalent workload identities. Gate 4 supports one worker identity per
+  operating-system process; several roles sharing a process are explicitly
+  unsupported because peer credentials cannot distinguish them.
 - The complete Gate 4 repository verifier is Linux-only. It fails before tests
   unless Linux, `/proc`, and `SO_PEERCRED` are available, and the same command is
   required in Ubuntu GitHub Actions. macOS and Windows are not supported

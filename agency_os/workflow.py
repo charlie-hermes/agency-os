@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import multiprocessing
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -14,7 +15,12 @@ from .contracts import (
     make_envelope,
     make_publication_manifest,
 )
-from .gateway import ActionGateway, MockPublisher
+from .gateway import GatewayDenied, MockPublisher
+from .gateway_host import (
+    _authority_enrollment_for_process,
+    _provision_authority_gateway_host,
+    fictional_runtime,
+)
 from .ledger import InMemoryActionLedger
 from .runtime_security import fictional_credential_broker
 from .store import Principal, TenantStore
@@ -25,6 +31,24 @@ class VerticalSliceResult:
     store: TenantStore
     publisher: MockPublisher
     records: dict[str, dict[str, Any]]
+
+
+def _fictional_publish_worker(control: Any) -> None:
+    """Worker entrypoint: receive only a socket path and publication request."""
+
+    try:
+        request = control.recv()
+        client = fictional_runtime(request["socket_path"])
+        receipt = client.publish(
+            manifest=request["manifest"],
+            approval_id=request["approval_id"],
+            idempotency_key=request["idempotency_key"],
+        )
+        control.send({"outcome": "ALLOW", "receipt": receipt})
+    except (EOFError, KeyError, GatewayDenied) as exc:
+        control.send({"outcome": "DENY", "code": str(exc)})
+    finally:
+        control.close()
 
 
 def run_fictional_article() -> VerticalSliceResult:
@@ -254,23 +278,58 @@ def run_fictional_article() -> VerticalSliceResult:
     )
     capability_registry.register(principals["director"], capability)
     publisher = MockPublisher()
-    gateway = ActionGateway(
-        capability_id=capability["capability_id"],
-        capability_registry=capability_registry,
-        credential_broker=fictional_credential_broker(capability),
-        publisher=publisher,
-        approval_store=store,
-        approval_authorities={brand_id: {"brand_owner": ["human_owner"]}},
-        action_ledger=InMemoryActionLedger(),
+    context = multiprocessing.get_context("spawn")
+    authority_control, worker_control = context.Pipe(duplex=True)
+    worker = context.Process(
+        target=_fictional_publish_worker, args=(worker_control,), daemon=True
     )
+    worker.start()
+    worker_control.close()
+    host = None
     try:
-        receipt = gateway.publish(
-            manifest=manifest,
-            approval_id=approval["approval_id"],
-            idempotency_key="idem_guide_v1",
+        enrollment = _authority_enrollment_for_process(
+            worker.pid,
+            principals["publisher"],
+            runtime_id="runtime_agent_publisher",
         )
+        host = _provision_authority_gateway_host(
+            enrollment=enrollment,
+            capability_id=capability["capability_id"],
+            capability_registry=capability_registry,
+            credential_broker=fictional_credential_broker(capability),
+            publisher=publisher,
+            approval_store=store,
+            approval_authorities={brand_id: {"brand_owner": ["human_owner"]}},
+            action_ledger=InMemoryActionLedger(),
+        )
+        authority_control.send(
+            {
+                "socket_path": host.socket_path,
+                "manifest": manifest,
+                "approval_id": approval["approval_id"],
+                "idempotency_key": "idem_guide_v1",
+            }
+        )
+        if not authority_control.poll(5):
+            raise RuntimeError("fictional publisher worker did not respond")
+        outcome = authority_control.recv()
+        if outcome.get("outcome") != "ALLOW":
+            raise GatewayDenied(str(outcome.get("code", "GATEWAY_HOST_DENIED")))
+        snapshot = host.snapshot()
+        authoritative_receipts = snapshot["authoritative_receipts"]
+        if len(authoritative_receipts) != 1:
+            raise GatewayDenied("AUTHORITATIVE_RECEIPT_MISSING")
+        receipt = authoritative_receipts[0]
+        publisher.calls = snapshot["publisher_calls"]
+        publisher.objects = snapshot["publisher_objects"]
     finally:
-        gateway.close()
+        authority_control.close()
+        worker.join(timeout=2)
+        if worker.is_alive():
+            worker.terminate()
+            worker.join(timeout=2)
+        if host is not None:
+            host.close()
     store.put(principals["publisher"], receipt)
     records["receipt"] = receipt
 
