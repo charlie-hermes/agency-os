@@ -149,6 +149,24 @@ class SQLiteCapabilityRegistryTests(CapabilityRegistryTests):
         mode = stat.S_IMODE(self.database_path.stat().st_mode)
         self.assertEqual(mode, 0o600)
 
+    def test_group_writable_parent_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            parent = Path(temporary_directory)
+            parent.chmod(0o770)
+
+            with self.assertRaises(CapabilityError):
+                SQLiteCapabilityRegistry(parent / "capabilities.sqlite3")
+
+    def test_running_registry_rejects_database_identity_replacement(self) -> None:
+        self.registry.register(self.director, self.capability)
+        replacement_path = self.database_path.with_name("replacement.sqlite3")
+        replacement = SQLiteCapabilityRegistry(replacement_path)
+        replacement.register(self.director, self.capability)
+        replacement_path.replace(self.database_path)
+
+        with self.assertRaises(CapabilityError):
+            self.registry.resolve("brand_lantern", "cap_publish")
+
     def test_dispatch_and_suspension_are_ordered_across_instances(self) -> None:
         self.registry.register(self.director, self.capability)
         other = SQLiteCapabilityRegistry(self.database_path, timeout_seconds=2)

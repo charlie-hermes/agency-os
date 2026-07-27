@@ -8,7 +8,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from agency_os.capabilities import CapabilityRegistry
+from agency_os.capabilities import CapabilityRegistry, SQLiteCapabilityRegistry
 from agency_os.contracts import (
     ContractError,
     finalize_record,
@@ -801,6 +801,69 @@ class GatewayTests(unittest.TestCase):
                 idempotency_key="ledger-unavailable",
                 now=self.now,
             )
+
+        self.assertEqual(str(denied.exception), "LEDGER_UNAVAILABLE")
+        self.assertEqual(publisher.calls, 0)
+
+    def test_replaced_durable_authority_in_unsafe_parent_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            parent = Path(temporary_directory)
+            authority_path = parent / "capabilities.sqlite3"
+            replacement_path = parent / "replacement.sqlite3"
+            registry = SQLiteCapabilityRegistry(authority_path)
+            registry.register(self.director, self.capability)
+            registry.suspend(
+                self.director, "brand_lantern", self.capability["capability_id"]
+            )
+            replacement = SQLiteCapabilityRegistry(replacement_path)
+            replacement.register(self.director, self.capability)
+            parent.chmod(0o770)
+            replacement_path.replace(authority_path)
+            publisher = MockPublisher()
+            gateway = self._gateway(
+                publisher,
+                SQLiteActionLedger(self.ledger_path),
+                capability_registry=registry,
+            )
+
+            try:
+                with self.assertRaises(GatewayDenied) as denied:
+                    gateway.publish(
+                        principal=self.principal,
+                        manifest=self.manifest,
+                        approval_id=self.approval["approval_id"],
+                        idempotency_key="replaced-authority",
+                        now=self.now,
+                    )
+            finally:
+                parent.chmod(0o700)
+
+        self.assertEqual(str(denied.exception), "CAPABILITY_NOT_AUTHORITATIVE")
+        self.assertEqual(publisher.calls, 0)
+
+    def test_replaced_durable_ledger_in_unsafe_parent_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            parent = Path(temporary_directory)
+            ledger_path = parent / "action-ledger.sqlite3"
+            replacement_path = parent / "replacement.sqlite3"
+            ledger = SQLiteActionLedger(ledger_path)
+            SQLiteActionLedger(replacement_path)
+            parent.chmod(0o770)
+            replacement_path.replace(ledger_path)
+            publisher = MockPublisher()
+            gateway = self._gateway(publisher, ledger)
+
+            try:
+                with self.assertRaises(GatewayDenied) as denied:
+                    gateway.publish(
+                        principal=self.principal,
+                        manifest=self.manifest,
+                        approval_id=self.approval["approval_id"],
+                        idempotency_key="replaced-ledger",
+                        now=self.now,
+                    )
+            finally:
+                parent.chmod(0o700)
 
         self.assertEqual(str(denied.exception), "LEDGER_UNAVAILABLE")
         self.assertEqual(publisher.calls, 0)

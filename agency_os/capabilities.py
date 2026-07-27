@@ -20,6 +20,11 @@ from .contracts import (
     utc_now,
     verify_record,
 )
+from .sqlite_storage import (
+    SQLiteStorageError,
+    prepare_sqlite_storage,
+    validate_sqlite_storage,
+)
 from .store import Principal
 
 
@@ -256,8 +261,10 @@ class SQLiteCapabilityRegistry(CapabilityRegistry):
         if timeout_seconds <= 0:
             raise ValueError("timeout_seconds must be positive")
         self.timeout_seconds = timeout_seconds
-        if self.database_path.exists():
-            self._restrict_permissions()
+        try:
+            self._storage_identity = prepare_sqlite_storage(self.database_path)
+        except SQLiteStorageError as exc:
+            raise CapabilityError("unsafe capability registry storage") from exc
         self._initialize()
 
     def register(self, issuer: Principal, record: Mapping[str, Any]) -> str:
@@ -453,7 +460,6 @@ class SQLiteCapabilityRegistry(CapabilityRegistry):
                 if "locked" not in str(exc.__cause__).lower() or time.monotonic() >= deadline:
                     raise
                 time.sleep(min(0.05, max(deadline - time.monotonic(), 0.0)))
-        self._restrict_permissions()
 
     def _initialize_once(self) -> None:
         connection = self._connect()
@@ -486,25 +492,24 @@ class SQLiteCapabilityRegistry(CapabilityRegistry):
             connection.close()
 
     def _connect(self) -> sqlite3.Connection:
+        connection: sqlite3.Connection | None = None
         try:
+            validate_sqlite_storage(self.database_path, self._storage_identity)
             connection = sqlite3.connect(
                 self.database_path,
                 timeout=self.timeout_seconds,
                 isolation_level=None,
             )
+            validate_sqlite_storage(self.database_path, self._storage_identity)
             connection.execute(
                 f"PRAGMA busy_timeout = {int(self.timeout_seconds * 1000)}"
             )
             connection.execute("PRAGMA synchronous = FULL")
             return connection
-        except sqlite3.Error as exc:
+        except (SQLiteStorageError, sqlite3.Error) as exc:
+            if connection is not None:
+                connection.close()
             raise CapabilityError("could not open capability registry") from exc
-
-    def _restrict_permissions(self) -> None:
-        try:
-            self.database_path.chmod(0o600)
-        except OSError as exc:
-            raise CapabilityError("could not restrict capability registry") from exc
 
 
 def _validated_durable_capability(

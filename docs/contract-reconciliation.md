@@ -99,9 +99,11 @@ Before dispatch, it revalidates capability, approval, checksum, destination,
 schedule, and idempotency. The authority samples a trusted clock inside its
 dispatch boundary, rechecks capability, approval, and schedule time windows,
 then invokes the adapter. The SQLite authority persists grants and suspensions
-and orders that boundary across processes on one host. An allow decision is
-single-use for the bound request. Unknown or partial external results must be
-reconciled before retry.
+and orders that boundary across processes on one host. Its service-owned local
+database and non-writable parent directory are identity-pinned and revalidated
+for every connection; replacement, symlink, ownership, or mode drift fails
+closed. An allow decision is single-use for the bound request. Unknown or
+partial external results must be reconciled before retry.
 
 ## Phase boundary
 

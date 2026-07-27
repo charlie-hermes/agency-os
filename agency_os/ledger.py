@@ -13,6 +13,11 @@ from pathlib import Path
 from typing import Any, Literal, Mapping, Protocol
 
 from .contracts import ContractError, canonical_bytes, utc_now
+from .sqlite_storage import (
+    SQLiteStorageError,
+    prepare_sqlite_storage,
+    validate_sqlite_storage,
+)
 
 
 class LedgerError(RuntimeError):
@@ -147,8 +152,10 @@ class SQLiteActionLedger:
         if timeout_seconds <= 0:
             raise ValueError("timeout_seconds must be positive")
         self.timeout_seconds = timeout_seconds
-        if self.database_path.exists():
-            self._restrict_permissions()
+        try:
+            self._storage_identity = prepare_sqlite_storage(self.database_path)
+        except SQLiteStorageError as exc:
+            raise LedgerError("unsafe action ledger storage") from exc
         self._initialize()
 
     def reserve(
@@ -294,7 +301,6 @@ class SQLiteActionLedger:
                     raise
                 remaining = deadline - time.monotonic()
                 time.sleep(min(0.05, max(remaining, 0.0)))
-        self._restrict_permissions()
 
     def _initialize_once(self) -> None:
         connection = self._connect()
@@ -331,27 +337,24 @@ class SQLiteActionLedger:
         finally:
             connection.close()
 
-    def _restrict_permissions(self) -> None:
-        try:
-            self.database_path.chmod(0o600)
-        except OSError as exc:
-            raise LedgerError(
-                "could not restrict action ledger permissions"
-            ) from exc
-
     def _connect(self) -> sqlite3.Connection:
+        connection: sqlite3.Connection | None = None
         try:
+            validate_sqlite_storage(self.database_path, self._storage_identity)
             connection = sqlite3.connect(
                 self.database_path,
                 timeout=self.timeout_seconds,
                 isolation_level=None,
             )
+            validate_sqlite_storage(self.database_path, self._storage_identity)
             connection.execute(
                 f"PRAGMA busy_timeout = {int(self.timeout_seconds * 1000)}"
             )
             connection.execute("PRAGMA synchronous = FULL")
             return connection
-        except sqlite3.Error as exc:
+        except (SQLiteStorageError, sqlite3.Error) as exc:
+            if connection is not None:
+                connection.close()
             raise LedgerError("could not open action ledger") from exc
 
     @staticmethod

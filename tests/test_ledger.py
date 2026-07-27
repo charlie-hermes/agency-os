@@ -54,15 +54,45 @@ class LedgerTests(unittest.TestCase):
 
         self.assertEqual(attempts, 2)
 
-    def test_database_file_is_restricted_to_its_owner(self) -> None:
+    def test_unsafe_existing_database_mode_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             database_path = Path(temporary_directory) / "action-ledger.sqlite3"
             database_path.touch(mode=0o644)
             database_path.chmod(0o644)
 
-            SQLiteActionLedger(database_path)
+            with self.assertRaises(LedgerError):
+                SQLiteActionLedger(database_path)
 
-            self.assertEqual(database_path.stat().st_mode & 0o777, 0o600)
+    def test_group_writable_parent_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            parent = Path(temporary_directory)
+            parent.chmod(0o770)
+
+            with self.assertRaises(LedgerError):
+                SQLiteActionLedger(parent / "action-ledger.sqlite3")
+
+    def test_symlink_parent_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            real_parent = root / "real"
+            real_parent.mkdir(mode=0o700)
+            linked_parent = root / "linked"
+            linked_parent.symlink_to(real_parent, target_is_directory=True)
+
+            with self.assertRaises(LedgerError):
+                SQLiteActionLedger(linked_parent / "action-ledger.sqlite3")
+
+    def test_running_ledger_rejects_database_identity_replacement(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            parent = Path(temporary_directory)
+            database_path = parent / "action-ledger.sqlite3"
+            replacement_path = parent / "replacement.sqlite3"
+            ledger = SQLiteActionLedger(database_path)
+            SQLiteActionLedger(replacement_path)
+            replacement_path.replace(database_path)
+
+            with self.assertRaises(LedgerError):
+                ledger.reserve("brand_lantern", "replaced", "sha256:request")
 
     def test_separate_processes_share_one_atomic_reservation(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
