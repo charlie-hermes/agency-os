@@ -1,0 +1,177 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agency-os.invalid/schemas/learning.schema.json",
+  "title": "Agency OS governed learning records",
+  "oneOf": [
+    {"$ref": "#/$defs/LearningContextManifest"},
+    {"$ref": "#/$defs/FailureObservation"},
+    {"$ref": "#/$defs/CandidateLearning"},
+    {"$ref": "#/$defs/LearningRecord"}
+  ],
+  "$defs": {
+    "Checksum": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "LearningContextManifest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "artifact_type",
+        "context_manifest_id",
+        "brand_id",
+        "paperclip_issue_id",
+        "query",
+        "record_bindings",
+        "created_at",
+        "content_checksum"
+      ],
+      "properties": {
+        "schema_version": {"const": "1.0"},
+        "artifact_type": {"const": "learning_context_manifest"},
+        "context_manifest_id": {"type": "string"},
+        "brand_id": {"type": "string", "pattern": "^brand_"},
+        "paperclip_issue_id": {"type": "string"},
+        "query": {"type": "object"},
+        "record_bindings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "learning_record_id",
+              "version",
+              "checksum",
+              "reuse_scope",
+              "fresh_until",
+              "applicability"
+            ],
+            "properties": {
+              "learning_record_id": {"type": "string"},
+              "version": {"type": "integer", "minimum": 1},
+              "checksum": {"$ref": "#/$defs/Checksum"},
+              "reuse_scope": {"enum": ["brand-only", "agency-shared"]},
+              "fresh_until": {"type": "string", "format": "date-time"},
+              "applicability": {"type": "string"}
+            }
+          }
+        },
+        "created_at": {"type": "string", "format": "date-time"},
+        "content_checksum": {"$ref": "#/$defs/Checksum"}
+      }
+    },
+    "FailureObservation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "artifact_type",
+        "failure_observation_id",
+        "brand_id",
+        "paperclip_issue_id",
+        "failure_signature",
+        "attempt_checksum",
+        "evidence_refs",
+        "observed_at",
+        "content_checksum"
+      ],
+      "properties": {
+        "schema_version": {"const": "1.0"},
+        "artifact_type": {"const": "failure_observation"},
+        "failure_observation_id": {"type": "string"},
+        "brand_id": {"type": "string", "pattern": "^brand_"},
+        "paperclip_issue_id": {"type": "string"},
+        "failure_signature": {"type": "string"},
+        "attempt_checksum": {"$ref": "#/$defs/Checksum"},
+        "evidence_refs": {"type": "array", "minItems": 1},
+        "observed_at": {"type": "string", "format": "date-time"},
+        "content_checksum": {"$ref": "#/$defs/Checksum"}
+      }
+    },
+    "CandidateLearning": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "artifact_type",
+        "candidate_learning_id",
+        "brand_id",
+        "proposed_by_role",
+        "failure_observation_ids",
+        "evidence_refs",
+        "proposed_correction",
+        "confidence",
+        "proposed_reuse_scope",
+        "authority",
+        "created_at",
+        "content_checksum"
+      ],
+      "properties": {
+        "schema_version": {"const": "1.0"},
+        "artifact_type": {"const": "candidate_learning"},
+        "candidate_learning_id": {"type": "string"},
+        "brand_id": {"type": "string", "pattern": "^brand_"},
+        "proposed_by_role": {"type": "string"},
+        "failure_observation_ids": {"type": "array"},
+        "evidence_refs": {"type": "array", "minItems": 1},
+        "proposed_correction": {"type": "string"},
+        "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+        "proposed_reuse_scope": {
+          "enum": ["brand-only", "agency-shared", "discard"]
+        },
+        "authority": {"const": "proposal_only"},
+        "created_at": {"type": "string", "format": "date-time"},
+        "content_checksum": {"$ref": "#/$defs/Checksum"}
+      }
+    },
+    "LearningRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "artifact_type",
+        "learning_record_id",
+        "version",
+        "brand_id",
+        "validation_status",
+        "lifecycle_status",
+        "reuse_scope",
+        "expected_result",
+        "actual_result",
+        "attempted_approach",
+        "validated_correction",
+        "evidence_refs",
+        "confidence",
+        "limitations",
+        "fresh_until",
+        "reviewed_at",
+        "supersedes",
+        "dispositioned_by",
+        "content_checksum"
+      ],
+      "properties": {
+        "schema_version": {"const": "1.0"},
+        "artifact_type": {"const": "learning_record"},
+        "learning_record_id": {"type": "string"},
+        "version": {"type": "integer", "minimum": 1},
+        "brand_id": {"type": "string", "pattern": "^brand_"},
+        "validation_status": {"enum": ["candidate", "validated", "rejected"]},
+        "lifecycle_status": {"enum": ["active", "superseded", "retired"]},
+        "reuse_scope": {"enum": ["brand-only", "agency-shared", "discard"]},
+        "expected_result": {"type": "string"},
+        "actual_result": {"type": "string"},
+        "attempted_approach": {"type": "string"},
+        "validated_correction": {"type": "string"},
+        "evidence_refs": {"type": "array", "minItems": 1},
+        "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+        "limitations": {"type": "array"},
+        "fresh_until": {"type": "string", "format": "date-time"},
+        "reviewed_at": {"type": "string", "format": "date-time"},
+        "supersedes": {"type": ["string", "null"]},
+        "dispositioned_by": {"type": "string"},
+        "content_checksum": {"$ref": "#/$defs/Checksum"}
+      }
+    }
+  }
+}

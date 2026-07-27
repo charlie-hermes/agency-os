@@ -1,0 +1,8 @@
+{
+  "brand_id": "brand_lantern",
+  "brand_name": "Lantern Garden Co.",
+  "classification": "fictional",
+  "real_client_data": false,
+  "allowed_destination": "mock_cms:lantern",
+  "environment": "sandbox"
+}

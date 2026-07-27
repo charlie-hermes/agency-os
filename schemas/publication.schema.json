@@ -1,0 +1,183 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agency-os.invalid/schemas/publication.schema.json",
+  "title": "Agency OS publication records",
+  "oneOf": [
+    {"$ref": "#/$defs/PublicationManifest"},
+    {"$ref": "#/$defs/ApprovalRecord"},
+    {"$ref": "#/$defs/PublicationReceipt"}
+  ],
+  "$defs": {
+    "Checksum": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "ScheduleWindow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["starts_at", "ends_at"],
+      "properties": {
+        "starts_at": {"type": "string", "format": "date-time"},
+        "ends_at": {"type": "string", "format": "date-time"}
+      }
+    },
+    "PublicationManifest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "artifact_type",
+        "manifest_id",
+        "brand_id",
+        "campaign_id",
+        "asset_id",
+        "qa_package_id",
+        "qa_package_checksum",
+        "child_checksums",
+        "destination_ref",
+        "environment",
+        "operation",
+        "schedule_window",
+        "transformation_version",
+        "public_fields",
+        "created_at",
+        "content_checksum"
+      ],
+      "properties": {
+        "schema_version": {"const": "1.0"},
+        "artifact_type": {"const": "publication_manifest"},
+        "manifest_id": {"type": "string"},
+        "brand_id": {"type": "string", "pattern": "^brand_"},
+        "campaign_id": {"type": "string"},
+        "asset_id": {"type": "string"},
+        "qa_package_id": {"type": "string"},
+        "qa_package_checksum": {"$ref": "#/$defs/Checksum"},
+        "child_checksums": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/Checksum"},
+          "uniqueItems": true
+        },
+        "destination_ref": {"type": "string"},
+        "environment": {
+          "enum": ["development", "sandbox", "staging", "production"]
+        },
+        "operation": {"enum": ["create_draft", "schedule", "publish"]},
+        "schedule_window": {"$ref": "#/$defs/ScheduleWindow"},
+        "transformation_version": {"type": "string"},
+        "public_fields": {"type": "object"},
+        "created_at": {"type": "string", "format": "date-time"},
+        "content_checksum": {"$ref": "#/$defs/Checksum"}
+      }
+    },
+    "ApprovalRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "artifact_type",
+        "approval_id",
+        "decision",
+        "brand_id",
+        "manifest_id",
+        "manifest_checksum",
+        "artifact_id",
+        "artifact_checksum",
+        "destination_ref",
+        "environment",
+        "operation",
+        "schedule_window",
+        "approver_id",
+        "authority_role",
+        "conditions",
+        "decided_at",
+        "expires_at",
+        "content_checksum"
+      ],
+      "properties": {
+        "schema_version": {"const": "1.0"},
+        "artifact_type": {"const": "approval_record"},
+        "approval_id": {"type": "string"},
+        "decision": {"enum": ["APPROVED", "CHANGES_REQUESTED", "REJECTED"]},
+        "brand_id": {"type": "string", "pattern": "^brand_"},
+        "manifest_id": {"type": "string"},
+        "manifest_checksum": {"$ref": "#/$defs/Checksum"},
+        "artifact_id": {"type": "string"},
+        "artifact_checksum": {"$ref": "#/$defs/Checksum"},
+        "destination_ref": {"type": "string"},
+        "environment": {"type": "string"},
+        "operation": {"type": "string"},
+        "schedule_window": {"$ref": "#/$defs/ScheduleWindow"},
+        "approver_id": {"type": "string"},
+        "authority_role": {"type": "string"},
+        "conditions": {"type": "array"},
+        "decided_at": {"type": "string", "format": "date-time"},
+        "expires_at": {"type": "string", "format": "date-time"},
+        "content_checksum": {"$ref": "#/$defs/Checksum"}
+      }
+    },
+    "PublicationReceipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "artifact_type",
+        "receipt_id",
+        "brand_id",
+        "manifest_id",
+        "manifest_checksum",
+        "approval_id",
+        "approval_checksum",
+        "artifact_id",
+        "artifact_checksum",
+        "destination_ref",
+        "environment",
+        "operation",
+        "adapter_version",
+        "idempotency_key",
+        "request_binding_checksum",
+        "external_id",
+        "external_url",
+        "state",
+        "published_at",
+        "validation",
+        "replayed",
+        "content_checksum"
+      ],
+      "properties": {
+        "schema_version": {"const": "1.0"},
+        "artifact_type": {"const": "publication_receipt"},
+        "receipt_id": {"type": "string"},
+        "brand_id": {"type": "string", "pattern": "^brand_"},
+        "manifest_id": {"type": "string"},
+        "manifest_checksum": {"$ref": "#/$defs/Checksum"},
+        "approval_id": {"type": "string"},
+        "approval_checksum": {"$ref": "#/$defs/Checksum"},
+        "artifact_id": {"type": "string"},
+        "artifact_checksum": {"$ref": "#/$defs/Checksum"},
+        "destination_ref": {"type": "string"},
+        "environment": {"type": "string"},
+        "operation": {"type": "string"},
+        "adapter_version": {"type": "string"},
+        "idempotency_key": {"type": "string"},
+        "request_binding_checksum": {"$ref": "#/$defs/Checksum"},
+        "external_id": {"type": "string"},
+        "external_url": {"type": "string"},
+        "state": {
+          "enum": [
+            "REQUESTED",
+            "ACCEPTED",
+            "PROCESSING",
+            "SCHEDULED",
+            "PUBLISHED",
+            "FAILED",
+            "UNKNOWN"
+          ]
+        },
+        "published_at": {"type": "string", "format": "date-time"},
+        "validation": {"type": "object"},
+        "replayed": {"type": "boolean"},
+        "content_checksum": {"$ref": "#/$defs/Checksum"}
+      }
+    }
+  }
+}

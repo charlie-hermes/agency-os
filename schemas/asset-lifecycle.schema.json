@@ -1,0 +1,145 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agency-os.invalid/schemas/asset-lifecycle.schema.json",
+  "title": "Agency OS asset lifecycle",
+  "oneOf": [
+    {"$ref": "#/$defs/DraftAssetPackage"},
+    {"$ref": "#/$defs/CompleteAssetPackage"},
+    {"$ref": "#/$defs/QAPassedAssetPackage"}
+  ],
+  "$defs": {
+    "Checksum": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "Actor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["actor_type", "actor_id"],
+      "properties": {
+        "actor_type": {"enum": ["human", "agent", "system"]},
+        "actor_id": {"type": "string", "minLength": 1}
+      }
+    },
+    "AssetPayload": {
+      "type": "object",
+      "required": ["public_fields", "internal_notes"],
+      "properties": {
+        "public_fields": {"type": "object"},
+        "internal_notes": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "claim_register": {"type": "array", "items": {"type": "object"}},
+        "source_register": {"type": "array", "items": {"type": "string"}},
+        "metadata": {"type": "object"},
+        "internal_links": {"type": "array"},
+        "structured_data": {"type": ["object", "array", "null"]},
+        "upstream_checksum": {"$ref": "#/$defs/Checksum"},
+        "qa_verdict_id": {"type": "string"},
+        "qa_verdict_checksum": {"$ref": "#/$defs/Checksum"},
+        "reviewed_checksum": {"$ref": "#/$defs/Checksum"}
+      }
+    },
+    "AssetEnvelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "artifact_type",
+        "artifact_id",
+        "brand_id",
+        "campaign_id",
+        "asset_id",
+        "paperclip_issue_id",
+        "created_at",
+        "created_by",
+        "source_artifact_ids",
+        "status",
+        "payload",
+        "content_checksum"
+      ],
+      "properties": {
+        "schema_version": {"const": "1.0"},
+        "artifact_type": {"type": "string"},
+        "artifact_id": {"type": "string", "minLength": 1},
+        "brand_id": {"type": "string", "pattern": "^brand_"},
+        "campaign_id": {"type": "string", "minLength": 1},
+        "asset_id": {"type": "string", "minLength": 1},
+        "paperclip_issue_id": {"type": "string", "minLength": 1},
+        "created_at": {"type": "string", "format": "date-time"},
+        "created_by": {"$ref": "#/$defs/Actor"},
+        "source_artifact_ids": {"type": "array", "items": {"type": "string"}},
+        "status": {
+          "enum": ["draft", "review", "approved", "rejected", "superseded"]
+        },
+        "payload": {"$ref": "#/$defs/AssetPayload"},
+        "content_checksum": {"$ref": "#/$defs/Checksum"}
+      }
+    },
+    "DraftAssetPackage": {
+      "allOf": [
+        {"$ref": "#/$defs/AssetEnvelope"},
+        {
+          "properties": {
+            "artifact_type": {"const": "draft_asset_package"},
+            "payload": {
+              "allOf": [
+                {"$ref": "#/$defs/AssetPayload"},
+                {"required": ["claim_register", "source_register"]}
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "CompleteAssetPackage": {
+      "allOf": [
+        {"$ref": "#/$defs/AssetEnvelope"},
+        {
+          "properties": {
+            "artifact_type": {"const": "complete_asset_package"},
+            "payload": {
+              "allOf": [
+                {"$ref": "#/$defs/AssetPayload"},
+                {
+                  "required": [
+                    "claim_register",
+                    "source_register",
+                    "metadata",
+                    "internal_links",
+                    "structured_data",
+                    "upstream_checksum"
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "QAPassedAssetPackage": {
+      "allOf": [
+        {"$ref": "#/$defs/AssetEnvelope"},
+        {
+          "properties": {
+            "artifact_type": {"const": "qa_passed_asset_package"},
+            "status": {"const": "approved"},
+            "payload": {
+              "allOf": [
+                {"$ref": "#/$defs/AssetPayload"},
+                {
+                  "required": [
+                    "qa_verdict_id",
+                    "qa_verdict_checksum",
+                    "reviewed_checksum"
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ]
+    }
+  }
+}

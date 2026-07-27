@@ -1,0 +1,17 @@
+{
+  "schema_version": "1.0",
+  "roles": [
+    {"role_id": "agency-director", "display_name": "Hermes Agency Director", "lifecycle": "runtime", "profile_path": "roles/agency-director"},
+    {"role_id": "technical-implementation-specialist", "display_name": "Codex Technical Implementation Specialist", "lifecycle": "build_repair", "profile_path": "roles/technical-implementation-specialist"},
+    {"role_id": "platform-assurance-reviewer", "display_name": "Platform Assurance Reviewer", "lifecycle": "independent_gate", "profile_path": "roles/platform-assurance-reviewer"},
+    {"role_id": "brand-brief-steward", "display_name": "Brand and Brief Steward", "lifecycle": "runtime", "profile_path": "roles/brand-brief-steward"},
+    {"role_id": "search-content-strategist", "display_name": "Search and Content Strategist", "lifecycle": "runtime", "profile_path": "roles/search-content-strategist"},
+    {"role_id": "content-producer", "display_name": "Content Producer", "lifecycle": "runtime", "profile_path": "roles/content-producer"},
+    {"role_id": "search-answer-optimiser", "display_name": "Search and Answer Optimiser", "lifecycle": "runtime", "profile_path": "roles/search-answer-optimiser"},
+    {"role_id": "visual-creative-specialist", "display_name": "Visual and Creative Specialist", "lifecycle": "runtime_optional_branch", "profile_path": "roles/visual-creative-specialist"},
+    {"role_id": "editorial-integrity-qa", "display_name": "Editorial Integrity QA", "lifecycle": "runtime_independent_review", "profile_path": "roles/editorial-integrity-qa"},
+    {"role_id": "social-amplifier", "display_name": "Social Amplifier", "lifecycle": "runtime_optional_branch", "profile_path": "roles/social-amplifier"},
+    {"role_id": "publishing-operator", "display_name": "Publishing Operator", "lifecycle": "runtime_restricted_execution", "profile_path": "roles/publishing-operator"},
+    {"role_id": "growth-intelligence-analyst", "display_name": "Growth Intelligence Analyst", "lifecycle": "runtime", "profile_path": "roles/growth-intelligence-analyst"}
+  ]
+}

@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+python3 -m compileall -q agency_os tests
+python3 -m unittest discover -s tests -v
+python3 -m agency_os.demo
