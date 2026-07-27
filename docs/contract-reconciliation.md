@@ -96,11 +96,12 @@ Capability content is resolved by ID from an authoritative registry; immutable
 grant bindings and mutable suspension state are not accepted from the caller.
 
 Before dispatch, it revalidates capability, approval, checksum, destination,
-schedule, and idempotency. The fictional in-process authority samples a trusted
-clock inside its dispatch lock, rechecks capability, approval, and schedule time
-windows, then invokes the adapter. Suspension and dispatch are ordered by that
-same lock. An allow decision is single-use for the bound request. Unknown or
-partial external results must be reconciled before retry.
+schedule, and idempotency. The authority samples a trusted clock inside its
+dispatch boundary, rechecks capability, approval, and schedule time windows,
+then invokes the adapter. The SQLite authority persists grants and suspensions
+and orders that boundary across processes on one host. An allow decision is
+single-use for the bound request. Unknown or partial external results must be
+reconciled before retry.
 
 ## Phase boundary
 

@@ -20,13 +20,15 @@
   and data class for a bounded time. Missing, suspended, expired, future,
   checksum-invalid, or mismatched grants fail closed. The gateway resolves the
   grant by ID rather than accepting caller-supplied grant content. After action
-  reservation, the in-process authority samples a trusted dispatch-time clock
-  and serializes final active, checksum, and capability-window checks with
-  adapter invocation. The same sampled time revalidates approval expiry and the
-  schedule window. Suspension that wins the dispatch lock prevents the call;
-  suspension after dispatch starts becomes effective when the call finishes.
-  Production requires equivalent enforcement at the credential and egress
-  boundary across deployed workers.
+  reservation, the authority samples a trusted dispatch-time clock and
+  serializes final active, checksum, and capability-window checks with adapter
+  invocation. The same sampled time revalidates approval expiry and the schedule
+  window. The fictional in-memory implementation coordinates threads. The
+  durable SQLite implementation persists grants and suspensions and orders
+  dispatch with suspension across processes on one host. Its database must use
+  owner-only local storage and must not be shared over a network filesystem.
+  Production still requires topology-appropriate shared authority plus
+  enforcement at the credential and egress boundary across deployed workers.
 - The action gateway also checks role, brand, environment, destination,
   operation, approval expiry, manifest checksum, artifact checksum, and
   schedule. Because Phase 0/1 has no typed condition evaluator, an Approval
