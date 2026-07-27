@@ -165,9 +165,10 @@ documented in
 of authenticated mutation against installed Paperclip or Buzz services.
 
 The second bounded slice records the exact read-only target-host contract:
-Paperclip `2026.720.0`, its versioned paths, executable, complete service-unit
-and package/route/reference checksums, exact reviewed route surface, private
-authenticated health shape, and the current Buzz binary and command surface.
+Paperclip `2026.720.0`, its versioned paths, executable, primary unit and exact
+systemd drop-in graph, package/route/reference checksums, exact reviewed route
+surface, private authenticated health shape, and the current Buzz binary and
+command surface.
 A local verifier rechecks those facts and fails closed on drift without credentials,
 messages or task mutation. This admits the installed interface contract; it does
 not yet prove authenticated task, approval or Buzz lifecycle integration.

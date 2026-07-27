@@ -6,10 +6,12 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from agency_os.platform_compatibility import (
     DEFAULT_MANIFEST,
     _verify_file,
+    _verify_paperclip_service,
     _verify_paperclip_surface,
     PlatformCompatibilityError,
     admit_installed_platform_manifest,
@@ -105,12 +107,23 @@ class PlatformCompatibilityTests(unittest.TestCase):
 
     def test_executable_and_service_unit_bytes_are_pinned(self) -> None:
         service = self.manifest["paperclip"]["service"]
+        self.assertEqual(service["drop_ins"], [])
         for field in ("executable_sha256", "fragment_sha256"):
             with self.subTest(field=field):
                 changed = copy.deepcopy(self.manifest)
                 changed["paperclip"]["service"][field] = "f" * 64
                 with self.assertRaises(PlatformCompatibilityError):
                     admit_installed_platform_manifest(changed)
+
+        changed = copy.deepcopy(self.manifest)
+        changed["paperclip"]["service"]["drop_ins"] = [
+            {
+                "path": "/etc/systemd/system/paperclip.service.d/override.conf",
+                "sha256": "f" * 64,
+            }
+        ]
+        with self.assertRaises(PlatformCompatibilityError):
+            admit_installed_platform_manifest(changed)
 
         with tempfile.TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / "pinned-file"
@@ -121,6 +134,115 @@ class PlatformCompatibilityTests(unittest.TestCase):
             path.write_bytes(b"replacement bytes")
             with self.assertRaisesRegex(PlatformCompatibilityError, "checksum drift"):
                 _verify_file(path, expected, "test file")
+
+    def test_effective_service_drop_in_graph_fails_closed_before_probes(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            executable_target = root / "paperclip.js"
+            executable_target.write_bytes(b"reviewed executable")
+            executable = root / "paperclipai"
+            executable.symlink_to(executable_target.name)
+            fragment = root / "paperclip.service"
+            fragment.write_text("[Service]\nExecStart=/reviewed\n")
+            first_drop_in = root / "10-first.conf"
+            first_drop_in.write_text("[Service]\nExecStartPre=/usr/bin/test\n")
+            second_drop_in = root / "20-second.conf"
+            second_drop_in.write_text("[Service]\nProtectSystem=strict\n")
+
+            service = copy.deepcopy(self.manifest["paperclip"]["service"])
+            service.update(
+                {
+                    "executable": str(executable),
+                    "executable_resolved_path": str(executable_target),
+                    "executable_sha256": hashlib.sha256(
+                        executable_target.read_bytes()
+                    ).hexdigest(),
+                    "fragment_path": str(fragment),
+                    "fragment_sha256": hashlib.sha256(
+                        fragment.read_bytes()
+                    ).hexdigest(),
+                    "data_root": str(root / "data"),
+                    "workspace_root": str(root / "workspaces"),
+                    "drop_ins": [
+                        {
+                            "path": str(first_drop_in),
+                            "sha256": hashlib.sha256(
+                                first_drop_in.read_bytes()
+                            ).hexdigest(),
+                        },
+                        {
+                            "path": str(second_drop_in),
+                            "sha256": hashlib.sha256(
+                                second_drop_in.read_bytes()
+                            ).hexdigest(),
+                        },
+                    ],
+                }
+            )
+
+            def service_output(drop_in_paths: list[Path]) -> str:
+                return "\n".join(
+                    (
+                        "ActiveState=active",
+                        "SubState=running",
+                        "User=paperclip",
+                        "Group=paperclip",
+                        f"FragmentPath={fragment}",
+                        "DropInPaths=" + " ".join(map(str, drop_in_paths)),
+                        "ProtectSystem=strict",
+                        "ProtectHome=yes",
+                        "NoNewPrivileges=yes",
+                        f"WorkingDirectory={root / 'data'}",
+                        f"ReadWritePaths={root / 'data'} {root / 'workspaces'}",
+                        (
+                            f"ExecStart={{ path={executable} ; argv[]={executable} "
+                            f"run -d {root / 'data'} -i default --no-repair ; "
+                            "ignore_errors=no }"
+                        ),
+                    )
+                )
+
+            with patch(
+                "agency_os.platform_compatibility._run_text",
+                return_value=service_output([first_drop_in, second_drop_in]),
+            ) as run_text:
+                _verify_paperclip_service(service)
+            self.assertIn("DropInPaths", run_text.call_args.args[0])
+
+            first_drop_in.write_text("[Service]\nExecStartPre=/bin/false\n")
+            with patch(
+                "agency_os.platform_compatibility._run_text",
+                return_value=service_output([first_drop_in, second_drop_in]),
+            ), self.assertRaisesRegex(PlatformCompatibilityError, "checksum drift"):
+                _verify_paperclip_service(service)
+            first_drop_in.write_text("[Service]\nExecStartPre=/usr/bin/test\n")
+
+            unexpected = root / "90-unreviewed.conf"
+            unexpected.write_text("[Service]\nEnvironmentFile=/tmp/unreviewed\n")
+            with patch(
+                "agency_os.platform_compatibility._run_text",
+                return_value=service_output(
+                    [first_drop_in, second_drop_in, unexpected]
+                ),
+            ), self.assertRaisesRegex(PlatformCompatibilityError, "drop-in set"):
+                _verify_paperclip_service(service)
+
+            with patch(
+                "agency_os.platform_compatibility._run_text",
+                return_value=service_output([second_drop_in, first_drop_in]),
+            ), self.assertRaisesRegex(PlatformCompatibilityError, "drop-in set"):
+                _verify_paperclip_service(service)
+
+            missing_drop_in_property = "\n".join(
+                line
+                for line in service_output([first_drop_in, second_drop_in]).splitlines()
+                if not line.startswith("DropInPaths=")
+            )
+            with patch(
+                "agency_os.platform_compatibility._run_text",
+                return_value=missing_drop_in_property,
+            ), self.assertRaisesRegex(PlatformCompatibilityError, "did not report"):
+                _verify_paperclip_service(service)
 
     def test_buzz_binary_command_or_authority_drift_fails_closed(self) -> None:
         changed = copy.deepcopy(self.manifest)

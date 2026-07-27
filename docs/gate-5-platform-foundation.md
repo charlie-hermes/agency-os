@@ -31,8 +31,8 @@ The next bounded slice records a non-secret, read-only contract from target host
 `paperclip-511e4513` in `config/installed-platforms.json`:
 
 - Paperclip package `2026.720.0`, its versioned root, package, lockfile, resolved
-  executable and complete service-unit checksums, exact service account,
-  data/workspace roots and systemd hardening;
+  executable, primary unit fragment and exact ordered systemd drop-in graph
+  checksums, exact service account, data/workspace roots and systemd hardening;
 - the private authenticated deployment health shape and absence of an active
   bootstrap invite;
 - checksums for the installed health, identity, issue, approval and cost routes
@@ -48,8 +48,10 @@ The next bounded slice records a non-secret, read-only contract from target host
 fields, requires private/authenticated/ready Paperclip health, preserves
 Paperclip as decision authority and denies Buzz `--broadcast`. Reviewed identity
 or interface drift fails closed. `scripts/verify-installed-platforms` rechecks
-the package/source, executable and unit hashes, systemd identity and hardening,
-private health response, Buzz binary and every required target-host command option.
+the package/source, executable, primary unit and every admitted drop-in hash,
+systemd identity and hardening, private health response, Buzz binary and every
+required target-host command option. The reviewed target currently admits no
+drop-ins, so any new drop-in fails before the health or Buzz probes.
 
 The live check is read-only. It performs no authenticated task or approval call,
 creates no Buzz channel or message, and reports `real_external_writes: false`.

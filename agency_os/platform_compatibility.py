@@ -225,6 +225,37 @@ def validate_installed_platform_manifest(
         service.get("executable_sha256"),
         "paperclip.service.executable_sha256",
     )
+    drop_ins = service.get("drop_ins")
+    if not isinstance(drop_ins, list):
+        raise PlatformCompatibilityError(
+            "paperclip.service.drop_ins must be an array"
+        )
+    drop_in_paths: set[Path] = set()
+    for index, item in enumerate(drop_ins):
+        drop_in = _require_mapping(item, f"paperclip.service.drop_ins[{index}]")
+        if set(drop_in) != {"path", "sha256"}:
+            raise PlatformCompatibilityError(
+                "Paperclip service drop-in entries require only path and sha256"
+            )
+        drop_in_path = Path(
+            _require_string(
+                drop_in.get("path"),
+                f"paperclip.service.drop_ins[{index}].path",
+            )
+        )
+        if not drop_in_path.is_absolute():
+            raise PlatformCompatibilityError(
+                "Paperclip service drop-in paths must be absolute"
+            )
+        if drop_in_path in drop_in_paths:
+            raise PlatformCompatibilityError(
+                "Paperclip service drop-in paths must be unique"
+            )
+        drop_in_paths.add(drop_in_path)
+        _validate_sha256(
+            drop_in.get("sha256"),
+            f"paperclip.service.drop_ins[{index}].sha256",
+        )
 
     executable_path = Path(service["executable"])
     resolved_executable_path = Path(service["executable_resolved_path"])
@@ -431,14 +462,9 @@ def _verify_paperclip_surface(
         )
 
 
-def verify_live_installed_platforms(
-    manifest: Mapping[str, Any],
-) -> dict[str, Any]:
-    """Re-run the read-only target-host checks represented by the manifest."""
+def _verify_paperclip_service(service: Mapping[str, Any]) -> None:
+    """Verify the executable and complete effective systemd unit file graph."""
 
-    record = admit_installed_platform_manifest(manifest)
-    paperclip = record["paperclip"]
-    service = paperclip["service"]
     executable_path = Path(service["executable"])
     _verify_file(
         executable_path,
@@ -450,8 +476,116 @@ def verify_live_installed_platforms(
     _verify_file(
         Path(service["fragment_path"]),
         service["fragment_sha256"],
-        "Paperclip service unit",
+        "Paperclip service unit fragment",
     )
+
+    service_output = _run_text(
+        (
+            "systemctl",
+            "show",
+            service["unit"],
+            "-p",
+            "ActiveState",
+            "-p",
+            "SubState",
+            "-p",
+            "User",
+            "-p",
+            "Group",
+            "-p",
+            "FragmentPath",
+            "-p",
+            "DropInPaths",
+            "-p",
+            "ProtectSystem",
+            "-p",
+            "ProtectHome",
+            "-p",
+            "NoNewPrivileges",
+            "-p",
+            "WorkingDirectory",
+            "-p",
+            "ReadWritePaths",
+            "-p",
+            "ExecStart",
+            "--no-pager",
+        )
+    )
+    service_facts = {}
+    for line in service_output.splitlines():
+        if "=" in line:
+            key, value = line.split("=", 1)
+            if key in service_facts:
+                raise PlatformCompatibilityError(
+                    f"Paperclip service property {key!r} was reported more than once"
+                )
+            service_facts[key] = value
+
+    if "DropInPaths" not in service_facts:
+        raise PlatformCompatibilityError(
+            "Paperclip service did not report its drop-in graph"
+        )
+    observed_drop_in_paths = service_facts.pop("DropInPaths").split()
+    expected_drop_ins = service["drop_ins"]
+    expected_drop_in_paths = [item["path"] for item in expected_drop_ins]
+    if observed_drop_in_paths != expected_drop_in_paths:
+        raise PlatformCompatibilityError(
+            "Paperclip service drop-in set or order drift"
+        )
+    for item in expected_drop_ins:
+        _verify_file(
+            Path(item["path"]),
+            item["sha256"],
+            "Paperclip service drop-in",
+        )
+
+    exec_start = service_facts.pop("ExecStart", "")
+    expected_read_write_paths = " ".join(
+        (
+            service["data_root"],
+            service["workspace_root"],
+        )
+    )
+    expected_service_facts = {
+        "ActiveState": "active",
+        "SubState": "running",
+        "User": service["user"],
+        "Group": service["group"],
+        "FragmentPath": service["fragment_path"],
+        "ProtectSystem": "strict",
+        "ProtectHome": "yes",
+        "NoNewPrivileges": "yes",
+        "WorkingDirectory": service["data_root"],
+        "ReadWritePaths": expected_read_write_paths,
+    }
+    if service_facts != expected_service_facts:
+        raise PlatformCompatibilityError(
+            "Paperclip service identity or hardening drift"
+        )
+    expected_argv = (
+        f'{service["executable"]} run '
+        f'-d {service["data_root"]} '
+        f'-i {service["instance"]} --no-repair'
+    )
+    exec_match = re.match(
+        r"^\{ path=(\S+) ; argv\[\]=(.*?) ; ignore_errors=", exec_start
+    )
+    if exec_match is None or exec_match.groups() != (
+        service["executable"],
+        expected_argv,
+    ):
+        raise PlatformCompatibilityError("Paperclip service command drift")
+
+
+def verify_live_installed_platforms(
+    manifest: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Re-run the read-only target-host checks represented by the manifest."""
+
+    record = admit_installed_platform_manifest(manifest)
+    paperclip = record["paperclip"]
+    service = paperclip["service"]
+    _verify_paperclip_service(service)
 
     package_root = Path(paperclip["package_root"])
     package_json_path = Path(paperclip["package_json_path"])
@@ -482,78 +616,6 @@ def verify_live_installed_platforms(
         package_root / _PAPERCLIP_SOURCE_PATHS["cost_routes"],
         paperclip["api_surface"],
     )
-    service_output = _run_text(
-        (
-            "systemctl",
-            "show",
-            paperclip["service"]["unit"],
-            "-p",
-            "ActiveState",
-            "-p",
-            "SubState",
-            "-p",
-            "User",
-            "-p",
-            "Group",
-            "-p",
-            "FragmentPath",
-            "-p",
-            "ProtectSystem",
-            "-p",
-            "ProtectHome",
-            "-p",
-            "NoNewPrivileges",
-            "-p",
-            "WorkingDirectory",
-            "-p",
-            "ReadWritePaths",
-            "-p",
-            "ExecStart",
-            "--no-pager",
-        )
-    )
-    service_facts = {}
-    for line in service_output.splitlines():
-        if "=" in line:
-            key, value = line.split("=", 1)
-            service_facts[key] = value
-    exec_start = service_facts.pop("ExecStart", "")
-    expected_read_write_paths = " ".join(
-        (
-            paperclip["service"]["data_root"],
-            paperclip["service"]["workspace_root"],
-        )
-    )
-    expected_service_facts = {
-        "ActiveState": "active",
-        "SubState": "running",
-        "User": paperclip["service"]["user"],
-        "Group": paperclip["service"]["group"],
-        "FragmentPath": paperclip["service"]["fragment_path"],
-        "ProtectSystem": "strict",
-        "ProtectHome": "yes",
-        "NoNewPrivileges": "yes",
-        "WorkingDirectory": paperclip["service"]["data_root"],
-        "ReadWritePaths": expected_read_write_paths,
-    }
-    if service_facts != expected_service_facts:
-        raise PlatformCompatibilityError(
-            "Paperclip service identity or hardening drift"
-        )
-    expected_argv = (
-        f'{paperclip["service"]["executable"]} run '
-        f'-d {paperclip["service"]["data_root"]} '
-        f'-i {paperclip["service"]["instance"]} --no-repair'
-    )
-    exec_match = re.match(
-        r"^\{ path=(\S+) ; argv\[\]=(.*?) ; ignore_errors=", exec_start
-    )
-    if exec_match is None or exec_match.groups() != (
-        paperclip["service"]["executable"],
-        expected_argv,
-    ):
-        raise PlatformCompatibilityError("Paperclip service command drift")
-
     try:
         with urllib.request.urlopen(
             paperclip["health"]["url"], timeout=5
