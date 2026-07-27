@@ -154,7 +154,8 @@ real role and tenant.
 
 **Status:** in progress.
 
-The first fictional local slice adds typed Paperclip task authority, typed
+The first fictional local slice adds typed Paperclip task authority with a
+versioned brand approver policy, deadline-enforced and restartable
 non-authoritative Buzz context with decision write-back, persistent tenant
 evidence and tenant-scoped audit events. It is documented in
 `docs/gate-5-platform-foundation.md`. This is reference behavior, not evidence
@@ -178,7 +179,7 @@ target VM before activation claims are made.
 
 ### Gate 6 — governed product-decision workshop
 
-**Status:** pending Gate 4; design recommendation received.
+**Status:** pending Gate 5; design recommendation received.
 
 Use OpenAI Responses API and Agents SDK for structured, evidence-backed
 research behind a self-owned, read-only Agency OS Decision MCP broker.

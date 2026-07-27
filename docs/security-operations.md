@@ -92,6 +92,16 @@
   unless Linux, `/proc`, and `SO_PEERCRED` are available, and the same command is
   required in Ubuntu GitHub Actions. macOS and Windows are not supported
   validation hosts for this gate.
+- The fictional Gate 5 Paperclip boundary accepts a task approval only from an
+  actor named in the current immutable brand approver-policy revision. Each
+  brand has one append-only policy lineage. Approval creation and task closure
+  both re-read that active revision; alternate IDs, unlisted actors, legacy
+  unbound records and revision drift fail without task or closure-audit
+  mutation. The fictional Buzz boundary persists context and archive state in
+  Paperclip-shaped storage, derives decision time from authority clocks, resumes
+  retained context after adapter restart, rejects expired or future-dated
+  activity, and prevents elapsed-deadline bypass through backdated direct
+  write-back without adding a decision or audit record.
 - Audit records contain identifiers, checksums, state, and reason codes, never
   credentials or client content.
 

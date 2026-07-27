@@ -301,13 +301,49 @@
       "expected_evidence": "no approval alternative can close the protected task"
     },
     {
+      "id": "PAPERCLIP-APPROVER-POLICY-001",
+      "phase": 5,
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "fixture": "unlisted actor, named approver and changed brand approver-policy revision",
+      "command": "python3 -m unittest tests.test_platform_adapters.PlatformAdapterTests.test_approver_catalogue_and_policy_drift_control_closure",
+      "expected_evidence": "unlisted and stale-policy approvals cannot mutate task or closure audit; a current named approver can close"
+    },
+    {
+      "id": "PAPERCLIP-APPROVAL-LEGACY-001",
+      "phase": 5,
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "fixture": "checksum-valid legacy approval without policy binding plus a forged unlisted approver record",
+      "command": "python3 -m unittest tests.test_platform_adapters.PlatformAdapterTests.test_legacy_approval_without_policy_binding_is_rejected",
+      "expected_evidence": "legacy and forged approvals both leave task and closure audit unchanged"
+    },
+    {
       "id": "BUZZ-AUTHORITY-001",
       "phase": 5,
       "owner": "platform-assurance-reviewer",
       "release_blocker": true,
-      "fixture": "typed Buzz context and immutable Paperclip decision summary",
+      "fixture": "persisted typed Buzz context resumed by a fresh adapter before immutable Paperclip decision write-back",
       "command": "python3 -m unittest tests.test_platform_adapters.PlatformAdapterTests.test_buzz_decision_is_written_to_paperclip_without_task_mutation",
-      "expected_evidence": "decision survives restart while task authority remains byte-for-byte unchanged"
+      "expected_evidence": "fresh Buzz and Paperclip adapters resume context and persist the decision while task authority remains byte-for-byte unchanged"
+    },
+    {
+      "id": "BUZZ-DEADLINE-001",
+      "phase": 5,
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "fixture": "expired adapter decision plus direct backdated Paperclip write-back",
+      "command": "python3 -m unittest tests.test_platform_adapters.PlatformAdapterTests.test_buzz_deadline_is_enforced_by_buzz_and_paperclip",
+      "expected_evidence": "both paths deny after the authority deadline with no decision or audit mutation"
+    },
+    {
+      "id": "BUZZ-ARCHIVE-RESTART-001",
+      "phase": 5,
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "fixture": "archived persisted context opened through fresh Buzz and Paperclip adapters",
+      "command": "python3 -m unittest tests.test_platform_adapters.PlatformAdapterTests.test_archived_buzz_context_remains_closed_after_restart",
+      "expected_evidence": "archive state survives restart and later decision write-back remains absent"
     },
     {
       "id": "EVIDENCE-PERSISTENCE-001",

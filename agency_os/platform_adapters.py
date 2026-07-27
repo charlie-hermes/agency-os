@@ -121,6 +121,48 @@ def make_paperclip_task(
     )
 
 
+def make_approver_policy(
+    *,
+    policy_id: str,
+    brand_id: str,
+    revision: int,
+    permitted_approver_ids: Sequence[str],
+    issued_by: str,
+    effective_at: str,
+    previous_policy_checksum: str | None = None,
+) -> dict[str, Any]:
+    """Create one immutable revision of a brand-owned approver catalogue."""
+
+    if not policy_id or not brand_id.startswith("brand_") or not issued_by:
+        raise ContractError("approver policy identity, brand, and issuer are required")
+    if isinstance(revision, bool) or not isinstance(revision, int) or revision < 1:
+        raise ContractError("approver policy revision must be a positive integer")
+    if not permitted_approver_ids or len(set(permitted_approver_ids)) != len(
+        permitted_approver_ids
+    ):
+        raise ContractError("approver policy requires unique permitted actors")
+    if any(not actor_id for actor_id in permitted_approver_ids):
+        raise ContractError("approver policy actor IDs cannot be empty")
+    if revision == 1 and previous_policy_checksum is not None:
+        raise ContractError("first approver policy revision cannot have a predecessor")
+    if revision > 1 and not previous_policy_checksum:
+        raise ContractError("later approver policy revision requires its predecessor")
+    parse_time(effective_at)
+    return finalize_record(
+        {
+            "schema_version": "1.0",
+            "artifact_type": "approver_policy",
+            "policy_id": policy_id,
+            "brand_id": brand_id,
+            "revision": revision,
+            "previous_policy_checksum": previous_policy_checksum,
+            "permitted_approver_ids": sorted(permitted_approver_ids),
+            "issued_by": issued_by,
+            "effective_at": effective_at,
+        }
+    )
+
+
 def make_buzz_context_packet(
     *,
     context_id: str,
@@ -262,6 +304,16 @@ class _SQLitePlatformDatabase:
                     PRIMARY KEY (brand_id, issue_id, version),
                     UNIQUE (brand_id, issue_id, checksum)
                 );
+                CREATE TABLE IF NOT EXISTS paperclip_approver_policies (
+                    brand_id TEXT NOT NULL,
+                    policy_id TEXT NOT NULL,
+                    revision INTEGER NOT NULL,
+                    record_json TEXT NOT NULL,
+                    checksum TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    PRIMARY KEY (brand_id, policy_id, revision),
+                    UNIQUE (brand_id, policy_id, checksum)
+                );
                 CREATE TABLE IF NOT EXISTS paperclip_approvals (
                     brand_id TEXT NOT NULL,
                     approval_id TEXT NOT NULL,
@@ -277,6 +329,8 @@ class _SQLitePlatformDatabase:
                     issue_id TEXT NOT NULL,
                     record_json TEXT NOT NULL,
                     checksum TEXT NOT NULL,
+                    state TEXT NOT NULL DEFAULT 'open'
+                        CHECK (state IN ('open', 'archived')),
                     created_at TEXT NOT NULL,
                     PRIMARY KEY (brand_id, context_id)
                 );
@@ -306,6 +360,20 @@ class _SQLitePlatformDatabase:
                 );
                 """
             )
+            buzz_context_columns = {
+                str(row[1])
+                for row in connection.execute(
+                    "PRAGMA table_info(paperclip_buzz_contexts)"
+                ).fetchall()
+            }
+            if "state" not in buzz_context_columns:
+                connection.execute(
+                    """
+                    ALTER TABLE paperclip_buzz_contexts
+                    ADD COLUMN state TEXT NOT NULL DEFAULT 'open'
+                        CHECK (state IN ('open', 'archived'))
+                    """
+                )
             connection.commit()
         except self.error_type:
             raise
@@ -469,6 +537,82 @@ class FictionalPaperclipAdapter:
             principal, issue_id, expected_checksum, "paperclip.task.spend", mutate
         )
 
+    def register_approver_policy(
+        self, principal: Principal, policy: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        """Append one authority-owned approver policy revision."""
+
+        self._require_director(principal)
+        _validate_approver_policy(policy)
+        if policy["brand_id"] != principal.brand_id:
+            raise AuthorizationError("cross-tenant approver policy denied")
+        if policy["issued_by"] != principal.actor_id:
+            raise AuthorizationError("approver policy issuer does not match actor")
+        record = copy.deepcopy(dict(policy))
+        connection = self._database.connect()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                """
+                SELECT revision, record_json FROM paperclip_approver_policies
+                WHERE brand_id = ?
+                ORDER BY revision DESC LIMIT 1
+                """,
+                (principal.brand_id,),
+            ).fetchone()
+            if row is None:
+                if (
+                    record["revision"] != 1
+                    or record["previous_policy_checksum"] is not None
+                ):
+                    raise ContractError("first approver policy revision is invalid")
+            else:
+                latest_revision = int(row[0])
+                latest = json.loads(row[1])
+                if record["revision"] == latest_revision:
+                    if latest != record:
+                        raise ContractError("approver policy revision is immutable")
+                    connection.commit()
+                    return record
+                if (
+                    record["policy_id"] != latest["policy_id"]
+                    or record["revision"] != latest_revision + 1
+                    or record["previous_policy_checksum"]
+                    != latest["content_checksum"]
+                ):
+                    raise ContractError("approver policy revision chain is invalid")
+            connection.execute(
+                """
+                INSERT INTO paperclip_approver_policies (
+                    brand_id, policy_id, revision, record_json, checksum, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    principal.brand_id,
+                    record["policy_id"],
+                    record["revision"],
+                    canonical_bytes(record).decode("utf-8"),
+                    record["content_checksum"],
+                    record["effective_at"],
+                ),
+            )
+            self._insert_audit(
+                connection,
+                principal,
+                "paperclip.approver_policy.recorded",
+                f"{record['policy_id']}:{record['revision']}",
+            )
+            connection.commit()
+            return record
+        except (AuthorizationError, ContractError, PlatformAdapterError):
+            _rollback(connection)
+            raise
+        except (json.JSONDecodeError, sqlite3.Error, TypeError, ValueError) as exc:
+            _rollback(connection)
+            raise PlatformAdapterError("could not register approver policy") from exc
+        finally:
+            connection.close()
+
     def record_approval(
         self,
         principal: Principal,
@@ -476,6 +620,9 @@ class FictionalPaperclipAdapter:
         approval_id: str,
         issue_id: str,
         expected_task_checksum: str,
+        policy_id: str,
+        policy_revision: int,
+        policy_checksum: str,
         decision: str,
         decided_at: str,
         expires_at: str,
@@ -486,29 +633,52 @@ class FictionalPaperclipAdapter:
             raise ContractError("Paperclip approval_id is required")
         if decision not in {"APPROVED", "REJECTED"}:
             raise ContractError("Paperclip approval decision is invalid")
-        if parse_time(decided_at) >= parse_time(expires_at):
+        decision_time = parse_time(decided_at)
+        expiry_time = parse_time(expires_at)
+        if decision_time >= expiry_time:
             raise ContractError("Paperclip approval expiry must follow its decision")
-        current = self.get_task(principal, issue_id)
-        if current["content_checksum"] != expected_task_checksum:
-            raise ContractError("Paperclip approval task checksum drift")
-        approval = finalize_record(
-            {
-                "schema_version": "1.0",
-                "artifact_type": "paperclip_task_approval",
-                "approval_id": approval_id,
-                "brand_id": principal.brand_id,
-                "paperclip_issue_id": issue_id,
-                "task_checksum": expected_task_checksum,
-                "decision": decision,
-                "approver_id": principal.actor_id,
-                "authority_role": principal.role_id,
-                "decided_at": decided_at,
-                "expires_at": expires_at,
-            }
-        )
         connection = self._database.connect()
         try:
             connection.execute("BEGIN IMMEDIATE")
+            authority_time = _authority_now(self._clock)
+            if decision_time > authority_time or expiry_time <= authority_time:
+                raise ContractError(
+                    "Paperclip approval is outside its authority time window"
+                )
+            current = self._read_current_task(
+                connection, principal.brand_id, issue_id
+            )
+            if current["content_checksum"] != expected_task_checksum:
+                raise ContractError("Paperclip approval task checksum drift")
+            policy = self._read_active_approver_policy(
+                connection, principal.brand_id, policy_id
+            )
+            if (
+                policy["revision"] != policy_revision
+                or policy["content_checksum"] != policy_checksum
+                or parse_time(policy["effective_at"]) > decision_time
+            ):
+                raise ContractError("Paperclip approver policy is stale or ineffective")
+            if principal.actor_id not in policy["permitted_approver_ids"]:
+                raise AuthorizationError("actor is not permitted by approver policy")
+            approval = finalize_record(
+                {
+                    "schema_version": "1.0",
+                    "artifact_type": "paperclip_task_approval",
+                    "approval_id": approval_id,
+                    "brand_id": principal.brand_id,
+                    "paperclip_issue_id": issue_id,
+                    "task_checksum": expected_task_checksum,
+                    "policy_id": policy_id,
+                    "policy_revision": policy_revision,
+                    "policy_checksum": policy_checksum,
+                    "decision": decision,
+                    "approver_id": principal.actor_id,
+                    "authority_role": principal.role_id,
+                    "decided_at": decided_at,
+                    "expires_at": expires_at,
+                }
+            )
             row = connection.execute(
                 """
                 SELECT record_json FROM paperclip_approvals
@@ -544,7 +714,7 @@ class FictionalPaperclipAdapter:
             )
             connection.commit()
             return approval
-        except (AuthorizationError, ContractError, PlatformAdapterError):
+        except (AuthorizationError, ContractError, KeyError, PlatformAdapterError):
             _rollback(connection)
             raise
         except (json.JSONDecodeError, sqlite3.Error, TypeError, ValueError) as exc:
@@ -591,14 +761,24 @@ class FictionalPaperclipAdapter:
         _validate_buzz_context(packet)
         if packet["brand_id"] != principal.brand_id:
             raise AuthorizationError("cross-tenant Buzz context write-back denied")
-        current = self.get_task(principal, packet["paperclip_issue_id"])
-        if current["campaign_id"] != packet["campaign_id"]:
-            raise ContractError("Buzz context campaign does not match Paperclip")
+        if packet["created_by"] != principal.actor_id:
+            raise AuthorizationError("Buzz context author does not match actor")
         record = copy.deepcopy(dict(packet))
         context_id = record["context_id"]
         connection = self._database.connect()
         try:
             connection.execute("BEGIN IMMEDIATE")
+            authority_time = _authority_now(self._clock)
+            if (
+                parse_time(record["created_at"]) > authority_time
+                or parse_time(record["deadline"]) <= authority_time
+            ):
+                raise ContractError("Buzz context is outside its authority time window")
+            current = self._read_current_task(
+                connection, principal.brand_id, record["paperclip_issue_id"]
+            )
+            if current["campaign_id"] != record["campaign_id"]:
+                raise ContractError("Buzz context campaign does not match Paperclip")
             row = connection.execute(
                 """
                 SELECT record_json FROM paperclip_buzz_contexts
@@ -664,6 +844,68 @@ class FictionalPaperclipAdapter:
         finally:
             connection.close()
 
+    def get_buzz_context_state(self, principal: Principal, context_id: str) -> str:
+        connection = self._database.connect()
+        try:
+            row = connection.execute(
+                """
+                SELECT state FROM paperclip_buzz_contexts
+                WHERE brand_id = ? AND context_id = ?
+                """,
+                (principal.brand_id, context_id),
+            ).fetchone()
+            if row is None:
+                raise KeyError(context_id)
+            state = str(row[0])
+            if state not in {"open", "archived"}:
+                raise ContractError("stored Buzz context state is invalid")
+            return state
+        except (KeyError, ContractError, PlatformAdapterError):
+            raise
+        except sqlite3.Error as exc:
+            raise PlatformAdapterError("could not read Buzz context state") from exc
+        finally:
+            connection.close()
+
+    def archive_buzz_context(self, principal: Principal, context_id: str) -> None:
+        self._require_director(principal)
+        connection = self._database.connect()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                """
+                SELECT state FROM paperclip_buzz_contexts
+                WHERE brand_id = ? AND context_id = ?
+                """,
+                (principal.brand_id, context_id),
+            ).fetchone()
+            if row is None:
+                raise KeyError(context_id)
+            if row[0] == "archived":
+                connection.commit()
+                return
+            if row[0] != "open":
+                raise ContractError("stored Buzz context state is invalid")
+            connection.execute(
+                """
+                UPDATE paperclip_buzz_contexts SET state = 'archived'
+                WHERE brand_id = ? AND context_id = ?
+                """,
+                (principal.brand_id, context_id),
+            )
+            self._insert_audit(
+                connection, principal, "paperclip.buzz_context.archived", context_id
+            )
+            connection.commit()
+        except (AuthorizationError, ContractError, KeyError, PlatformAdapterError):
+            _rollback(connection)
+            raise
+        except sqlite3.Error as exc:
+            _rollback(connection)
+            raise PlatformAdapterError("could not archive Buzz context") from exc
+        finally:
+            connection.close()
+
     def record_buzz_decision(
         self, principal: Principal, decision: Mapping[str, Any]
     ) -> dict[str, Any]:
@@ -673,21 +915,47 @@ class FictionalPaperclipAdapter:
         _validate_buzz_decision(decision)
         if decision["brand_id"] != principal.brand_id:
             raise AuthorizationError("cross-tenant Buzz decision write-back denied")
-        context = self.get_buzz_context(principal, decision["context_id"])
-        if (
-            context["content_checksum"] != decision["context_checksum"]
-            or context["paperclip_issue_id"] != decision["paperclip_issue_id"]
-            or context["campaign_id"] != decision["campaign_id"]
-        ):
-            raise ContractError("Buzz decision does not match retained context")
-        current = self.get_task(principal, decision["paperclip_issue_id"])
-        if current["campaign_id"] != decision["campaign_id"]:
-            raise ContractError("Buzz decision campaign does not match Paperclip")
+        if decision["recorded_by"] != principal.actor_id:
+            raise AuthorizationError("Buzz decision author does not match actor")
         record = copy.deepcopy(dict(decision))
         decision_id = record["decision_id"]
         connection = self._database.connect()
         try:
             connection.execute("BEGIN IMMEDIATE")
+            context_row = connection.execute(
+                """
+                SELECT record_json, state FROM paperclip_buzz_contexts
+                WHERE brand_id = ? AND context_id = ?
+                """,
+                (principal.brand_id, record["context_id"]),
+            ).fetchone()
+            if context_row is None:
+                raise KeyError(record["context_id"])
+            context = json.loads(context_row[0])
+            _validate_buzz_context(context)
+            if context_row[1] != "open":
+                raise ContractError("Buzz context is already archived")
+            if (
+                context["content_checksum"] != record["context_checksum"]
+                or context["paperclip_issue_id"] != record["paperclip_issue_id"]
+                or context["campaign_id"] != record["campaign_id"]
+            ):
+                raise ContractError("Buzz decision does not match retained context")
+            authority_time = _authority_now(self._clock)
+            recorded_at = parse_time(record["recorded_at"])
+            deadline = parse_time(context["deadline"])
+            if (
+                authority_time >= deadline
+                or recorded_at >= deadline
+                or recorded_at < parse_time(context["created_at"])
+                or recorded_at > authority_time
+            ):
+                raise ContractError("Buzz decision is outside its authority time window")
+            current = self._read_current_task(
+                connection, principal.brand_id, record["paperclip_issue_id"]
+            )
+            if current["campaign_id"] != record["campaign_id"]:
+                raise ContractError("Buzz decision campaign does not match Paperclip")
             row = connection.execute(
                 """
                 SELECT record_json FROM paperclip_buzz_decisions
@@ -721,7 +989,7 @@ class FictionalPaperclipAdapter:
             )
             connection.commit()
             return record
-        except (AuthorizationError, ContractError, PlatformAdapterError):
+        except (AuthorizationError, ContractError, KeyError, PlatformAdapterError):
             _rollback(connection)
             raise
         except (json.JSONDecodeError, sqlite3.Error, TypeError, ValueError) as exc:
@@ -800,7 +1068,7 @@ class FictionalPaperclipAdapter:
             next_record.pop("content_checksum")
             next_record["version"] += 1
             next_record["previous_checksum"] = expected_checksum
-            next_record["updated_at"] = self._clock().isoformat()
+            next_record["updated_at"] = _authority_now(self._clock).isoformat()
             mutate(connection, next_record)
             next_record = finalize_record(next_record)
             _validate_task(next_record)
@@ -905,6 +1173,26 @@ class FictionalPaperclipAdapter:
                     f"Paperclip dependency {dependency_id!r} is not done"
                 )
 
+    @staticmethod
+    def _read_active_approver_policy(
+        connection: sqlite3.Connection, brand_id: str, policy_id: str
+    ) -> dict[str, Any]:
+        row = connection.execute(
+            """
+            SELECT record_json FROM paperclip_approver_policies
+            WHERE brand_id = ?
+            ORDER BY revision DESC LIMIT 1
+            """,
+            (brand_id,),
+        ).fetchone()
+        if row is None:
+            raise ContractError("Paperclip approver policy is missing")
+        policy = json.loads(row[0])
+        _validate_approver_policy(policy)
+        if policy["brand_id"] != brand_id or policy["policy_id"] != policy_id:
+            raise ContractError("stored approver policy binding is invalid")
+        return policy
+
     def _require_valid_approval(
         self,
         connection: sqlite3.Connection,
@@ -925,11 +1213,27 @@ class FictionalPaperclipAdapter:
             raise ContractError("Paperclip approval is missing")
         approval = json.loads(row[0])
         verify_record(approval)
+        policy_id = approval.get("policy_id")
+        if not isinstance(policy_id, str) or not policy_id:
+            raise ContractError("Paperclip approval has no approver policy binding")
+        policy = self._read_active_approver_policy(
+            connection, task["brand_id"], policy_id
+        )
+        authority_time = _authority_now(self._clock)
         if (
-            approval.get("paperclip_issue_id") != task["paperclip_issue_id"]
+            approval.get("artifact_type") != "paperclip_task_approval"
+            or approval.get("brand_id") != task["brand_id"]
+            or approval.get("paperclip_issue_id") != task["paperclip_issue_id"]
             or approval.get("task_checksum") != task_checksum
             or approval.get("decision") != "APPROVED"
-            or parse_time(approval["expires_at"]) <= self._clock()
+            or approval.get("authority_role") != "human-approver"
+            or approval.get("policy_revision") != policy["revision"]
+            or approval.get("policy_checksum") != policy["content_checksum"]
+            or approval.get("approver_id") not in policy["permitted_approver_ids"]
+            or parse_time(approval["decided_at"])
+            < parse_time(policy["effective_at"])
+            or parse_time(approval["decided_at"]) > authority_time
+            or parse_time(approval["expires_at"]) <= authority_time
         ):
             raise ContractError("Paperclip approval is invalid, stale, or rejected")
 
@@ -960,10 +1264,15 @@ class FictionalPaperclipAdapter:
 class FictionalBuzzAdapter:
     """Typed local Buzz collaboration surface with Paperclip write-back only."""
 
-    def __init__(self, paperclip: FictionalPaperclipAdapter) -> None:
+    def __init__(
+        self,
+        paperclip: FictionalPaperclipAdapter,
+        *,
+        clock: Callable[[], datetime] | None = None,
+    ) -> None:
         self._paperclip = paperclip
+        self._clock = clock or (lambda: datetime.now(timezone.utc))
         self._contexts: dict[tuple[str, str], dict[str, Any]] = {}
-        self._archived: set[tuple[str, str]] = set()
 
     def post_context(
         self, principal: Principal, packet: Mapping[str, Any]
@@ -973,6 +1282,8 @@ class FictionalBuzzAdapter:
             raise AuthorizationError("cross-tenant Buzz context denied")
         if packet["created_by"] != principal.actor_id:
             raise AuthorizationError("Buzz context author does not match actor")
+        if parse_time(packet["deadline"]) <= _authority_now(self._clock):
+            raise ContractError("Buzz context deadline has expired")
         task = self._paperclip.get_task(principal, packet["paperclip_issue_id"])
         if task["campaign_id"] != packet["campaign_id"]:
             raise ContractError("Buzz context campaign does not match Paperclip")
@@ -993,7 +1304,6 @@ class FictionalBuzzAdapter:
         decision_id: str,
         summary: str,
         source_event_ids: Sequence[str],
-        recorded_at: str | None = None,
     ) -> dict[str, Any]:
         if principal.role_id != "agency-director":
             raise AuthorizationError(
@@ -1002,8 +1312,9 @@ class FictionalBuzzAdapter:
         key = (principal.brand_id, context_id)
         context = self._contexts.get(key)
         if context is None:
-            raise KeyError(context_id)
-        if key in self._archived:
+            context = self._paperclip.get_buzz_context(principal, context_id)
+            self._contexts[key] = copy.deepcopy(context)
+        if self._paperclip.get_buzz_context_state(principal, context_id) != "open":
             raise ContractError("Buzz context is already archived")
         if not decision_id:
             raise ContractError("Buzz decision_id is required")
@@ -1011,8 +1322,9 @@ class FictionalBuzzAdapter:
             source_event_ids
         ):
             raise ContractError("Buzz decision needs a summary and unique event IDs")
-        timestamp = recorded_at or utc_now()
-        parse_time(timestamp)
+        authority_time = _authority_now(self._clock)
+        if parse_time(context["deadline"]) <= authority_time:
+            raise ContractError("Buzz context deadline has expired")
         decision = finalize_record(
             {
                 "schema_version": "1.0",
@@ -1026,18 +1338,13 @@ class FictionalBuzzAdapter:
                 "summary": summary,
                 "source_event_ids": list(source_event_ids),
                 "recorded_by": principal.actor_id,
-                "recorded_at": timestamp,
+                "recorded_at": authority_time.isoformat(),
             }
         )
         return self._paperclip.record_buzz_decision(principal, decision)
 
     def archive(self, principal: Principal, context_id: str) -> None:
-        if principal.role_id != "agency-director":
-            raise AuthorizationError("only the agency director may archive Buzz context")
-        key = (principal.brand_id, context_id)
-        if key not in self._contexts:
-            raise KeyError(context_id)
-        self._archived.add(key)
+        self._paperclip.archive_buzz_context(principal, context_id)
 
 
 class SQLiteTenantEvidenceStore:
@@ -1166,6 +1473,60 @@ class SQLiteTenantEvidenceStore:
             connection.close()
 
 
+def _authority_now(clock: Callable[[], datetime]) -> datetime:
+    now = clock()
+    if now.tzinfo is None or now.utcoffset() is None:
+        raise ContractError("authority clock must return a timezone-aware value")
+    return now
+
+
+def _validate_approver_policy(policy: Mapping[str, Any]) -> None:
+    verify_record(policy)
+    required = {
+        "policy_id",
+        "brand_id",
+        "revision",
+        "previous_policy_checksum",
+        "permitted_approver_ids",
+        "issued_by",
+        "effective_at",
+    }
+    if policy.get("artifact_type") != "approver_policy" or not required.issubset(
+        policy
+    ):
+        raise ContractError("invalid approver policy")
+    if not isinstance(policy["brand_id"], str) or not policy["brand_id"].startswith(
+        "brand_"
+    ):
+        raise ContractError("invalid approver policy brand")
+    if (
+        not isinstance(policy["policy_id"], str)
+        or not policy["policy_id"]
+        or not isinstance(policy["issued_by"], str)
+        or not policy["issued_by"]
+    ):
+        raise ContractError("invalid approver policy identity")
+    revision = policy["revision"]
+    if isinstance(revision, bool) or not isinstance(revision, int) or revision < 1:
+        raise ContractError("invalid approver policy revision")
+    permitted = policy["permitted_approver_ids"]
+    if (
+        not isinstance(permitted, list)
+        or not permitted
+        or any(not isinstance(actor_id, str) or not actor_id for actor_id in permitted)
+        or len(set(permitted)) != len(permitted)
+    ):
+        raise ContractError("invalid approver policy actors")
+    if revision == 1 and policy["previous_policy_checksum"] is not None:
+        raise ContractError("invalid first approver policy predecessor")
+    if revision > 1 and (
+        not isinstance(policy["previous_policy_checksum"], str)
+        or not policy["previous_policy_checksum"]
+    ):
+        raise ContractError("invalid approver policy predecessor")
+    parse_time(policy["effective_at"])
+
+
 def _validate_task(task: Mapping[str, Any]) -> None:
     verify_record(task)
     required = {
@@ -1248,8 +1609,18 @@ def _validate_buzz_context(packet: Mapping[str, Any]) -> None:
         packet
     ):
         raise ContractError("invalid Buzz context packet")
-    if not packet["participants"]:
-        raise ContractError("Buzz context has no participants")
+    participants = packet["participants"]
+    if (
+        not isinstance(participants, list)
+        or not participants
+        or any(not isinstance(actor_id, str) or not actor_id for actor_id in participants)
+        or len(set(participants)) != len(participants)
+    ):
+        raise ContractError("Buzz context has invalid participants")
+    if not isinstance(packet["source_artifact_ids"], list) or not isinstance(
+        packet["constraints"], list
+    ):
+        raise ContractError("Buzz context evidence and constraints must be arrays")
     parse_time(packet["deadline"])
     parse_time(packet["created_at"])
 
@@ -1272,8 +1643,15 @@ def _validate_buzz_decision(decision: Mapping[str, Any]) -> None:
         decision
     ):
         raise ContractError("invalid Buzz decision summary")
-    if not decision["summary"] or not decision["source_event_ids"]:
-        raise ContractError("Buzz decision has no summary evidence")
+    source_event_ids = decision["source_event_ids"]
+    if (
+        not decision["summary"]
+        or not isinstance(source_event_ids, list)
+        or not source_event_ids
+        or any(not isinstance(event_id, str) or not event_id for event_id in source_event_ids)
+        or len(set(source_event_ids)) != len(source_event_ids)
+    ):
+        raise ContractError("Buzz decision has invalid summary evidence")
     parse_time(decision["recorded_at"])
 
 

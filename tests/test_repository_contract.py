@@ -50,6 +50,7 @@ class RepositoryContractTests(unittest.TestCase):
             "ApprovalRecord",
             "PublicationReceipt",
             "CapabilityRecord",
+            "ApproverPolicy",
             "PaperclipTask",
             "PaperclipTaskApproval",
             "BuzzContextPacket",

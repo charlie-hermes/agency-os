@@ -57,6 +57,39 @@
         "content_checksum": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"}
       }
     },
+    "ApproverPolicy": {
+      "type": "object",
+      "required": [
+        "artifact_type",
+        "policy_id",
+        "brand_id",
+        "revision",
+        "previous_policy_checksum",
+        "permitted_approver_ids",
+        "issued_by",
+        "effective_at",
+        "content_checksum"
+      ],
+      "properties": {
+        "artifact_type": {"const": "approver_policy"},
+        "policy_id": {"type": "string", "minLength": 1},
+        "brand_id": {"type": "string", "pattern": "^brand_"},
+        "revision": {"type": "integer", "minimum": 1},
+        "previous_policy_checksum": {
+          "type": ["string", "null"],
+          "pattern": "^sha256:[a-f0-9]{64}$"
+        },
+        "permitted_approver_ids": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"type": "string", "minLength": 1},
+          "uniqueItems": true
+        },
+        "issued_by": {"type": "string", "minLength": 1},
+        "effective_at": {"type": "string", "format": "date-time"},
+        "content_checksum": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"}
+      }
+    },
     "PaperclipTaskApproval": {
       "type": "object",
       "required": [
@@ -65,6 +98,9 @@
         "brand_id",
         "paperclip_issue_id",
         "task_checksum",
+        "policy_id",
+        "policy_revision",
+        "policy_checksum",
         "decision",
         "approver_id",
         "expires_at",
@@ -72,6 +108,9 @@
       ],
       "properties": {
         "artifact_type": {"const": "paperclip_task_approval"},
+        "policy_id": {"type": "string", "minLength": 1},
+        "policy_revision": {"type": "integer", "minimum": 1},
+        "policy_checksum": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"},
         "decision": {"enum": ["APPROVED", "REJECTED"]},
         "content_checksum": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"}
       }
