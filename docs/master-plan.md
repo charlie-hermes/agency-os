@@ -162,7 +162,21 @@ approver policy, deadline-enforced and restartable non-authoritative Buzz
 context with decision write-back, and tenant-scoped audit events. It is
 documented in
 `docs/gate-5-platform-foundation.md`. This is reference behavior, not evidence
-against installed Paperclip or Buzz services.
+of authenticated mutation against installed Paperclip or Buzz services.
+
+The second bounded slice records the exact read-only target-host contract:
+Paperclip `2026.720.0`, its versioned paths, executable, primary unit and exact
+systemd drop-in graph, package/route/reference checksums, exact reviewed route
+surface, private authenticated health shape, and the current Buzz binary and
+command surface.
+A local verifier rechecks those facts and fails closed on drift without credentials,
+messages or task mutation. This admits the installed interface contract; it does
+not yet prove authenticated task, approval or Buzz lifecycle integration.
+
+**Merged first-slice evidence:** PR #6, reviewed commit
+`5b53ef937bb0b05490e851660967c5ac39334ac4`, merge commit
+`4efc84fc36c4cd14d8226700162a4e8a4fbb3b57`, and Ubuntu repository gate
+`30309918344` with 94 tests and no real external write.
 
 Implement:
 
@@ -313,10 +327,10 @@ governed DecisionPacket workshop.
 
 ## Current checkpoint
 
-- Approved base: `main` after the merged Gate 4 fictional runtime/egress
-  boundary.
+- Approved base: `main` after the merged first Gate 5 fictional Platform
+  Authority slice.
 - Active gate: Gate 5, authoritative platform adapters and tenant data
-  foundation.
+  foundation; installed contract admission is the current bounded slice.
 - Next dependent work: finish Gate 5, then Gate 6 governed product decisions
   and Gate 7 full fictional Core workflow.
 - Explicit guardrail: finish the bounded safety gate, then advance the agency

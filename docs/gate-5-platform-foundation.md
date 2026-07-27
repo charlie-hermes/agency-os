@@ -21,8 +21,42 @@ Gate 5 boundaries:
    human approver even through Python’s base setter.
 
 These boundaries use fictional data, a local Unix socket and local SQLite only.
-They make no network call, hold no service credential and do not claim
-compatibility with an installed Paperclip or Buzz version.
+They make no network call and hold no service credential. The fictional
+task/approval and context implementations do not yet claim authenticated
+data-plane compatibility with Paperclip or Buzz.
+
+## Installed platform compatibility admission
+
+The next bounded slice records a non-secret, read-only contract from target host
+`paperclip-511e4513` in `config/installed-platforms.json`:
+
+- Paperclip package `2026.720.0`, its versioned root, package, lockfile, resolved
+  executable, primary unit fragment and exact ordered systemd drop-in graph
+  checksums, exact service account, data/workspace roots and systemd hardening;
+- the private authenticated deployment health shape and absence of an active
+  bootstrap invite;
+- checksums for the installed health, identity, issue, approval and cost routes
+  plus the installed API reference;
+- the exact task, dependency, comment, approval, cost and budget method/path
+  surface. Only the budget route may use the pinned cost source because that one
+  route is absent from the installed API reference; and
+- the current Buzz binary path, SHA-256, size and exact help-option surface for
+  bounded channel context. The installed CLI has no version flag, so its binary
+  hash plus command surface is the recorded identity.
+
+`agency_os.platform_compatibility` validates the evidence, rejects secret-bearing
+fields, requires private/authenticated/ready Paperclip health, preserves
+Paperclip as decision authority and denies Buzz `--broadcast`. Reviewed identity
+or interface drift fails closed. `scripts/verify-installed-platforms` rechecks
+the package/source, executable, primary unit and every admitted drop-in hash,
+systemd identity and hardening, private health response, Buzz binary and every
+required target-host command option. The reviewed target currently admits no
+drop-ins, so any new drop-in fails before the health or Buzz probes.
+
+The live check is read-only. It performs no authenticated task or approval call,
+creates no Buzz channel or message, and reports `real_external_writes: false`.
+It proves exact installed contract admission, not authenticated lifecycle
+integration, service-account separation, key custody or production readiness.
 
 ## Authority boundaries
 
@@ -116,8 +150,9 @@ All denials leave no decision or audit event.
 This slice proves restart persistence, not a complete recovery plan. Before
 Gate 5 can complete, the project still needs:
 
-- adapters tested against the actual installed Paperclip and Buzz versions,
-  with their host paths and service identities recorded;
+- authenticated task, dependency, approval, budget, closure, Buzz-context and
+  decision write-back tests against the admitted installed services; version,
+  path, service-identity and interface evidence is now recorded read-only;
 - production Paperclip approval signing, protected key custody, rotation and
   recovery under an authority service account unavailable to workers;
 - persistent artifact and learning authorities integrated with this evidence

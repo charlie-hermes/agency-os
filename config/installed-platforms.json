@@ -1,0 +1,96 @@
+{
+  "schema_version": "1.0",
+  "captured_at": "2026-07-27T22:42:17Z",
+  "capture_mode": "read_only",
+  "host_id": "paperclip-511e4513",
+  "real_external_writes": false,
+  "paperclip": {
+    "package_name": "paperclipai",
+    "package_version": "2026.720.0",
+    "package_root": "/opt/paperclip/2026.720.0",
+    "package_json_path": "/opt/paperclip/2026.720.0/node_modules/paperclipai/package.json",
+    "package_json_sha256": "e28cdfb21a8620d6910d9e264163ef7927cf6db36eee10605d6ddf3df9956e1d",
+    "package_lock_sha256": "209fa78fa15b073880c1b9466214bd9ba38c39f8cac12e62ea6aadec55386536",
+    "service": {
+      "unit": "paperclip.service",
+      "fragment_path": "/etc/systemd/system/paperclip.service",
+      "fragment_sha256": "a86722baef8fc780054e576e9df5a58aaefdac13816979ac095371be4305c28f",
+      "drop_ins": [],
+      "user": "paperclip",
+      "group": "paperclip",
+      "executable": "/opt/paperclip/2026.720.0/node_modules/.bin/paperclipai",
+      "executable_resolved_path": "/opt/paperclip/2026.720.0/node_modules/paperclipai/dist/index.js",
+      "executable_sha256": "2fe1f4002f998fdcb6f3416dd99a62d9802cd6b457e9ea8490a0e70926187d7f",
+      "data_root": "/var/lib/paperclip",
+      "instance": "default",
+      "workspace_root": "/srv/paperclip/workspaces",
+      "active_state": "active",
+      "sub_state": "running",
+      "protect_system": "strict",
+      "protect_home": true,
+      "no_new_privileges": true
+    },
+    "health": {
+      "url": "http://172.30.0.1:3100/api/health",
+      "status": "ok",
+      "deployment_mode": "authenticated",
+      "deployment_exposure": "private",
+      "bootstrap_status": "ready",
+      "bootstrap_invite_active": false
+    },
+    "source_sha256": {
+      "health_routes": "4d300cf4a9988524e9bd9494582c0b63135d1b093e8d71c1d29b375c2491e33d",
+      "agent_routes": "18e133e8322be1b7d8563177a0fad06a7946e48446d157a54041123d96198148",
+      "issue_routes": "c741f931ca3b1e657aadcd35e66f6fc5c15c6240a7f32d990aa94e3811ef23fe",
+      "approval_routes": "bcb94462617c9c5e199b7af0da7f985d96470d56483434ebae9cde2bf4924a89",
+      "cost_routes": "35389baba8f346e6bfa2fbffd285a2d108c4e2fb38c0be09a3450306518e135a",
+      "api_reference": "0a278fe90462bffa97b07cb6a5ac66e00b14185e6f1963db138066868c81c60b"
+    },
+    "api_surface": [
+      ["GET", "/api/health"],
+      ["GET", "/api/agents/me"],
+      ["GET", "/api/companies/:companyId/issues"],
+      ["POST", "/api/companies/:companyId/issues"],
+      ["GET", "/api/issues/:issueId"],
+      ["PATCH", "/api/issues/:issueId"],
+      ["POST", "/api/issues/:issueId/checkout"],
+      ["POST", "/api/issues/:issueId/release"],
+      ["GET", "/api/issues/:issueId/comments"],
+      ["POST", "/api/issues/:issueId/comments"],
+      ["GET", "/api/issues/:issueId/approvals"],
+      ["POST", "/api/issues/:issueId/approvals"],
+      ["GET", "/api/companies/:companyId/approvals"],
+      ["POST", "/api/companies/:companyId/approvals"],
+      ["GET", "/api/approvals/:approvalId"],
+      ["GET", "/api/approvals/:approvalId/issues"],
+      ["POST", "/api/approvals/:approvalId/approve"],
+      ["POST", "/api/approvals/:approvalId/reject"],
+      ["POST", "/api/companies/:companyId/cost-events"],
+      ["GET", "/api/companies/:companyId/costs/summary"],
+      ["PATCH", "/api/companies/:companyId/budgets"]
+    ]
+  },
+  "buzz": {
+    "version_strategy": "binary_sha256_and_cli_surface",
+    "version_flag_supported": false,
+    "binary_path": "/usr/local/bin/buzz",
+    "binary_sha256": "2e7c59cae63c4f6a29dcb91fe9633471c61f42392a9484fe393a7e681d48d916",
+    "binary_size_bytes": 16224768,
+    "command_surface": {
+      "messages send": ["--channel", "--content", "--reply-to", "--file"],
+      "messages get": ["--channel", "--limit", "--before", "--since", "--kinds"],
+      "messages thread": ["--channel", "--event", "--limit", "--depth-limit"],
+      "messages search": ["--query", "--author", "--since", "--limit"],
+      "channels create": ["--name", "--type", "--visibility", "--description", "--ttl"],
+      "channels get": ["--channel"],
+      "channels list": ["--visibility", "--member", "--limit"],
+      "channels join": ["--channel"],
+      "channels members": ["--channel"]
+    },
+    "adapter_policy": {
+      "denied_options": ["--broadcast"],
+      "task_state_mutation": false,
+      "decision_write_back_authority": "paperclip"
+    }
+  }
+}

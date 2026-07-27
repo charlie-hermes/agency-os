@@ -389,6 +389,24 @@
       "fixture": "a running authority whose SQLite path is replaced",
       "command": "python3 -m unittest tests.test_platform_adapters.PlatformAdapterTests.test_replaced_storage_identity_is_rejected_by_both_authorities",
       "expected_evidence": "Paperclip and evidence operations both fail closed after replacement"
+    },
+    {
+      "id": "INSTALLED-PLATFORM-CONTRACT-001",
+      "phase": 5,
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "fixture": "config/installed-platforms.json with target-host Paperclip and Buzz identity evidence",
+      "command": "python3 -m unittest tests.test_platform_compatibility.PlatformCompatibilityTests.test_checked_in_target_host_manifest_is_admitted",
+      "expected_evidence": "exact private authenticated Paperclip and non-authoritative Buzz contract is admitted without external writes"
+    },
+    {
+      "id": "INSTALLED-PLATFORM-DRIFT-001",
+      "phase": 5,
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "fixture": "changed Paperclip version, executable, primary unit or drop-in graph bytes, service, reviewed route surface, and Buzz binary or command authority",
+      "command": "python3 -m unittest tests.test_platform_compatibility.PlatformCompatibilityTests.test_paperclip_version_identity_service_and_route_drift_fail_closed tests.test_platform_compatibility.PlatformCompatibilityTests.test_only_reviewed_budget_route_can_use_source_fallback tests.test_platform_compatibility.PlatformCompatibilityTests.test_executable_and_service_unit_bytes_are_pinned tests.test_platform_compatibility.PlatformCompatibilityTests.test_effective_service_drop_in_graph_fails_closed_before_probes tests.test_platform_compatibility.PlatformCompatibilityTests.test_buzz_binary_command_or_authority_drift_fails_closed",
+      "expected_evidence": "extra and undocumented routes plus reviewed platform byte, exact drop-in set/order, identity and authority drift fail closed before health, Buzz or authenticated adapter use"
     }
   ]
 }
