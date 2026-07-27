@@ -14,11 +14,24 @@
   approver identity and authority-role policy.
 - Public fields and internal notes are separate values; only public fields
   cross the publication adapter.
-- The action gateway checks role, brand, environment, destination, operation,
-  approval expiry, manifest checksum, artifact checksum, and schedule. Because
-  Phase 0/1 has no typed condition evaluator, an Approval Record with missing,
-  malformed, or non-empty `conditions` fails closed before adapter dispatch;
-  only an explicit empty array is currently publishable.
+- Capability grants are immutable, brand-scoped records issued through an
+  authoritative registry by the authenticated agency director. A grant binds
+  one actor and role to one environment, destination, operation, action class,
+  and data class for a bounded time. Missing, suspended, expired, future,
+  checksum-invalid, or mismatched grants fail closed. The gateway resolves the
+  grant by ID rather than accepting caller-supplied grant content. After action
+  reservation, the in-process authority samples a trusted dispatch-time clock
+  and serializes final active, checksum, and capability-window checks with
+  adapter invocation. The same sampled time revalidates approval expiry and the
+  schedule window. Suspension that wins the dispatch lock prevents the call;
+  suspension after dispatch starts becomes effective when the call finishes.
+  Production requires equivalent enforcement at the credential and egress
+  boundary across deployed workers.
+- The action gateway also checks role, brand, environment, destination,
+  operation, approval expiry, manifest checksum, artifact checksum, and
+  schedule. Because Phase 0/1 has no typed condition evaluator, an Approval
+  Record with missing, malformed, or non-empty `conditions` fails closed before
+  adapter dispatch; only an explicit empty array is currently publishable.
 - The action gateway requires an explicit ledger. The fictional demonstration
   uses a thread-safe in-memory ledger; the durable SQLite implementation uses a
   unique `(brand_id, idempotency_key)` and an atomic transaction shared by
@@ -92,7 +105,8 @@ real persistent deployment meets them.
 - real Paperclip and typed Buzz adapter evidence;
 - persistent row-level or physically isolated tenant storage;
 - credential broker and deny-by-default egress;
-- capability admission and drift suspension;
+- persistent capability admission, runtime identity binding, and drift
+  suspension across deployed workers;
 - queue lease, dead-letter, cancellation, and reconciliation implementation;
 - immutable audit retention and tenant-scoped telemetry;
 - backup, restore, and destructive offboarding exercises;

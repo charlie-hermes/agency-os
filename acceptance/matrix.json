@@ -76,6 +76,42 @@
       "expected_evidence": "replacement is rejected and the original approval plus provenance remain intact"
     },
     {
+      "id": "CAPABILITY-AUTHORITY-001",
+      "phase": 1,
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "fixture": "missing grant and same-brand grant bound to another actor",
+      "command": "python3 -m unittest tests.test_gateway.GatewayTests.test_missing_and_wrong_actor_capabilities_are_denied",
+      "expected_evidence": "only an authoritative grant bound to the authenticated actor may reach reservation"
+    },
+    {
+      "id": "CAPABILITY-LIFECYCLE-001",
+      "phase": 1,
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "fixture": "suspended, expired, and not-yet-effective grants",
+      "command": "python3 -m unittest tests.test_gateway.GatewayTests.test_suspended_expired_and_future_capabilities_are_denied",
+      "expected_evidence": "all inactive capability states fail closed with zero adapter dispatch"
+    },
+    {
+      "id": "CAPABILITY-SCOPE-001",
+      "phase": 1,
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "fixture": "grants with wrong destination, environment, operation, action class, or data class",
+      "command": "python3 -m unittest tests.test_gateway.GatewayTests.test_capability_scope_is_exact_for_action_and_data",
+      "expected_evidence": "every mismatched grant scope fails closed with zero adapter dispatch"
+    },
+    {
+      "id": "CAPABILITY-REVALIDATION-001",
+      "phase": 1,
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "fixture": "grant suspended after action reservation but before dispatch",
+      "command": "python3 -m unittest tests.test_gateway.GatewayTests.test_capability_is_revalidated_after_reservation",
+      "expected_evidence": "late suspension stops adapter dispatch"
+    },
+    {
       "id": "IDEMPOTENCY-001",
       "phase": 1,
       "owner": "platform-assurance-reviewer",

@@ -26,7 +26,8 @@ provider, or publish externally.
   promotion blockers.
 - `schemas/` — versioned JSON Schemas for lifecycle and learning records.
 - `agency_os/` — standard-library-only reference controls, including an
-  injectable in-memory or durable local-process action ledger.
+  authoritative capability registry and an injectable in-memory or durable
+  local-process action ledger.
 - `fixtures/` — fictional tenant input.
 - `acceptance/matrix.json` — release criteria mapped to executable evidence.
 - `tests/` — allowed-path, denied-path, recovery, and vertical-slice tests.

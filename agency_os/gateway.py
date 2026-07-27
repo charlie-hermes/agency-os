@@ -4,8 +4,17 @@ from __future__ import annotations
 
 import copy
 from datetime import datetime, timezone
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 
+from .capabilities import (
+    CapabilityDispatchError,
+    CapabilityDriftError,
+    CapabilityError,
+    CapabilityExpiredError,
+    CapabilityInactiveError,
+    CapabilityNotYetEffectiveError,
+    CapabilityRegistry,
+)
 from .contracts import (
     ContractError,
     canonical_checksum,
@@ -48,17 +57,21 @@ class ActionGateway:
     def __init__(
         self,
         *,
-        capability: Mapping[str, Any],
+        capability_id: str,
+        capability_registry: CapabilityRegistry,
         publisher: MockPublisher,
         approval_store: TenantStore,
         approval_authorities: Mapping[str, Mapping[str, list[str] | tuple[str, ...]]],
         action_ledger: ActionLedger,
+        clock: Callable[[], datetime] | None = None,
     ) -> None:
-        self.capability = copy.deepcopy(dict(capability))
+        self.capability_id = capability_id
+        self.capability_registry = capability_registry
         self.publisher = publisher
         self.approval_store = approval_store
         self.approval_authorities = copy.deepcopy(dict(approval_authorities))
         self.action_ledger = action_ledger
+        self._clock = clock or (lambda: datetime.now(timezone.utc))
         self.audit: list[dict[str, Any]] = []
 
     def publish(
@@ -70,7 +83,8 @@ class ActionGateway:
         idempotency_key: str,
         now: datetime | None = None,
     ) -> dict[str, Any]:
-        current_time = now or datetime.now(timezone.utc)
+        current_time = now or self._clock()
+        capability, capability_status = self._resolve_capability(principal)
         try:
             approval, approval_provenance = self.approval_store.resolve_approval(
                 principal.brand_id, approval_id
@@ -82,13 +96,20 @@ class ActionGateway:
                 cause=exc,
             )
         self._preflight(
-            principal, manifest, approval, approval_provenance, current_time
+            principal,
+            manifest,
+            approval,
+            approval_provenance,
+            capability,
+            capability_status,
+            current_time,
         )
         request_binding = {
             "actor_id": principal.actor_id,
             "role_id": principal.role_id,
             "brand_id": principal.brand_id,
-            "capability_id": self.capability["capability_id"],
+            "capability_id": capability["capability_id"],
+            "capability_checksum": capability["content_checksum"],
             "manifest_checksum": manifest["content_checksum"],
             "approval_checksum": approval["content_checksum"],
             "destination_ref": manifest["destination_ref"],
@@ -135,11 +156,30 @@ class ActionGateway:
         if reservation.status != "RESERVED":
             self._deny("LEDGER_UNAVAILABLE", request_binding)
         try:
-            external = self.publisher.publish(
-                public_fields=manifest["public_fields"],
-                idempotency_key=idempotency_key,
+            external = self.capability_registry.authorized_dispatch(
+                principal.brand_id,
+                self.capability_id,
+                capability["content_checksum"],
+                clock=self._clock,
+                pre_dispatch=lambda dispatch_time: self._validate_time_windows(
+                    manifest, approval, dispatch_time
+                ),
+                dispatch=lambda: self.publisher.publish(
+                    public_fields=manifest["public_fields"],
+                    idempotency_key=idempotency_key,
+                ),
             )
-        except Exception as exc:
+        except CapabilityNotYetEffectiveError as exc:
+            self._deny("CAPABILITY_NOT_YET_EFFECTIVE", request_binding, cause=exc)
+        except CapabilityExpiredError as exc:
+            self._deny("CAPABILITY_EXPIRED", request_binding, cause=exc)
+        except CapabilityInactiveError as exc:
+            self._deny("CAPABILITY_INACTIVE", request_binding, cause=exc)
+        except CapabilityDriftError as exc:
+            self._deny("CAPABILITY_DRIFT", request_binding, cause=exc)
+        except (KeyError, ContractError, CapabilityError) as exc:
+            self._deny("CAPABILITY_NOT_AUTHORITATIVE", request_binding, cause=exc)
+        except CapabilityDispatchError as exc:
             try:
                 self.action_ledger.mark_unknown(
                     principal.brand_id, idempotency_key, request_checksum
@@ -209,29 +249,21 @@ class ActionGateway:
         manifest: Mapping[str, Any],
         approval: Mapping[str, Any],
         approval_provenance: Mapping[str, str],
+        capability: Mapping[str, Any],
+        capability_status: str,
         now: datetime,
     ) -> None:
         try:
             verify_record(manifest)
             verify_record(approval)
+            verify_record(capability)
         except ContractError as exc:
             self._deny("INVALID_CHECKSUM", {"brand_id": principal.brand_id}, cause=exc)
         if principal.role_id != "publishing-operator":
             self._deny("ROLE_DENIED", {"brand_id": principal.brand_id})
-        if self.capability.get("status") != "active":
-            self._deny("CAPABILITY_INACTIVE", {"brand_id": principal.brand_id})
-        exact_pairs = (
-            ("brand_id", principal.brand_id),
-            ("brand_id", self.capability.get("brand_id")),
-            ("destination_ref", self.capability.get("destination_ref")),
-            ("environment", self.capability.get("environment")),
-            ("operation", self.capability.get("operation")),
+        self._validate_capability(
+            principal, manifest, capability, capability_status, now
         )
-        for field, expected in exact_pairs:
-            if manifest.get(field) != expected:
-                self._deny(f"MANIFEST_{field.upper()}_MISMATCH", dict(manifest))
-        if principal.role_id not in self.capability.get("allowed_role_ids", []):
-            self._deny("CAPABILITY_ROLE_DENIED", dict(manifest))
         if (
             approval_provenance.get("actor_id") != approval.get("approver_id")
             or approval_provenance.get("role_id") != "human-approver"
@@ -264,6 +296,14 @@ class ActionGateway:
             self._deny("APPROVAL_MANIFEST_CHECKSUM_MISMATCH", dict(manifest))
         if approval.get("artifact_checksum") != manifest.get("qa_package_checksum"):
             self._deny("APPROVAL_ARTIFACT_CHECKSUM_MISMATCH", dict(manifest))
+        self._validate_time_windows(manifest, approval, now)
+
+    def _validate_time_windows(
+        self,
+        manifest: Mapping[str, Any],
+        approval: Mapping[str, Any],
+        now: datetime,
+    ) -> None:
         if parse_time(approval["decided_at"]) > now:
             self._deny("APPROVAL_NOT_YET_EFFECTIVE", dict(manifest))
         if parse_time(approval["expires_at"]) <= now:
@@ -272,6 +312,75 @@ class ActionGateway:
             self._deny("SCHEDULE_WINDOW_NOT_STARTED", dict(manifest))
         if parse_time(manifest["schedule_window"]["ends_at"]) <= now:
             self._deny("SCHEDULE_WINDOW_EXPIRED", dict(manifest))
+
+    def _resolve_capability(
+        self, principal: Principal
+    ) -> tuple[dict[str, Any], str]:
+        try:
+            return self.capability_registry.resolve(
+                principal.brand_id, self.capability_id
+            )
+        except (KeyError, ContractError, CapabilityError) as exc:
+            self._deny(
+                "CAPABILITY_NOT_AUTHORITATIVE",
+                {"brand_id": principal.brand_id},
+                cause=exc,
+            )
+
+    def _validate_capability(
+        self,
+        principal: Principal,
+        manifest: Mapping[str, Any],
+        capability: Mapping[str, Any],
+        registry_status: str,
+        now: datetime,
+    ) -> None:
+        try:
+            verify_record(capability)
+        except ContractError as exc:
+            self._deny(
+                "CAPABILITY_NOT_AUTHORITATIVE",
+                {"brand_id": principal.brand_id},
+                cause=exc,
+            )
+        if capability.get("status") != "active" or registry_status != "active":
+            self._deny("CAPABILITY_INACTIVE", {"brand_id": principal.brand_id})
+        exact_pairs = (
+            ("brand_id", principal.brand_id, capability.get("brand_id")),
+            ("actor_id", principal.actor_id, capability.get("actor_id")),
+            ("role_id", principal.role_id, capability.get("role_id")),
+            (
+                "destination_ref",
+                manifest.get("destination_ref"),
+                capability.get("destination_ref"),
+            ),
+            (
+                "environment",
+                manifest.get("environment"),
+                capability.get("environment"),
+            ),
+            (
+                "operation",
+                manifest.get("operation"),
+                capability.get("operation"),
+            ),
+        )
+        for field, actual, expected in exact_pairs:
+            if actual != expected:
+                self._deny(f"CAPABILITY_{field.upper()}_DENIED", dict(manifest))
+        if capability.get("action_class") != "external_write":
+            self._deny("CAPABILITY_ACTION_CLASS_DENIED", dict(manifest))
+        if capability.get("data_class") != "public_content":
+            self._deny("CAPABILITY_DATA_CLASS_DENIED", dict(manifest))
+        try:
+            not_before = parse_time(capability["not_before"])
+            expires_at = parse_time(capability["expires_at"])
+        except (KeyError, ContractError) as exc:
+            self._deny("CAPABILITY_NOT_AUTHORITATIVE", dict(manifest), cause=exc)
+        if not_before > now:
+            self._deny("CAPABILITY_NOT_YET_EFFECTIVE", dict(manifest))
+        if expires_at <= now:
+            self._deny("CAPABILITY_EXPIRED", dict(manifest))
 
     def _deny(
         self,

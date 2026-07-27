@@ -31,6 +31,7 @@ class RepositoryContractTests(unittest.TestCase):
             "PublicationManifest",
             "ApprovalRecord",
             "PublicationReceipt",
+            "CapabilityRecord",
             "LearningContextManifest",
             "FailureObservation",
             "CandidateLearning",

@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agency-os.invalid/schemas/capability.schema.json",
+  "title": "Agency OS capability record",
+  "$ref": "#/$defs/CapabilityRecord",
+  "$defs": {
+    "Checksum": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "CapabilityRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "artifact_type",
+        "capability_id",
+        "brand_id",
+        "actor_id",
+        "role_id",
+        "destination_ref",
+        "environment",
+        "operation",
+        "action_class",
+        "data_class",
+        "issued_by",
+        "issued_at",
+        "not_before",
+        "expires_at",
+        "status",
+        "content_checksum"
+      ],
+      "properties": {
+        "schema_version": {"const": "1.0"},
+        "artifact_type": {"const": "capability_record"},
+        "capability_id": {"type": "string", "minLength": 1},
+        "brand_id": {"type": "string", "pattern": "^brand_"},
+        "actor_id": {"type": "string", "minLength": 1},
+        "role_id": {"type": "string", "minLength": 1},
+        "destination_ref": {"type": "string", "minLength": 1},
+        "environment": {
+          "enum": ["development", "sandbox", "staging", "production"]
+        },
+        "operation": {"type": "string", "minLength": 1},
+        "action_class": {"type": "string", "minLength": 1},
+        "data_class": {"type": "string", "minLength": 1},
+        "issued_by": {"type": "string", "minLength": 1},
+        "issued_at": {"type": "string", "format": "date-time"},
+        "not_before": {"type": "string", "format": "date-time"},
+        "expires_at": {"type": "string", "format": "date-time"},
+        "status": {"const": "active"},
+        "content_checksum": {"$ref": "#/$defs/Checksum"}
+      }
+    }
+  }
+}

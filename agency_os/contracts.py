@@ -213,6 +213,50 @@ def make_approval_record(
     return finalize_record(record)
 
 
+def make_capability_record(
+    *,
+    capability_id: str,
+    brand_id: str,
+    actor_id: str,
+    role_id: str,
+    destination_ref: str,
+    environment: str,
+    operation: str,
+    action_class: str,
+    data_class: str,
+    issued_by: str,
+    issued_at: str,
+    not_before: str,
+    expires_at: str,
+) -> dict[str, Any]:
+    record = {
+        "schema_version": "1.0",
+        "artifact_type": "capability_record",
+        "capability_id": capability_id,
+        "brand_id": brand_id,
+        "actor_id": actor_id,
+        "role_id": role_id,
+        "destination_ref": destination_ref,
+        "environment": environment,
+        "operation": operation,
+        "action_class": action_class,
+        "data_class": data_class,
+        "issued_by": issued_by,
+        "issued_at": issued_at,
+        "not_before": not_before,
+        "expires_at": expires_at,
+        "status": "active",
+    }
+    issue_time = parse_time(issued_at)
+    start_time = parse_time(not_before)
+    expiry_time = parse_time(expires_at)
+    if issue_time > start_time:
+        raise ContractError("capability cannot become valid before it is issued")
+    if start_time >= expiry_time:
+        raise ContractError("capability not_before must precede expires_at")
+    return finalize_record(record)
+
+
 def validate_learning_record(record: Mapping[str, Any]) -> None:
     verify_record(record)
     require_fields(

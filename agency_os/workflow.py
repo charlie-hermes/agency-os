@@ -6,9 +6,11 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from .capabilities import CapabilityRegistry
 from .contracts import (
     finalize_record,
     make_approval_record,
+    make_capability_record,
     make_envelope,
     make_publication_manifest,
 )
@@ -233,17 +235,27 @@ def run_fictional_article() -> VerticalSliceResult:
     store.put(principals["approver"], approval)
     records["approval"] = approval
 
+    capability_registry = CapabilityRegistry()
+    capability = make_capability_record(
+        capability_id="cap_mock_publish",
+        brand_id=brand_id,
+        actor_id=principals["publisher"].actor_id,
+        role_id=principals["publisher"].role_id,
+        destination_ref="mock_cms:lantern",
+        environment="sandbox",
+        operation="publish",
+        action_class="external_write",
+        data_class="public_content",
+        issued_by=principals["director"].actor_id,
+        issued_at=(now - timedelta(minutes=5)).isoformat(),
+        not_before=(now - timedelta(minutes=5)).isoformat(),
+        expires_at=(now + timedelta(minutes=30)).isoformat(),
+    )
+    capability_registry.register(principals["director"], capability)
     publisher = MockPublisher()
     gateway = ActionGateway(
-        capability={
-            "capability_id": "cap_mock_publish",
-            "status": "active",
-            "brand_id": brand_id,
-            "allowed_role_ids": ["publishing-operator"],
-            "destination_ref": "mock_cms:lantern",
-            "environment": "sandbox",
-            "operation": "publish",
-        },
+        capability_id=capability["capability_id"],
+        capability_registry=capability_registry,
         publisher=publisher,
         approval_store=store,
         approval_authorities={brand_id: {"brand_owner": ["human_owner"]}},

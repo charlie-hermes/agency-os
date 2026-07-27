@@ -92,10 +92,15 @@ Tool discovery and credential availability confer no authority. Every action
 requires an active capability record for the authenticated role, brand,
 environment, destination, operation, and data/action class. The gateway derives
 the principal from runtime state and does not accept an agent-supplied identity.
+Capability content is resolved by ID from an authoritative registry; immutable
+grant bindings and mutable suspension state are not accepted from the caller.
 
 Before dispatch, it revalidates capability, approval, checksum, destination,
-schedule, and idempotency. An allow decision is single-use for the bound
-request. Unknown or partial external results must be reconciled before retry.
+schedule, and idempotency. The fictional in-process authority samples a trusted
+clock inside its dispatch lock, rechecks capability, approval, and schedule time
+windows, then invokes the adapter. Suspension and dispatch are ordered by that
+same lock. An allow decision is single-use for the bound request. Unknown or
+partial external results must be reconciled before retry.
 
 ## Phase boundary
 
