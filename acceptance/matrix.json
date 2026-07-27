@@ -404,9 +404,9 @@
       "phase": 5,
       "owner": "platform-assurance-reviewer",
       "release_blocker": true,
-      "fixture": "changed Paperclip version, hash, service, route and Buzz binary or command authority",
-      "command": "python3 -m unittest tests.test_platform_compatibility.PlatformCompatibilityTests.test_paperclip_version_identity_service_and_route_drift_fail_closed tests.test_platform_compatibility.PlatformCompatibilityTests.test_buzz_binary_command_or_authority_drift_fails_closed",
-      "expected_evidence": "reviewed platform identity and authority drift fails closed before authenticated adapter use"
+      "fixture": "changed Paperclip version, executable or unit bytes, service, reviewed route surface, and Buzz binary or command authority",
+      "command": "python3 -m unittest tests.test_platform_compatibility.PlatformCompatibilityTests.test_paperclip_version_identity_service_and_route_drift_fail_closed tests.test_platform_compatibility.PlatformCompatibilityTests.test_only_reviewed_budget_route_can_use_source_fallback tests.test_platform_compatibility.PlatformCompatibilityTests.test_executable_and_service_unit_bytes_are_pinned tests.test_platform_compatibility.PlatformCompatibilityTests.test_buzz_binary_command_or_authority_drift_fails_closed",
+      "expected_evidence": "extra and undocumented routes plus reviewed platform byte, identity and authority drift fail closed before authenticated adapter use"
     }
   ]
 }

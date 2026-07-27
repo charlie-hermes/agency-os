@@ -64,6 +64,12 @@ PAPERCLIP_REQUIRED_SURFACE = frozenset(
     }
 )
 
+PAPERCLIP_SOURCE_FALLBACK_SURFACE = frozenset(
+    {
+        ("PATCH", "/api/companies/:companyId/budgets"),
+    }
+)
+
 BUZZ_REQUIRED_SURFACE = {
     "messages send": frozenset({"--channel", "--content", "--reply-to", "--file"}),
     "messages get": frozenset(
@@ -201,6 +207,7 @@ def validate_installed_platform_manifest(
     for field in (
         "fragment_path",
         "executable",
+        "executable_resolved_path",
         "data_root",
         "workspace_root",
     ):
@@ -211,9 +218,22 @@ def validate_installed_platform_manifest(
             raise PlatformCompatibilityError(
                 f"Paperclip service field {field!r} must be absolute"
             )
-    if not str(service["executable"]).startswith(f"{package_root}/"):
+    _validate_sha256(
+        service.get("fragment_sha256"), "paperclip.service.fragment_sha256"
+    )
+    _validate_sha256(
+        service.get("executable_sha256"),
+        "paperclip.service.executable_sha256",
+    )
+
+    executable_path = Path(service["executable"])
+    resolved_executable_path = Path(service["executable_resolved_path"])
+    if (
+        package_root not in executable_path.parents
+        or package_root not in resolved_executable_path.parents
+    ):
         raise PlatformCompatibilityError(
-            "Paperclip service executable is outside the pinned package root"
+            "Paperclip service executable paths are outside the pinned package root"
         )
 
     health = _require_mapping(paperclip.get("health"), "paperclip.health")
@@ -266,9 +286,12 @@ def validate_installed_platform_manifest(
     if len(surface) != len(raw_surface):
         raise PlatformCompatibilityError("Paperclip API surface contains duplicates")
     missing_paperclip = PAPERCLIP_REQUIRED_SURFACE - surface
-    if missing_paperclip:
+    extra_paperclip = surface - PAPERCLIP_REQUIRED_SURFACE
+    if missing_paperclip or extra_paperclip:
         raise PlatformCompatibilityError(
-            f"Paperclip API surface is missing {sorted(missing_paperclip)!r}"
+            "Paperclip API surface must match the reviewed contract exactly: "
+            f"missing={sorted(missing_paperclip)!r}, "
+            f"extra={sorted(extra_paperclip)!r}"
         )
 
     buzz = _require_mapping(record.get("buzz"), "buzz")
@@ -398,11 +421,15 @@ def _verify_paperclip_surface(
         source_declaration = (
             f'router.{method.lower()}("{route.removeprefix("/api")}"'
         )
-        if source_declaration in cost_routes:
+        if (
+            (method, route) in PAPERCLIP_SOURCE_FALLBACK_SURFACE
+            and source_declaration in cost_routes
+        ):
             continue
         raise PlatformCompatibilityError(
             f"Paperclip installed sources do not declare {method} {route}"
         )
+
 
 def verify_live_installed_platforms(
     manifest: Mapping[str, Any],
@@ -411,6 +438,21 @@ def verify_live_installed_platforms(
 
     record = admit_installed_platform_manifest(manifest)
     paperclip = record["paperclip"]
+    service = paperclip["service"]
+    executable_path = Path(service["executable"])
+    _verify_file(
+        executable_path,
+        service["executable_sha256"],
+        "Paperclip executable",
+    )
+    if executable_path.resolve() != Path(service["executable_resolved_path"]):
+        raise PlatformCompatibilityError("Paperclip executable target drift")
+    _verify_file(
+        Path(service["fragment_path"]),
+        service["fragment_sha256"],
+        "Paperclip service unit",
+    )
+
     package_root = Path(paperclip["package_root"])
     package_json_path = Path(paperclip["package_json_path"])
     _verify_file(
@@ -511,7 +553,6 @@ def verify_live_installed_platforms(
         expected_argv,
     ):
         raise PlatformCompatibilityError("Paperclip service command drift")
-
 
     try:
         with urllib.request.urlopen(

@@ -14,9 +14,12 @@
     "service": {
       "unit": "paperclip.service",
       "fragment_path": "/etc/systemd/system/paperclip.service",
+      "fragment_sha256": "a86722baef8fc780054e576e9df5a58aaefdac13816979ac095371be4305c28f",
       "user": "paperclip",
       "group": "paperclip",
       "executable": "/opt/paperclip/2026.720.0/node_modules/.bin/paperclipai",
+      "executable_resolved_path": "/opt/paperclip/2026.720.0/node_modules/paperclipai/dist/index.js",
+      "executable_sha256": "2fe1f4002f998fdcb6f3416dd99a62d9802cd6b457e9ea8490a0e70926187d7f",
       "data_root": "/var/lib/paperclip",
       "instance": "default",
       "workspace_root": "/srv/paperclip/workspaces",

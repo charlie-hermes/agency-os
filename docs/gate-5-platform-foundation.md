@@ -30,15 +30,16 @@ data-plane compatibility with Paperclip or Buzz.
 The next bounded slice records a non-secret, read-only contract from target host
 `paperclip-511e4513` in `config/installed-platforms.json`:
 
-- Paperclip package `2026.720.0`, its versioned root, package and lockfile
-  checksums, exact service account, executable, data/workspace roots and systemd
-  hardening;
+- Paperclip package `2026.720.0`, its versioned root, package, lockfile, resolved
+  executable and complete service-unit checksums, exact service account,
+  data/workspace roots and systemd hardening;
 - the private authenticated deployment health shape and absence of an active
   bootstrap invite;
-- checksums for the installed health, identity, issue, approval and cost routes plus
-  the installed API reference;
-- the task, dependency, comment, approval, cost and budget method/path surface
-  needed by the future authenticated adapter; and
+- checksums for the installed health, identity, issue, approval and cost routes
+  plus the installed API reference;
+- the exact task, dependency, comment, approval, cost and budget method/path
+  surface. Only the budget route may use the pinned cost source because that one
+  route is absent from the installed API reference; and
 - the current Buzz binary path, SHA-256, size and exact help-option surface for
   bounded channel context. The installed CLI has no version flag, so its binary
   hash plus command surface is the recorded identity.
@@ -47,8 +48,8 @@ The next bounded slice records a non-secret, read-only contract from target host
 fields, requires private/authenticated/ready Paperclip health, preserves
 Paperclip as decision authority and denies Buzz `--broadcast`. Reviewed identity
 or interface drift fails closed. `scripts/verify-installed-platforms` rechecks
-the package/source hashes, systemd identity and hardening, private health response,
-Buzz binary and every required command option on the target host.
+the package/source, executable and unit hashes, systemd identity and hardening,
+private health response, Buzz binary and every required target-host command option.
 
 The live check is read-only. It performs no authenticated task or approval call,
 creates no Buzz channel or message, and reports `real_external_writes: false`.

@@ -43,7 +43,7 @@ connect real client data, call a real provider, or publish externally.
   worker clients, typed Buzz context, and a persistent tenant-evidence
   authority.
 - `config/installed-platforms.json` — non-secret, read-only target-host version,
-  service, checksum, health, API-route and Buzz command-surface evidence.
+  executable/unit checksum, service, health, exact API and Buzz command evidence.
 - `scripts/verify-installed-platforms` — explicit read-only live drift check.
 - `fixtures/` — fictional tenant input.
 - `acceptance/matrix.json` — release criteria mapped to executable evidence.

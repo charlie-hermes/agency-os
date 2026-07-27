@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
+import tempfile
 import unittest
+from pathlib import Path
 
 from agency_os.platform_compatibility import (
     DEFAULT_MANIFEST,
+    _verify_file,
+    _verify_paperclip_surface,
     PlatformCompatibilityError,
     admit_installed_platform_manifest,
     load_installed_platform_manifest,
@@ -57,6 +62,13 @@ class PlatformCompatibilityTests(unittest.TestCase):
             validate_installed_platform_manifest(changed)
 
         changed = copy.deepcopy(self.manifest)
+        changed["paperclip"]["api_surface"].append(
+            ["POST", "/api/unrelated-undocumented"]
+        )
+        with self.assertRaises(PlatformCompatibilityError):
+            validate_installed_platform_manifest(changed)
+
+        changed = copy.deepcopy(self.manifest)
         changed["paperclip"]["package_json_sha256"] = "0" * 64
         with self.assertRaises(PlatformCompatibilityError):
             admit_installed_platform_manifest(changed)
@@ -65,6 +77,50 @@ class PlatformCompatibilityTests(unittest.TestCase):
         changed["paperclip"]["health"]["url"] = "http://8.8.8.8/api/health"
         with self.assertRaises(PlatformCompatibilityError):
             validate_installed_platform_manifest(changed)
+
+    def test_only_reviewed_budget_route_can_use_source_fallback(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            reference = Path(temp_dir) / "api-reference.md"
+            costs = Path(temp_dir) / "costs.js"
+            reference.write_text("")
+            costs.write_text(
+                'router.patch("/companies/:companyId/budgets", handler);\n'
+                'router.post("/unrelated-undocumented", handler);\n'
+            )
+            _verify_paperclip_surface(
+                reference,
+                costs,
+                [
+                    ("PATCH", "/api/companies/:companyId/budgets"),
+                ],
+            )
+            with self.assertRaises(PlatformCompatibilityError):
+                _verify_paperclip_surface(
+                    reference,
+                    costs,
+                    [
+                        ("POST", "/api/unrelated-undocumented"),
+                    ],
+                )
+
+    def test_executable_and_service_unit_bytes_are_pinned(self) -> None:
+        service = self.manifest["paperclip"]["service"]
+        for field in ("executable_sha256", "fragment_sha256"):
+            with self.subTest(field=field):
+                changed = copy.deepcopy(self.manifest)
+                changed["paperclip"]["service"][field] = "f" * 64
+                with self.assertRaises(PlatformCompatibilityError):
+                    admit_installed_platform_manifest(changed)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "pinned-file"
+            original = b"reviewed bytes"
+            expected = hashlib.sha256(original).hexdigest()
+            path.write_bytes(original)
+            _verify_file(path, expected, "test file")
+            path.write_bytes(b"replacement bytes")
+            with self.assertRaisesRegex(PlatformCompatibilityError, "checksum drift"):
+                _verify_file(path, expected, "test file")
 
     def test_buzz_binary_command_or_authority_drift_fails_closed(self) -> None:
         changed = copy.deepcopy(self.manifest)

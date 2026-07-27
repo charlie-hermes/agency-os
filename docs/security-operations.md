@@ -123,9 +123,10 @@
 - The installed-platform manifest is produced from read-only target-host facts
   and rejects any field whose name could carry a token, credential, secret,
   password, private key or auth tag. Admission requires Paperclip's exact
-  versioned paths and source hashes, `paperclip:paperclip` service identity,
-  strict hardening, private authenticated ready health, and the pinned Buzz
-  binary/command surface. Buzz broadcast and task mutation remain denied.
+  versioned paths, executable and complete service-unit bytes, source hashes,
+  reviewed route surface, `paperclip:paperclip` service identity, strict
+  hardening, private authenticated ready health, and the pinned Buzz binary and
+  command surface. Buzz broadcast and task mutation remain denied.
 - The live verifier reads package files, systemd properties, private health and
   CLI help only. It performs no authenticated write and captures no secret value.
 
