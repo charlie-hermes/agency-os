@@ -20,13 +20,19 @@
   and data class for a bounded time. Missing, suspended, expired, future,
   checksum-invalid, or mismatched grants fail closed. The gateway resolves the
   grant by ID rather than accepting caller-supplied grant content. After action
-  reservation, the in-process authority samples a trusted dispatch-time clock
-  and serializes final active, checksum, and capability-window checks with
-  adapter invocation. The same sampled time revalidates approval expiry and the
-  schedule window. Suspension that wins the dispatch lock prevents the call;
-  suspension after dispatch starts becomes effective when the call finishes.
-  Production requires equivalent enforcement at the credential and egress
-  boundary across deployed workers.
+  reservation, the authority samples a trusted dispatch-time clock and
+  serializes final active, checksum, and capability-window checks with adapter
+  invocation. The same sampled time revalidates approval expiry and the schedule
+  window. The fictional in-memory implementation coordinates threads. The
+  durable SQLite implementation persists grants and suspensions and orders
+  dispatch with suspension across processes on one host. Its database must be a
+  non-symlink regular file owned by the service account with mode `0600`. Its
+  immediate parent must be a non-symlink directory owned by that account with no
+  group or other write permission. Both identities and permissions are pinned
+  at startup and revalidated around every new connection. The database must not
+  be replaced while the service is running or shared over a network filesystem.
+  Production still requires topology-appropriate shared authority plus
+  enforcement at the credential and egress boundary across deployed workers.
 - The action gateway also checks role, brand, environment, destination,
   operation, approval expiry, manifest checksum, artifact checksum, and
   schedule. Because Phase 0/1 has no typed condition evaluator, an Approval
@@ -41,8 +47,9 @@
   `UNKNOWN` states survive restarts and require reconciliation. A multi-host
   deployment must provide the same ledger contract through a database designed
   and tested for that topology; a SQLite file must not be shared over a network
-  filesystem. The SQLite database file is restricted to its service-account
-  owner and must live in an owner-only directory.
+  filesystem. The SQLite database follows the same pinned file and parent
+  ownership, mode, symlink, and per-connection revalidation rules as the
+  capability authority.
 - The only Phase 0/1 destination is a local mock. Real egress is absent.
 - Audit records contain identifiers, checksums, state, and reason codes, never
   credentials or client content.
