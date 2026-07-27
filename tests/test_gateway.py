@@ -8,7 +8,12 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from agency_os.contracts import ContractError, finalize_record
+from agency_os.capabilities import CapabilityRegistry
+from agency_os.contracts import (
+    ContractError,
+    finalize_record,
+    make_capability_record,
+)
 from agency_os.gateway import ActionGateway, GatewayDenied, MockPublisher
 from agency_os.ledger import (
     InMemoryActionLedger,
@@ -64,6 +69,22 @@ class InvalidReplayLedger(InMemoryActionLedger):
         )
 
 
+class SuspendingLedger(InMemoryActionLedger):
+    def __init__(self, registry, issuer, brand_id, capability_id):
+        super().__init__()
+        self.registry = registry
+        self.issuer = issuer
+        self.brand_id = brand_id
+        self.capability_id = capability_id
+
+    def reserve(self, brand_id, idempotency_key, request_checksum):
+        reservation = super().reserve(brand_id, idempotency_key, request_checksum)
+        self.registry.suspend(
+            self.issuer, self.brand_id, self.capability_id
+        )
+        return reservation
+
+
 class GatewayTests(unittest.TestCase):
     def setUp(self) -> None:
         flow = run_fictional_article()
@@ -73,15 +94,13 @@ class GatewayTests(unittest.TestCase):
         self.principal = Principal(
             "agent_publisher", "publishing-operator", "brand_lantern"
         )
-        self.capability = {
-            "capability_id": "cap_mock_publish",
-            "status": "active",
-            "brand_id": "brand_lantern",
-            "allowed_role_ids": ["publishing-operator"],
-            "destination_ref": "mock_cms:lantern",
-            "environment": "sandbox",
-            "operation": "publish",
-        }
+        self.director = Principal(
+            "agent_director", "agency-director", "brand_lantern"
+        )
+        self.now = datetime.now(timezone.utc)
+        self.capability_registry = CapabilityRegistry()
+        self.capability = self._capability()
+        self.capability_registry.register(self.director, self.capability)
         self.approval_authorities = {
             "brand_lantern": {"brand_owner": ["human_owner"]}
         }
@@ -92,11 +111,36 @@ class GatewayTests(unittest.TestCase):
         self.gateway = self._gateway(
             self.publisher, InMemoryActionLedger()
         )
-        self.now = datetime.now(timezone.utc)
 
-    def _gateway(self, publisher, ledger) -> ActionGateway:
+    def _capability(self, capability_id="cap_mock_publish", **changes):
+        values = {
+            "capability_id": capability_id,
+            "brand_id": "brand_lantern",
+            "actor_id": "agent_publisher",
+            "role_id": "publishing-operator",
+            "destination_ref": "mock_cms:lantern",
+            "environment": "sandbox",
+            "operation": "publish",
+            "action_class": "external_write",
+            "data_class": "public_content",
+            "issued_by": "agent_director",
+            "issued_at": (self.now - timedelta(minutes=5)).isoformat(),
+            "not_before": (self.now - timedelta(minutes=5)).isoformat(),
+            "expires_at": (self.now + timedelta(minutes=30)).isoformat(),
+        }
+        values.update(changes)
+        return make_capability_record(**values)
+
+    def _gateway(
+        self,
+        publisher,
+        ledger,
+        capability_id="cap_mock_publish",
+        capability_registry=None,
+    ) -> ActionGateway:
         return ActionGateway(
-            capability=self.capability,
+            capability_id=capability_id,
+            capability_registry=capability_registry or self.capability_registry,
             publisher=publisher,
             approval_store=self.store,
             approval_authorities=self.approval_authorities,
@@ -194,6 +238,143 @@ class GatewayTests(unittest.TestCase):
                 now=self.now,
             )
         self.assertEqual(self.publisher.calls, 0)
+
+    def test_missing_and_wrong_actor_capabilities_are_denied(self) -> None:
+        missing_publisher = MockPublisher()
+        missing_gateway = self._gateway(
+            missing_publisher,
+            InMemoryActionLedger(),
+            capability_id="cap_missing",
+        )
+        with self.assertRaises(GatewayDenied) as missing:
+            missing_gateway.publish(
+                principal=self.principal,
+                manifest=self.manifest,
+                approval_id=self.approval["approval_id"],
+                idempotency_key="missing-capability",
+                now=self.now,
+            )
+        self.assertEqual(str(missing.exception), "CAPABILITY_NOT_AUTHORITATIVE")
+
+        wrong_actor = self._capability(
+            "cap_wrong_actor", actor_id="agent_other_publisher"
+        )
+        self.capability_registry.register(self.director, wrong_actor)
+        wrong_actor_publisher = MockPublisher()
+        wrong_actor_gateway = self._gateway(
+            wrong_actor_publisher,
+            InMemoryActionLedger(),
+            capability_id=wrong_actor["capability_id"],
+        )
+        with self.assertRaises(GatewayDenied) as denied:
+            wrong_actor_gateway.publish(
+                principal=self.principal,
+                manifest=self.manifest,
+                approval_id=self.approval["approval_id"],
+                idempotency_key="wrong-actor-capability",
+                now=self.now,
+            )
+        self.assertEqual(str(denied.exception), "CAPABILITY_ACTOR_ID_DENIED")
+        self.assertEqual(missing_publisher.calls, 0)
+        self.assertEqual(wrong_actor_publisher.calls, 0)
+
+    def test_suspended_expired_and_future_capabilities_are_denied(self) -> None:
+        suspended = self._capability("cap_suspended")
+        expired = self._capability(
+            "cap_expired",
+            issued_at=(self.now - timedelta(minutes=10)).isoformat(),
+            not_before=(self.now - timedelta(minutes=10)).isoformat(),
+            expires_at=(self.now - timedelta(minutes=1)).isoformat(),
+        )
+        future = self._capability(
+            "cap_future",
+            issued_at=(self.now - timedelta(minutes=1)).isoformat(),
+            not_before=(self.now + timedelta(minutes=1)).isoformat(),
+            expires_at=(self.now + timedelta(minutes=10)).isoformat(),
+        )
+        for capability in (suspended, expired, future):
+            self.capability_registry.register(self.director, capability)
+        self.capability_registry.suspend(
+            self.director, "brand_lantern", suspended["capability_id"]
+        )
+
+        expectations = (
+            (suspended, "CAPABILITY_INACTIVE"),
+            (expired, "CAPABILITY_EXPIRED"),
+            (future, "CAPABILITY_NOT_YET_EFFECTIVE"),
+        )
+        for capability, reason in expectations:
+            with self.subTest(capability=capability["capability_id"]):
+                publisher = MockPublisher()
+                gateway = self._gateway(
+                    publisher,
+                    InMemoryActionLedger(),
+                    capability_id=capability["capability_id"],
+                )
+                with self.assertRaises(GatewayDenied) as denied:
+                    gateway.publish(
+                        principal=self.principal,
+                        manifest=self.manifest,
+                        approval_id=self.approval["approval_id"],
+                        idempotency_key=capability["capability_id"],
+                        now=self.now,
+                    )
+                self.assertEqual(str(denied.exception), reason)
+                self.assertEqual(publisher.calls, 0)
+
+    def test_capability_scope_is_exact_for_action_and_data(self) -> None:
+        variants = (
+            ("destination_ref", "mock_cms:other", "CAPABILITY_DESTINATION_REF_DENIED"),
+            ("environment", "production", "CAPABILITY_ENVIRONMENT_DENIED"),
+            ("operation", "delete", "CAPABILITY_OPERATION_DENIED"),
+            ("action_class", "internal_read", "CAPABILITY_ACTION_CLASS_DENIED"),
+            ("data_class", "private_content", "CAPABILITY_DATA_CLASS_DENIED"),
+        )
+        for field, value, reason in variants:
+            with self.subTest(field=field):
+                capability_id = f"cap_wrong_{field}"
+                capability = self._capability(
+                    capability_id, **{field: value}
+                )
+                self.capability_registry.register(self.director, capability)
+                publisher = MockPublisher()
+                gateway = self._gateway(
+                    publisher,
+                    InMemoryActionLedger(),
+                    capability_id=capability_id,
+                )
+                with self.assertRaises(GatewayDenied) as denied:
+                    gateway.publish(
+                        principal=self.principal,
+                        manifest=self.manifest,
+                        approval_id=self.approval["approval_id"],
+                        idempotency_key=capability_id,
+                        now=self.now,
+                    )
+                self.assertEqual(str(denied.exception), reason)
+                self.assertEqual(publisher.calls, 0)
+
+    def test_capability_is_revalidated_after_reservation(self) -> None:
+        publisher = MockPublisher()
+        ledger = SuspendingLedger(
+            self.capability_registry,
+            self.director,
+            "brand_lantern",
+            self.capability["capability_id"],
+        )
+        gateway = self._gateway(publisher, ledger)
+
+        with self.assertRaises(GatewayDenied) as denied:
+            gateway.publish(
+                principal=self.principal,
+                manifest=self.manifest,
+                approval_id=self.approval["approval_id"],
+                idempotency_key="suspended-after-reservation",
+                now=self.now,
+            )
+
+        self.assertEqual(str(denied.exception), "CAPABILITY_INACTIVE")
+        self.assertEqual(publisher.calls, 0)
 
     def test_unknown_result_requires_reconciliation_before_retry(self) -> None:
         publisher = AmbiguousPublisher()
