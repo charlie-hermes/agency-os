@@ -112,6 +112,42 @@
       "expected_evidence": "late suspension stops adapter dispatch"
     },
     {
+      "id": "RUNTIME-IDENTITY-001",
+      "phase": 1,
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "fixture": "trusted runtime enrollment plus missing, expired, replayed, and changed assertions",
+      "command": "python3 -m unittest tests.test_gateway.GatewayTests.test_runtime_assertion_is_required_short_lived_one_use_and_pinned",
+      "expected_evidence": "identity is derived from one pinned runtime and every invalid assertion fails before dispatch"
+    },
+    {
+      "id": "RUNTIME-SCOPE-001",
+      "phase": 1,
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "fixture": "runtime enrollments for the wrong worker and client",
+      "command": "python3 -m unittest tests.test_gateway.GatewayTests.test_runtime_enrollment_not_worker_input_drives_identity",
+      "expected_evidence": "worker input cannot select identity and enrolled actor/client mismatches fail closed"
+    },
+    {
+      "id": "CREDENTIAL-EGRESS-001",
+      "phase": 1,
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "fixture": "wrong credential scope, unapproved endpoint, real-network endpoint, and direct adapter call",
+      "command": "python3 -m unittest tests.test_gateway.GatewayTests.test_credential_scope_allowlist_and_direct_bypass_fail_closed",
+      "expected_evidence": "all broker, endpoint, real-network, and adapter bypass attempts cause zero mock dispatch"
+    },
+    {
+      "id": "CREDENTIAL-LEASE-001",
+      "phase": 1,
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "fixture": "one exact mock credential grant and an expired grant",
+      "command": "python3 -m unittest tests.test_gateway.GatewayTests.test_mock_credential_is_short_lived_and_never_returned",
+      "expected_evidence": "the exact adapter receives one short-lived lease; expired scope fails and no credential appears in output or audit"
+    },
+    {
       "id": "IDEMPOTENCY-001",
       "phase": 1,
       "owner": "platform-assurance-reviewer",

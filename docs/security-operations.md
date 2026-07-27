@@ -2,8 +2,12 @@
 
 ## Phase 0/1 enforcement
 
-- Workload identity is represented by an immutable `Principal` supplied by the
-  host/runtime boundary.
+- The gateway no longer accepts a worker-supplied `Principal`. A trusted local
+  supervisor observes a pinned runtime ID, operating-system user, executable
+  checksum, and instance nonce. The runtime authority derives the immutable
+  `Principal` from that enrollment after authenticating a signed, short-lived,
+  one-use assertion. Missing, malformed, future, expired, replayed, unregistered,
+  or changed-runtime assertions fail before capability or action resolution.
 - The tenant store checks the principal's `brand_id` on every read and write.
 - Role read and write permissions are allowlisted by record type. The publishing
   operator can retrieve the public Publication Manifest but not draft or
@@ -50,7 +54,15 @@
   filesystem. The SQLite database follows the same pinned file and parent
   ownership, mode, symlink, and per-connection revalidation rules as the
   capability authority.
-- The only Phase 0/1 destination is a local mock. Real egress is absent.
+- The fictional credential broker binds one mock credential to the exact live
+  capability checksum, authenticated actor, role, brand, environment,
+  destination and operation. It creates a one-use lease of at most 30 seconds
+  and releases the mock value only inside the adapter call. The adapter rejects
+  direct calls without a broker lease. Destination-to-endpoint mapping is
+  allowlisted and this candidate refuses every endpoint except `mock://`.
+- The only Phase 0/1 destination is a local mock. Real egress is explicitly
+  denied. The supervisor, in-memory runtime authority and fictional credential
+  broker are reference controls, not claims of production VM enforcement.
 - Audit records contain identifiers, checksums, state, and reason codes, never
   credentials or client content.
 

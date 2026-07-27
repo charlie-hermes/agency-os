@@ -9,6 +9,20 @@ from .contracts import (
     verify_record,
 )
 from .gateway import ActionGateway, GatewayDenied, MockPublisher
+from .runtime_security import (
+    CredentialBrokerError,
+    FictionalCredentialBroker,
+    FictionalCredentialGrant,
+    RuntimeBoundary,
+    RuntimeIdentityAuthority,
+    RuntimeIdentityError,
+    RuntimeObservation,
+    SupervisorRuntimeBoundary,
+    VerifiedRuntimeBoundary,
+    fictional_credential_broker,
+    fictional_credential_grant,
+    fictional_runtime,
+)
 from .store import AuthorizationError, Principal, TenantStore
 
 __all__ = [
@@ -19,6 +33,18 @@ __all__ = [
     "ContractError",
     "GatewayDenied",
     "MockPublisher",
+    "CredentialBrokerError",
+    "FictionalCredentialBroker",
+    "FictionalCredentialGrant",
+    "RuntimeBoundary",
+    "RuntimeIdentityAuthority",
+    "RuntimeIdentityError",
+    "RuntimeObservation",
+    "SupervisorRuntimeBoundary",
+    "VerifiedRuntimeBoundary",
+    "fictional_credential_broker",
+    "fictional_credential_grant",
+    "fictional_runtime",
     "Principal",
     "TenantStore",
     "canonical_checksum",

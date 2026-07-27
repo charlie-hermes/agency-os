@@ -9,6 +9,24 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class RepositoryContractTests(unittest.TestCase):
+    def test_master_plan_keeps_end_to_end_gates_visible(self) -> None:
+        plan = (ROOT / "docs/master-plan.md").read_text()
+        expected_sections = {
+            "Gate 4 — authenticated runtime, credential broker and restricted egress",
+            "Gate 5 — authoritative platform adapters and tenant data foundation",
+            "Gate 6 — governed product-decision workshop",
+            "Gate 7 — complete fictional Search Authority Core slice",
+            "Gate 8 — optional fictional Social Amplifier",
+            "Gate 9 — two-brand isolation proof",
+            "Gate 10 — operator and client experience",
+            "Gate 11 — staged real integrations",
+            "Gate 12 — production operations and final acceptance",
+        }
+        for section in expected_sections:
+            self.assertIn(section, plan)
+        self.assertIn("Paperclip remains the only task, approval and audit authority", plan)
+        self.assertIn("Product choices remain owner decisions", plan)
+
     def test_role_catalogue_is_complete(self) -> None:
         catalogue = json.loads((ROOT / "config/roles.json").read_text())
         roles = catalogue["roles"]
