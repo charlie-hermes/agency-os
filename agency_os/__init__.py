@@ -8,17 +8,33 @@ from .contracts import (
     make_capability_record,
     verify_record,
 )
-from .gateway import ActionGateway, GatewayDenied, MockPublisher
+from .gateway import GatewayDenied, MockPublisher
+from .gateway_host import ActionGatewayClient, fictional_runtime
+from .runtime_security import (
+    CredentialBrokerError,
+    FictionalCredentialBroker,
+    FictionalCredentialGrant,
+    RuntimeIdentityError,
+    fictional_credential_broker,
+    fictional_credential_grant,
+)
 from .store import AuthorizationError, Principal, TenantStore
 
 __all__ = [
-    "ActionGateway",
+    "ActionGatewayClient",
     "AuthorizationError",
     "CapabilityError",
     "CapabilityRegistry",
     "ContractError",
     "GatewayDenied",
     "MockPublisher",
+    "CredentialBrokerError",
+    "FictionalCredentialBroker",
+    "FictionalCredentialGrant",
+    "RuntimeIdentityError",
+    "fictional_credential_broker",
+    "fictional_credential_grant",
+    "fictional_runtime",
     "Principal",
     "TenantStore",
     "canonical_checksum",

@@ -112,6 +112,69 @@
       "expected_evidence": "late suspension stops adapter dispatch"
     },
     {
+      "id": "RUNTIME-IDENTITY-001",
+      "phase": 1,
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "fixture": "trusted runtime enrollment plus missing, expired, replayed, and changed assertions",
+      "command": "python3 -m unittest tests.test_gateway.GatewayTests.test_runtime_assertion_is_required_short_lived_one_use_and_pinned",
+      "expected_evidence": "identity is derived from one pinned runtime and every invalid assertion fails before dispatch"
+    },
+    {
+      "id": "RUNTIME-SCOPE-001",
+      "phase": 1,
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "fixture": "authority-owned exact OS observation and a worker client with no identity inputs",
+      "command": "python3 -m unittest tests.test_gateway.GatewayTests.test_runtime_enrollment_not_worker_input_drives_identity",
+      "expected_evidence": "the worker-visible factory creates only an IPC client and accepts no principal, role, brand, runtime ID, observation, or time"
+    },
+    {
+      "id": "RUNTIME-WIRING-001",
+      "phase": 1,
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "fixture": "a worker client subjected to ordinary and object.__setattr__ gateway/boundary replacement attempts",
+      "command": "python3 -m unittest tests.test_gateway.GatewayTests.test_worker_client_cannot_hold_or_replace_gateway_boundary",
+      "expected_evidence": "the worker client contains only a socket path; protected host publisher and credential audit remain untouched"
+    },
+    {
+      "id": "RUNTIME-PEER-001",
+      "phase": 1,
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "fixture": "a second local process calls the public factory and attempts publication through the private host socket",
+      "command": "python3 -m unittest tests.test_gateway.GatewayTests.test_other_process_cannot_self_provision_or_access_authority_host",
+      "expected_evidence": "the unregistered PID is denied and protected-host credential and publisher counts remain zero"
+    },
+    {
+      "id": "RUNTIME-CLEANUP-001",
+      "phase": 1,
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "fixture": "a closed authority host and removed private socket directory",
+      "command": "python3 -m unittest tests.test_gateway.GatewayTests.test_authority_host_cleanup_fails_closed_without_dispatch",
+      "expected_evidence": "the host terminates, local socket material is removed, and later publication fails before credential release or dispatch"
+    },
+    {
+      "id": "CREDENTIAL-EGRESS-001",
+      "phase": 1,
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "fixture": "wrong credential scope, unapproved endpoint, real-network endpoint, and direct adapter call",
+      "command": "python3 -m unittest tests.test_gateway.GatewayTests.test_credential_scope_allowlist_and_direct_bypass_fail_closed",
+      "expected_evidence": "all broker, endpoint, real-network, and adapter bypass attempts cause zero mock dispatch"
+    },
+    {
+      "id": "CREDENTIAL-LEASE-001",
+      "phase": 1,
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "fixture": "one exact mock credential grant and an expired grant",
+      "command": "python3 -m unittest tests.test_gateway.GatewayTests.test_mock_credential_is_short_lived_and_never_returned",
+      "expected_evidence": "the exact adapter receives one short-lived lease; expired scope fails and no credential appears in output or audit"
+    },
+    {
       "id": "IDEMPOTENCY-001",
       "phase": 1,
       "owner": "platform-assurance-reviewer",

@@ -11,6 +11,7 @@ from .capabilities import (
     CapabilityDriftError,
     CapabilityError,
     CapabilityExpiredError,
+    FinalDispatchDenied,
     CapabilityInactiveError,
     CapabilityNotYetEffectiveError,
     CapabilityRegistry,
@@ -24,6 +25,7 @@ from .contracts import (
     verify_record,
 )
 from .ledger import ActionLedger, LedgerError
+from .runtime_security import CredentialBrokerError, FictionalCredentialBroker
 from .store import Principal, TenantStore
 
 
@@ -34,13 +36,28 @@ class GatewayDenied(PermissionError):
 class MockPublisher:
     """A local destination that never performs network I/O."""
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        destination_ref: str = "mock_cms:lantern",
+        endpoint: str = "mock://cms/lantern",
+        expected_credential: str = "fictional-credential-lantern",
+    ) -> None:
         self.calls = 0
         self.objects: dict[str, dict[str, Any]] = {}
+        self.destination_ref = destination_ref
+        self.endpoint = endpoint
+        self._expected_credential = expected_credential
+        self.credential_ids: list[str] = []
 
     def publish(
-        self, *, public_fields: Mapping[str, Any], idempotency_key: str
+        self,
+        *,
+        public_fields: Mapping[str, Any],
+        idempotency_key: str,
+        credential_lease: Any = None,
     ) -> dict[str, Any]:
+        self._authorize_dispatch(credential_lease)
         self.calls += 1
         external_id = f"mock_{len(self.objects) + 1}"
         result = {
@@ -52,41 +69,70 @@ class MockPublisher:
         self.objects[idempotency_key] = result
         return copy.deepcopy(result)
 
+    def _authorize_dispatch(self, credential_lease: Any) -> None:
+        if credential_lease is None or not callable(
+            getattr(credential_lease, "consume", None)
+        ):
+            raise CredentialBrokerError("DIRECT_ADAPTER_BYPASS_DENIED")
+        credential = credential_lease.consume(
+            destination_ref=self.destination_ref, endpoint=self.endpoint
+        )
+        if credential != self._expected_credential:
+            raise CredentialBrokerError("ADAPTER_CREDENTIAL_REJECTED")
+        self.credential_ids.append(str(credential_lease.credential_id))
 
-class ActionGateway:
+
+class _AuthorityActionGateway:
+    """Authority-host core; worker processes must use the IPC client."""
+
+    __slots__ = (
+        "_capability_id",
+        "_capability_registry",
+        "_credential_broker",
+        "_publisher",
+        "_approval_store",
+        "_approval_authorities",
+        "_action_ledger",
+        "_clock",
+        "audit",
+    )
+
     def __init__(
         self,
         *,
         capability_id: str,
         capability_registry: CapabilityRegistry,
+        credential_broker: FictionalCredentialBroker,
         publisher: MockPublisher,
         approval_store: TenantStore,
         approval_authorities: Mapping[str, Mapping[str, list[str] | tuple[str, ...]]],
         action_ledger: ActionLedger,
         clock: Callable[[], datetime] | None = None,
     ) -> None:
-        self.capability_id = capability_id
-        self.capability_registry = capability_registry
-        self.publisher = publisher
-        self.approval_store = approval_store
-        self.approval_authorities = copy.deepcopy(dict(approval_authorities))
-        self.action_ledger = action_ledger
+        self._capability_id = capability_id
+        self._capability_registry = capability_registry
+        self._credential_broker = credential_broker
+        self._publisher = publisher
+        self._approval_store = approval_store
+        self._approval_authorities = copy.deepcopy(dict(approval_authorities))
+        self._action_ledger = action_ledger
         self._clock = clock or (lambda: datetime.now(timezone.utc))
         self.audit: list[dict[str, Any]] = []
 
-    def publish(
+    def dispatch_authorized(
         self,
         *,
         principal: Principal,
         manifest: Mapping[str, Any],
         approval_id: str,
         idempotency_key: str,
-        now: datetime | None = None,
     ) -> dict[str, Any]:
-        current_time = now or self._clock()
+        current_time = self._clock()
+        if not isinstance(principal, Principal):
+            self._deny("RUNTIME_IDENTITY_INVALID", {"brand_id": None})
         capability, capability_status = self._resolve_capability(principal)
         try:
-            approval, approval_provenance = self.approval_store.resolve_approval(
+            approval, approval_provenance = self._approval_store.resolve_approval(
                 principal.brand_id, approval_id
             )
         except (KeyError, ContractError) as exc:
@@ -120,7 +166,7 @@ class ActionGateway:
         }
         request_checksum = canonical_checksum(request_binding)
         try:
-            reservation = self.action_ledger.reserve(
+            reservation = self._action_ledger.reserve(
                 principal.brand_id, idempotency_key, request_checksum
             )
         except LedgerError as exc:
@@ -156,19 +202,26 @@ class ActionGateway:
         if reservation.status != "RESERVED":
             self._deny("LEDGER_UNAVAILABLE", request_binding)
         try:
-            external = self.capability_registry.authorized_dispatch(
+            external = self._capability_registry.authorized_dispatch(
                 principal.brand_id,
-                self.capability_id,
+                self._capability_id,
                 capability["content_checksum"],
                 clock=self._clock,
                 pre_dispatch=lambda dispatch_time: self._validate_time_windows(
                     manifest, approval, dispatch_time
                 ),
-                dispatch=lambda: self.publisher.publish(
+                dispatch=lambda authorization_guard: self._credential_broker.dispatch(
+                    principal=principal,
+                    capability=capability,
+                    manifest=manifest,
+                    publisher=self._publisher,
                     public_fields=manifest["public_fields"],
                     idempotency_key=idempotency_key,
+                    authorization_guard=authorization_guard,
                 ),
             )
+        except FinalDispatchDenied as exc:
+            self._deny(exc.code, request_binding, cause=exc)
         except CapabilityNotYetEffectiveError as exc:
             self._deny("CAPABILITY_NOT_YET_EFFECTIVE", request_binding, cause=exc)
         except CapabilityExpiredError as exc:
@@ -180,8 +233,10 @@ class ActionGateway:
         except (KeyError, ContractError, CapabilityError) as exc:
             self._deny("CAPABILITY_NOT_AUTHORITATIVE", request_binding, cause=exc)
         except CapabilityDispatchError as exc:
+            if isinstance(exc.__cause__, CredentialBrokerError):
+                self._deny(exc.__cause__.code, request_binding, cause=exc)
             try:
-                self.action_ledger.mark_unknown(
+                self._action_ledger.mark_unknown(
                     principal.brand_id, idempotency_key, request_checksum
                 )
             except LedgerError:
@@ -222,12 +277,12 @@ class ActionGateway:
             }
         )
         try:
-            self.action_ledger.complete(
+            self._action_ledger.complete(
                 principal.brand_id, idempotency_key, request_checksum, receipt
             )
         except LedgerError as exc:
             try:
-                self.action_ledger.mark_unknown(
+                self._action_ledger.mark_unknown(
                     principal.brand_id, idempotency_key, request_checksum
                 )
             except LedgerError:
@@ -269,7 +324,7 @@ class ActionGateway:
             or approval_provenance.get("role_id") != "human-approver"
         ):
             self._deny("APPROVAL_PROVENANCE_INVALID", dict(manifest))
-        brand_policy = self.approval_authorities.get(principal.brand_id, {})
+        brand_policy = self._approval_authorities.get(principal.brand_id, {})
         allowed_approvers = brand_policy.get(str(approval.get("authority_role")), ())
         if approval.get("approver_id") not in allowed_approvers:
             self._deny("APPROVAL_AUTHORITY_DENIED", dict(manifest))
@@ -317,8 +372,8 @@ class ActionGateway:
         self, principal: Principal
     ) -> tuple[dict[str, Any], str]:
         try:
-            return self.capability_registry.resolve(
-                principal.brand_id, self.capability_id
+            return self._capability_registry.resolve(
+                principal.brand_id, self._capability_id
             )
         except (KeyError, ContractError, CapabilityError) as exc:
             self._deny(

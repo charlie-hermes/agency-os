@@ -22,17 +22,27 @@ provider, or publish externally.
   blueprint.
 - `docs/contract-reconciliation.md` — authoritative resolutions where the
   blueprint and role library differ.
+- `docs/master-plan.md` — living gate-by-gate roadmap from the current
+  fictional controls through the complete production system.
 - `docs/security-operations.md` — enforceable Phase 0/1 controls and production
   promotion blockers.
 - `schemas/` — versioned JSON Schemas for lifecycle and learning records.
 - `agency_os/` — standard-library-only reference controls, including an
   authoritative capability registry and an injectable in-memory or durable
-  local-process action ledger.
+  local-process action ledger, a protected fictional gateway/identity host with
+  a worker-only IPC client, mock credential broker and deny-by-default mock
+  egress boundary.
 - `fixtures/` — fictional tenant input.
 - `acceptance/matrix.json` — release criteria mapped to executable evidence.
 - `tests/` — allowed-path, denied-path, recovery, and vertical-slice tests.
 
 ## Verify
+
+The complete repository gate is supported on **Linux only** because the runtime
+identity tests intentionally require `SO_PEERCRED` and process facts from a
+mounted `/proc` filesystem. The verification script checks these prerequisites
+before running any tests. GitHub Actions runs the same gate on Ubuntu; macOS and
+Windows are not supported validation hosts for Gate 4.
 
 ```bash
 ./scripts/verify

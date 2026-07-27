@@ -175,8 +175,9 @@ class SQLiteCapabilityRegistryTests(CapabilityRegistryTests):
         suspend_started = threading.Event()
         calls = 0
 
-        def dispatch():
+        def dispatch(authorization_guard):
             nonlocal calls
+            authorization_guard.acquire()
             entered.set()
             if not release.wait(timeout=2):
                 raise TimeoutError("test did not release durable dispatch")
@@ -215,8 +216,44 @@ class SQLiteCapabilityRegistryTests(CapabilityRegistryTests):
                 self.capability["content_checksum"],
                 clock=lambda: self.now,
                 pre_dispatch=lambda _now: None,
-                dispatch=lambda: "unexpected",
+                dispatch=lambda _authorization_guard: "unexpected",
             )
+
+    def test_suspension_before_final_authorization_wins_across_instances(self) -> None:
+        self.registry.register(self.director, self.capability)
+        other = SQLiteCapabilityRegistry(self.database_path, timeout_seconds=2)
+        adapter_entered = threading.Event()
+        continue_to_credential = threading.Event()
+        calls = 0
+
+        def dispatch(authorization_guard):
+            nonlocal calls
+            adapter_entered.set()
+            if not continue_to_credential.wait(timeout=2):
+                raise TimeoutError("test did not continue to credential")
+            authorization_guard.acquire()
+            calls += 1
+            return "unexpected"
+
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            dispatch_future = pool.submit(
+                self.registry.authorized_dispatch,
+                "brand_lantern",
+                "cap_publish",
+                self.capability["content_checksum"],
+                clock=lambda: self.now,
+                pre_dispatch=lambda _now: None,
+                dispatch=dispatch,
+            )
+            self.assertTrue(adapter_entered.wait(timeout=1))
+            other.suspend(self.director, "brand_lantern", "cap_publish")
+            continue_to_credential.set()
+            with self.assertRaises(CapabilityInactiveError):
+                dispatch_future.result(timeout=1)
+
+        self.assertEqual(calls, 0)
+        _, status = self.registry.resolve("brand_lantern", "cap_publish")
+        self.assertEqual(status, "suspended")
 
 
 if __name__ == "__main__":
