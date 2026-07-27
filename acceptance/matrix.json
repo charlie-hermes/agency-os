@@ -94,6 +94,42 @@
       "expected_evidence": "one reservation and one external dispatch; concurrent retry is denied"
     },
     {
+      "id": "IDEMPOTENCY-SHARED-001",
+      "phase": 1,
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "fixture": "two gateway instances sharing one durable SQLite ledger",
+      "command": "python3 -m unittest tests.test_gateway.GatewayTests.test_two_gateway_instances_dispatch_once_with_shared_ledger",
+      "expected_evidence": "one external dispatch; overlapping second instance is denied"
+    },
+    {
+      "id": "IDEMPOTENCY-RESTART-001",
+      "phase": 1,
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "fixture": "completed action followed by a new gateway and ledger instance",
+      "command": "python3 -m unittest tests.test_gateway.GatewayTests.test_completed_receipt_replays_after_gateway_restart",
+      "expected_evidence": "saved receipt returns after restart with no second dispatch"
+    },
+    {
+      "id": "IDEMPOTENCY-UNKNOWN-RESTART-001",
+      "phase": 1,
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "fixture": "ambiguous adapter result followed by a new gateway instance",
+      "command": "python3 -m unittest tests.test_gateway.GatewayTests.test_unknown_result_survives_restart_and_blocks_retry",
+      "expected_evidence": "UNKNOWN state survives restart and blocks a second dispatch"
+    },
+    {
+      "id": "IDEMPOTENCY-PROCESS-001",
+      "phase": 1,
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "fixture": "two operating-system processes sharing one SQLite ledger",
+      "command": "python3 -m unittest tests.test_ledger.LedgerTests.test_separate_processes_share_one_atomic_reservation",
+      "expected_evidence": "one process reserves the key and the other observes the block"
+    },
+    {
       "id": "STORE-IDENTITY-001",
       "phase": 1,
       "owner": "platform-assurance-reviewer",

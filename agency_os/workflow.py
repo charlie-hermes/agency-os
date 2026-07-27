@@ -13,6 +13,7 @@ from .contracts import (
     make_publication_manifest,
 )
 from .gateway import ActionGateway, MockPublisher
+from .ledger import InMemoryActionLedger
 from .store import Principal, TenantStore
 
 
@@ -246,6 +247,7 @@ def run_fictional_article() -> VerticalSliceResult:
         publisher=publisher,
         approval_store=store,
         approval_authorities={brand_id: {"brand_owner": ["human_owner"]}},
+        action_ledger=InMemoryActionLedger(),
     )
     receipt = gateway.publish(
         principal=principals["publisher"],

@@ -25,7 +25,8 @@ provider, or publish externally.
 - `docs/security-operations.md` — enforceable Phase 0/1 controls and production
   promotion blockers.
 - `schemas/` — versioned JSON Schemas for lifecycle and learning records.
-- `agency_os/` — standard-library-only reference controls.
+- `agency_os/` — standard-library-only reference controls, including an
+  injectable in-memory or durable local-process action ledger.
 - `fixtures/` — fictional tenant input.
 - `acceptance/matrix.json` — release criteria mapped to executable evidence.
 - `tests/` — allowed-path, denied-path, recovery, and vertical-slice tests.
