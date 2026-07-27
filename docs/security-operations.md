@@ -19,11 +19,16 @@
   Phase 0/1 has no typed condition evaluator, an Approval Record with missing,
   malformed, or non-empty `conditions` fails closed before adapter dispatch;
   only an explicit empty array is currently publishable.
-- The Phase 0/1 in-process idempotency reservation is atomic and written before
-  adapter dispatch. Reuse with a different request fingerprint is denied; exact
-  replay returns the original receipt without a second write. Production
-  promotion still requires a shared durable ledger with a unique idempotency
-  constraint across workers and processes.
+- The action gateway requires an explicit ledger. The fictional demonstration
+  uses a thread-safe in-memory ledger; the durable SQLite implementation uses a
+  unique key and an atomic transaction shared by gateway instances and local
+  worker processes. Intent is saved before adapter dispatch, exact replay
+  returns the saved receipt, conflicting reuse is denied, and `REQUESTED` or
+  `UNKNOWN` states survive restarts and require reconciliation. A multi-host
+  deployment must provide the same ledger contract through a database designed
+  and tested for that topology; a SQLite file must not be shared over a network
+  filesystem. The SQLite database file is restricted to its service-account
+  owner and must live in an owner-only directory.
 - The only Phase 0/1 destination is a local mock. Real egress is absent.
 - Audit records contain identifiers, checksums, state, and reason codes, never
   credentials or client content.
@@ -80,6 +85,8 @@ real persistent deployment meets them.
 
 ## Production promotion blockers
 
+- deploy the durable action ledger on storage suited to the worker topology and
+  prove its access controls, backup, restore, contention, and reconciliation;
 - verified 12-agent runtime bundles and fresh-session load tests;
 - real Paperclip and typed Buzz adapter evidence;
 - persistent row-level or physically isolated tenant storage;

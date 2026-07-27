@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import copy
-import threading
 from datetime import datetime, timezone
 from typing import Any, Mapping
 
@@ -15,6 +14,7 @@ from .contracts import (
     utc_now,
     verify_record,
 )
+from .ledger import ActionLedger, LedgerError
 from .store import Principal, TenantStore
 
 
@@ -52,13 +52,13 @@ class ActionGateway:
         publisher: MockPublisher,
         approval_store: TenantStore,
         approval_authorities: Mapping[str, Mapping[str, list[str] | tuple[str, ...]]],
+        action_ledger: ActionLedger,
     ) -> None:
         self.capability = copy.deepcopy(dict(capability))
         self.publisher = publisher
         self.approval_store = approval_store
         self.approval_authorities = copy.deepcopy(dict(approval_authorities))
-        self._ledger: dict[str, dict[str, Any]] = {}
-        self._ledger_lock = threading.RLock()
+        self.action_ledger = action_ledger
         self.audit: list[dict[str, Any]] = []
 
     def publish(
@@ -98,36 +98,52 @@ class ActionGateway:
             "idempotency_key": idempotency_key,
         }
         request_checksum = canonical_checksum(request_binding)
-        with self._ledger_lock:
-            existing = self._ledger.get(idempotency_key)
-            if existing is not None:
-                if existing["request_checksum"] != request_checksum:
-                    self._deny("IDEMPOTENCY_KEY_REBOUND", request_binding)
-                if existing["state"] in {"REQUESTED", "UNKNOWN"}:
-                    self._deny("RECONCILIATION_REQUIRED", request_binding)
-                self.audit.append(
-                    {
-                        "outcome": "ALLOW_IDEMPOTENT_REPLAY",
-                        "brand_id": principal.brand_id,
-                        "request_binding_checksum": request_checksum,
-                    }
-                )
-                return copy.deepcopy(existing["receipt"])
-
-            # Atomically persist intent before the external call.
-            self._ledger[idempotency_key] = {
-                "request_checksum": request_checksum,
-                "state": "REQUESTED",
-                "receipt": None,
-            }
+        try:
+            reservation = self.action_ledger.reserve(
+                idempotency_key, request_checksum
+            )
+        except LedgerError as exc:
+            self._deny("LEDGER_UNAVAILABLE", request_binding, cause=exc)
+        if reservation.status == "CONFLICT":
+            self._deny("IDEMPOTENCY_KEY_REBOUND", request_binding)
+        if reservation.status == "BLOCKED":
+            self._deny("RECONCILIATION_REQUIRED", request_binding)
+        if reservation.status == "REPLAY":
+            receipt = reservation.receipt
+            if receipt is None:
+                self._deny("LEDGER_RECEIPT_INVALID", request_binding)
+            try:
+                verify_record(receipt)
+            except ContractError as exc:
+                self._deny("LEDGER_RECEIPT_INVALID", request_binding, cause=exc)
+            replay_pairs = (
+                ("brand_id", principal.brand_id),
+                ("idempotency_key", idempotency_key),
+                ("request_binding_checksum", request_checksum),
+                ("state", "PUBLISHED"),
+            )
+            if any(receipt.get(field) != expected for field, expected in replay_pairs):
+                self._deny("LEDGER_RECEIPT_INVALID", request_binding)
+            self.audit.append(
+                {
+                    "outcome": "ALLOW_IDEMPOTENT_REPLAY",
+                    "brand_id": principal.brand_id,
+                    "request_binding_checksum": request_checksum,
+                }
+            )
+            return copy.deepcopy(receipt)
+        if reservation.status != "RESERVED":
+            self._deny("LEDGER_UNAVAILABLE", request_binding)
         try:
             external = self.publisher.publish(
                 public_fields=manifest["public_fields"],
                 idempotency_key=idempotency_key,
             )
         except Exception as exc:
-            with self._ledger_lock:
-                self._ledger[idempotency_key]["state"] = "UNKNOWN"
+            try:
+                self.action_ledger.mark_unknown(idempotency_key, request_checksum)
+            except LedgerError:
+                pass
             self._deny("EXTERNAL_RESULT_UNKNOWN", request_binding, cause=exc)
 
         receipt = finalize_record(
@@ -163,12 +179,16 @@ class ActionGateway:
                 "replayed": False,
             }
         )
-        with self._ledger_lock:
-            self._ledger[idempotency_key] = {
-                "request_checksum": request_checksum,
-                "state": receipt["state"],
-                "receipt": receipt,
-            }
+        try:
+            self.action_ledger.complete(
+                idempotency_key, request_checksum, receipt
+            )
+        except LedgerError as exc:
+            try:
+                self.action_ledger.mark_unknown(idempotency_key, request_checksum)
+            except LedgerError:
+                pass
+            self._deny("EXTERNAL_RESULT_UNKNOWN", request_binding, cause=exc)
         self.audit.append(
             {
                 "outcome": "ALLOW",
