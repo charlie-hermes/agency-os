@@ -100,7 +100,7 @@ class ActionGateway:
         request_checksum = canonical_checksum(request_binding)
         try:
             reservation = self.action_ledger.reserve(
-                idempotency_key, request_checksum
+                principal.brand_id, idempotency_key, request_checksum
             )
         except LedgerError as exc:
             self._deny("LEDGER_UNAVAILABLE", request_binding, cause=exc)
@@ -141,7 +141,9 @@ class ActionGateway:
             )
         except Exception as exc:
             try:
-                self.action_ledger.mark_unknown(idempotency_key, request_checksum)
+                self.action_ledger.mark_unknown(
+                    principal.brand_id, idempotency_key, request_checksum
+                )
             except LedgerError:
                 pass
             self._deny("EXTERNAL_RESULT_UNKNOWN", request_binding, cause=exc)
@@ -181,11 +183,13 @@ class ActionGateway:
         )
         try:
             self.action_ledger.complete(
-                idempotency_key, request_checksum, receipt
+                principal.brand_id, idempotency_key, request_checksum, receipt
             )
         except LedgerError as exc:
             try:
-                self.action_ledger.mark_unknown(idempotency_key, request_checksum)
+                self.action_ledger.mark_unknown(
+                    principal.brand_id, idempotency_key, request_checksum
+                )
             except LedgerError:
                 pass
             self._deny("EXTERNAL_RESULT_UNKNOWN", request_binding, cause=exc)

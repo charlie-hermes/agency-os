@@ -7,6 +7,7 @@ import json
 import os
 import sqlite3
 import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, Mapping, Protocol
@@ -28,18 +29,29 @@ class Reservation:
 
 
 class ActionLedger(Protocol):
-    def reserve(self, idempotency_key: str, request_checksum: str) -> Reservation:
-        """Atomically reserve a new key or resolve its existing state."""
+    def reserve(
+        self,
+        brand_id: str,
+        idempotency_key: str,
+        request_checksum: str,
+    ) -> Reservation:
+        """Atomically reserve a brand-scoped key or resolve its existing state."""
 
     def complete(
         self,
+        brand_id: str,
         idempotency_key: str,
         request_checksum: str,
         receipt: Mapping[str, Any],
     ) -> None:
         """Atomically persist a successful receipt for a reserved action."""
 
-    def mark_unknown(self, idempotency_key: str, request_checksum: str) -> None:
+    def mark_unknown(
+        self,
+        brand_id: str,
+        idempotency_key: str,
+        request_checksum: str,
+    ) -> None:
         """Persist that an external result requires reconciliation."""
 
 
@@ -47,14 +59,20 @@ class InMemoryActionLedger:
     """Thread-safe ledger for the fictional single-process demonstration."""
 
     def __init__(self) -> None:
-        self._entries: dict[str, dict[str, Any]] = {}
+        self._entries: dict[tuple[str, str], dict[str, Any]] = {}
         self._lock = threading.RLock()
 
-    def reserve(self, idempotency_key: str, request_checksum: str) -> Reservation:
+    def reserve(
+        self,
+        brand_id: str,
+        idempotency_key: str,
+        request_checksum: str,
+    ) -> Reservation:
+        ledger_key = (brand_id, idempotency_key)
         with self._lock:
-            existing = self._entries.get(idempotency_key)
+            existing = self._entries.get(ledger_key)
             if existing is None:
-                self._entries[idempotency_key] = {
+                self._entries[ledger_key] = {
                     "request_checksum": request_checksum,
                     "state": "REQUESTED",
                     "receipt": None,
@@ -70,30 +88,43 @@ class InMemoryActionLedger:
 
     def complete(
         self,
+        brand_id: str,
         idempotency_key: str,
         request_checksum: str,
         receipt: Mapping[str, Any],
     ) -> None:
         receipt_copy = _validated_receipt(
-            idempotency_key, request_checksum, receipt
+            brand_id, idempotency_key, request_checksum, receipt
         )
         with self._lock:
-            existing = self._matching_entry(idempotency_key, request_checksum)
+            existing = self._matching_entry(
+                brand_id, idempotency_key, request_checksum
+            )
             if existing["state"] != "REQUESTED":
                 raise LedgerError("only a requested action can be completed")
             existing.update({"state": "PUBLISHED", "receipt": receipt_copy})
 
-    def mark_unknown(self, idempotency_key: str, request_checksum: str) -> None:
+    def mark_unknown(
+        self,
+        brand_id: str,
+        idempotency_key: str,
+        request_checksum: str,
+    ) -> None:
         with self._lock:
-            existing = self._matching_entry(idempotency_key, request_checksum)
+            existing = self._matching_entry(
+                brand_id, idempotency_key, request_checksum
+            )
             if existing["state"] == "PUBLISHED":
                 raise LedgerError("a published action cannot become unknown")
             existing.update({"state": "UNKNOWN", "receipt": None})
 
     def _matching_entry(
-        self, idempotency_key: str, request_checksum: str
+        self,
+        brand_id: str,
+        idempotency_key: str,
+        request_checksum: str,
     ) -> dict[str, Any]:
-        existing = self._entries.get(idempotency_key)
+        existing = self._entries.get((brand_id, idempotency_key))
         if existing is None:
             raise LedgerError("action reservation is missing")
         if existing["request_checksum"] != request_checksum:
@@ -120,7 +151,12 @@ class SQLiteActionLedger:
             self._restrict_permissions()
         self._initialize()
 
-    def reserve(self, idempotency_key: str, request_checksum: str) -> Reservation:
+    def reserve(
+        self,
+        brand_id: str,
+        idempotency_key: str,
+        request_checksum: str,
+    ) -> Reservation:
         connection = self._connect()
         try:
             connection.execute("BEGIN IMMEDIATE")
@@ -128,24 +164,25 @@ class SQLiteActionLedger:
                 """
                 SELECT request_checksum, state, receipt_json
                 FROM action_ledger
-                WHERE idempotency_key = ?
+                WHERE brand_id = ? AND idempotency_key = ?
                 """,
-                (idempotency_key,),
+                (brand_id, idempotency_key),
             ).fetchone()
             if row is None:
                 now = utc_now()
                 connection.execute(
                     """
                     INSERT INTO action_ledger (
+                        brand_id,
                         idempotency_key,
                         request_checksum,
                         state,
                         receipt_json,
                         created_at,
                         updated_at
-                    ) VALUES (?, ?, 'REQUESTED', NULL, ?, ?)
+                    ) VALUES (?, ?, ?, 'REQUESTED', NULL, ?, ?)
                     """,
-                    (idempotency_key, request_checksum, now, now),
+                    (brand_id, idempotency_key, request_checksum, now, now),
                 )
                 connection.commit()
                 return Reservation("RESERVED")
@@ -175,18 +212,21 @@ class SQLiteActionLedger:
 
     def complete(
         self,
+        brand_id: str,
         idempotency_key: str,
         request_checksum: str,
         receipt: Mapping[str, Any],
     ) -> None:
         receipt_copy = _validated_receipt(
-            idempotency_key, request_checksum, receipt
+            brand_id, idempotency_key, request_checksum, receipt
         )
         receipt_json = canonical_bytes(receipt_copy).decode("utf-8")
         connection = self._connect()
         try:
             connection.execute("BEGIN IMMEDIATE")
-            stored_checksum, state = self._read_state(connection, idempotency_key)
+            stored_checksum, state = self._read_state(
+                connection, brand_id, idempotency_key
+            )
             if stored_checksum != request_checksum:
                 raise LedgerError("action reservation checksum mismatch")
             if state != "REQUESTED":
@@ -195,9 +235,9 @@ class SQLiteActionLedger:
                 """
                 UPDATE action_ledger
                 SET state = 'PUBLISHED', receipt_json = ?, updated_at = ?
-                WHERE idempotency_key = ?
+                WHERE brand_id = ? AND idempotency_key = ?
                 """,
-                (receipt_json, utc_now(), idempotency_key),
+                (receipt_json, utc_now(), brand_id, idempotency_key),
             )
             connection.commit()
         except LedgerError:
@@ -209,11 +249,18 @@ class SQLiteActionLedger:
         finally:
             connection.close()
 
-    def mark_unknown(self, idempotency_key: str, request_checksum: str) -> None:
+    def mark_unknown(
+        self,
+        brand_id: str,
+        idempotency_key: str,
+        request_checksum: str,
+    ) -> None:
         connection = self._connect()
         try:
             connection.execute("BEGIN IMMEDIATE")
-            stored_checksum, state = self._read_state(connection, idempotency_key)
+            stored_checksum, state = self._read_state(
+                connection, brand_id, idempotency_key
+            )
             if stored_checksum != request_checksum:
                 raise LedgerError("action reservation checksum mismatch")
             if state == "PUBLISHED":
@@ -222,9 +269,9 @@ class SQLiteActionLedger:
                 """
                 UPDATE action_ledger
                 SET state = 'UNKNOWN', receipt_json = NULL, updated_at = ?
-                WHERE idempotency_key = ?
+                WHERE brand_id = ? AND idempotency_key = ?
                 """,
-                (utc_now(), idempotency_key),
+                (utc_now(), brand_id, idempotency_key),
             )
             connection.commit()
         except LedgerError:
@@ -237,6 +284,19 @@ class SQLiteActionLedger:
             connection.close()
 
     def _initialize(self) -> None:
+        deadline = time.monotonic() + self.timeout_seconds
+        while True:
+            try:
+                self._initialize_once()
+                break
+            except LedgerError as exc:
+                if not _is_locked_error(exc) or time.monotonic() >= deadline:
+                    raise
+                remaining = deadline - time.monotonic()
+                time.sleep(min(0.05, max(remaining, 0.0)))
+        self._restrict_permissions()
+
+    def _initialize_once(self) -> None:
         connection = self._connect()
         try:
             journal_mode = connection.execute("PRAGMA journal_mode = WAL").fetchone()
@@ -246,7 +306,8 @@ class SQLiteActionLedger:
             connection.execute(
                 """
                 CREATE TABLE IF NOT EXISTS action_ledger (
-                    idempotency_key TEXT PRIMARY KEY,
+                    brand_id TEXT NOT NULL,
+                    idempotency_key TEXT NOT NULL,
                     request_checksum TEXT NOT NULL,
                     state TEXT NOT NULL
                         CHECK (state IN ('REQUESTED', 'UNKNOWN', 'PUBLISHED')),
@@ -257,7 +318,8 @@ class SQLiteActionLedger:
                         (state = 'PUBLISHED' AND receipt_json IS NOT NULL)
                         OR
                         (state != 'PUBLISHED' AND receipt_json IS NULL)
-                    )
+                    ),
+                    PRIMARY KEY (brand_id, idempotency_key)
                 )
                 """
             )
@@ -268,7 +330,6 @@ class SQLiteActionLedger:
             raise LedgerError("could not initialize action ledger") from exc
         finally:
             connection.close()
-        self._restrict_permissions()
 
     def _restrict_permissions(self) -> None:
         try:
@@ -295,15 +356,17 @@ class SQLiteActionLedger:
 
     @staticmethod
     def _read_state(
-        connection: sqlite3.Connection, idempotency_key: str
+        connection: sqlite3.Connection,
+        brand_id: str,
+        idempotency_key: str,
     ) -> tuple[str, str]:
         row = connection.execute(
             """
             SELECT request_checksum, state
             FROM action_ledger
-            WHERE idempotency_key = ?
+            WHERE brand_id = ? AND idempotency_key = ?
             """,
-            (idempotency_key,),
+            (brand_id, idempotency_key),
         ).fetchone()
         if row is None:
             raise LedgerError("action reservation is missing")
@@ -311,11 +374,14 @@ class SQLiteActionLedger:
 
 
 def _validated_receipt(
+    brand_id: str,
     idempotency_key: str,
     request_checksum: str,
     receipt: Mapping[str, Any],
 ) -> dict[str, Any]:
     receipt_copy = copy.deepcopy(dict(receipt))
+    if receipt_copy.get("brand_id") != brand_id:
+        raise LedgerError("receipt brand mismatch")
     if receipt_copy.get("idempotency_key") != idempotency_key:
         raise LedgerError("receipt idempotency key mismatch")
     if receipt_copy.get("request_binding_checksum") != request_checksum:
@@ -334,3 +400,17 @@ def _rollback(connection: sqlite3.Connection) -> None:
         connection.rollback()
     except sqlite3.Error:
         pass
+
+
+def _is_locked_error(error: BaseException) -> bool:
+    current: BaseException | None = error
+    while current is not None:
+        if isinstance(current, sqlite3.OperationalError):
+            error_code = getattr(current, "sqlite_errorcode", None)
+            if error_code in {sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED}:
+                return True
+            message = str(current).lower()
+            if "locked" in message or "busy" in message:
+                return True
+        current = current.__cause__
+    return False

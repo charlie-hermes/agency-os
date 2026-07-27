@@ -42,21 +42,21 @@ class BlockingPublisher(MockPublisher):
 
 
 class CompletionFailingLedger(InMemoryActionLedger):
-    def complete(self, idempotency_key, request_checksum, receipt):
+    def complete(self, brand_id, idempotency_key, request_checksum, receipt):
         raise LedgerError("synthetic completion failure")
 
 
 class UnavailableLedger(InMemoryActionLedger):
-    def reserve(self, idempotency_key, request_checksum):
+    def reserve(self, brand_id, idempotency_key, request_checksum):
         raise LedgerError("synthetic unavailable ledger")
 
 
 class InvalidReplayLedger(InMemoryActionLedger):
-    def reserve(self, idempotency_key, request_checksum):
+    def reserve(self, brand_id, idempotency_key, request_checksum):
         return Reservation(
             "REPLAY",
             {
-                "brand_id": "brand_lantern",
+                "brand_id": brand_id,
                 "idempotency_key": idempotency_key,
                 "request_binding_checksum": request_checksum,
                 "state": "PUBLISHED",

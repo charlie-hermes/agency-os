@@ -21,8 +21,9 @@
   only an explicit empty array is currently publishable.
 - The action gateway requires an explicit ledger. The fictional demonstration
   uses a thread-safe in-memory ledger; the durable SQLite implementation uses a
-  unique key and an atomic transaction shared by gateway instances and local
-  worker processes. Intent is saved before adapter dispatch, exact replay
+  unique `(brand_id, idempotency_key)` and an atomic transaction shared by
+  gateway instances and local worker processes. Intent is saved before adapter
+  dispatch, exact replay
   returns the saved receipt, conflicting reuse is denied, and `REQUESTED` or
   `UNKNOWN` states survive restarts and require reconciliation. A multi-host
   deployment must provide the same ledger contract through a database designed
