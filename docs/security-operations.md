@@ -150,8 +150,11 @@ real persistent deployment meets them.
 - deploy the durable action ledger on storage suited to the worker topology and
   prove its access controls, backup, restore, contention, and reconciliation;
 - verified 12-agent runtime bundles and fresh-session load tests;
-- real Paperclip and typed Buzz adapter evidence;
-- persistent row-level or physically isolated tenant storage;
+- adapters verified against the installed Paperclip and Buzz services (the
+  current typed adapters are local fictional references only);
+- deployed row-level or physically isolated tenant storage with backup,
+  restore and offboarding evidence (the current evidence authority is local
+  SQLite only);
 - credential broker and deny-by-default egress;
 - persistent capability admission, runtime identity binding, and drift
   suspension across deployed workers;

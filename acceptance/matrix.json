@@ -1,6 +1,6 @@
 {
   "schema_version": "1.0",
-  "candidate_phase": "0/1-fictional",
+  "candidate_phase": "gate-5-foundation-fictional",
   "release_command": "./scripts/verify",
   "criteria": [
     {
@@ -281,6 +281,51 @@
       "fixture": "fixtures/fictional_brand.json",
       "command": "python3 -m unittest tests.test_workflow.WorkflowTests.test_complete_fictional_flow",
       "expected_evidence": "draft through measured publication receipt passes with no real write"
+    },
+    {
+      "id": "PAPERCLIP-AUTHORITY-001",
+      "phase": 5,
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "fixture": "versioned fictional tasks with dependencies, budgets and closure evidence",
+      "command": "python3 -m unittest tests.test_platform_adapters.PlatformAdapterTests.test_dependencies_budget_closure_and_restart_are_authoritative",
+      "expected_evidence": "dependency and budget denials hold while valid closure survives restart"
+    },
+    {
+      "id": "PAPERCLIP-APPROVAL-001",
+      "phase": 5,
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "fixture": "missing, rejected and checksum-stale task approvals",
+      "command": "python3 -m unittest tests.test_platform_adapters.PlatformAdapterTests.test_approval_is_exact_fresh_and_required_for_closure",
+      "expected_evidence": "no approval alternative can close the protected task"
+    },
+    {
+      "id": "BUZZ-AUTHORITY-001",
+      "phase": 5,
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "fixture": "typed Buzz context and immutable Paperclip decision summary",
+      "command": "python3 -m unittest tests.test_platform_adapters.PlatformAdapterTests.test_buzz_decision_is_written_to_paperclip_without_task_mutation",
+      "expected_evidence": "decision survives restart while task authority remains byte-for-byte unchanged"
+    },
+    {
+      "id": "EVIDENCE-PERSISTENCE-001",
+      "phase": 5,
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "fixture": "two fictional tenants and a restarted SQLite evidence authority",
+      "command": "python3 -m unittest tests.test_platform_adapters.PlatformAdapterTests.test_evidence_is_persistent_immutable_and_tenant_isolated",
+      "expected_evidence": "same-tenant evidence survives restart; conflict and cross-tenant access fail"
+    },
+    {
+      "id": "PLATFORM-STORAGE-IDENTITY-001",
+      "phase": 5,
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "fixture": "a running authority whose SQLite path is replaced",
+      "command": "python3 -m unittest tests.test_platform_adapters.PlatformAdapterTests.test_replaced_storage_identity_is_rejected_by_both_authorities",
+      "expected_evidence": "Paperclip and evidence operations both fail closed after replacement"
     }
   ]
 }
