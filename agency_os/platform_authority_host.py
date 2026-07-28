@@ -32,9 +32,11 @@ from .platform_adapters import (
     EvidenceStoreError,
     PlatformAdapterError,
     _AUTHORITY_ADAPTER_TOKEN,
+    _DELETION_LEDGER_TOKEN,
     _AuthorityPaperclipAdapter,
     _AuthorityTenantArtifactStore,
     _AuthorityTenantEvidenceStore,
+    _SQLiteArtifactDeletionLedger,
 )
 from .runtime_security import RuntimeIdentityError, _read_socket_line
 from .store import AuthorizationError, Principal
@@ -364,6 +366,8 @@ class _PlatformAuthorityHost:
         self,
         database_path: str | os.PathLike[str],
         *,
+        deletion_ledger_path: str | os.PathLike[str],
+        initialize_deletion_ledger: bool,
         authority_id: str,
         approval_signing_key: bytes,
         timeout_seconds: float,
@@ -406,6 +410,8 @@ class _PlatformAuthorityHost:
             args=(
                 self.socket_path,
                 str(database_path),
+                str(deletion_ledger_path),
+                initialize_deletion_ledger,
                 authority_id,
                 bytes(approval_signing_key),
                 timeout_seconds,
@@ -488,6 +494,8 @@ class _PlatformAuthorityHost:
 def _provision_platform_authority_host(
     database_path: str | os.PathLike[str],
     *,
+    deletion_ledger_path: str | os.PathLike[str],
+    initialize_deletion_ledger: bool = False,
     authority_id: str,
     approval_signing_key: bytes,
     timeout_seconds: float = 5.0,
@@ -498,6 +506,8 @@ def _provision_platform_authority_host(
 
     return _PlatformAuthorityHost(
         database_path,
+        deletion_ledger_path=deletion_ledger_path,
+        initialize_deletion_ledger=initialize_deletion_ledger,
         authority_id=authority_id,
         approval_signing_key=approval_signing_key,
         timeout_seconds=timeout_seconds,
@@ -510,6 +520,8 @@ def _provision_platform_authority_host(
 def _run_platform_authority_host(
     socket_path: str,
     database_path: str,
+    deletion_ledger_path: str,
+    initialize_deletion_ledger: bool,
     authority_id: str,
     approval_signing_key: bytes,
     timeout_seconds: float,
@@ -529,6 +541,13 @@ def _run_platform_authority_host(
             signing_key=approval_signing_key,
             _construction_token=_APPROVAL_AUTHORITY_TOKEN,
         )
+        deletion_ledger = _SQLiteArtifactDeletionLedger(
+            deletion_ledger_path,
+            authority_id=authority_id,
+            timeout_seconds=timeout_seconds,
+            allow_create=initialize_deletion_ledger,
+            _construction_token=_DELETION_LEDGER_TOKEN,
+        )
         paperclip = _AuthorityPaperclipAdapter(
             database_path,
             timeout_seconds=timeout_seconds,
@@ -546,6 +565,7 @@ def _run_platform_authority_host(
             timeout_seconds=timeout_seconds,
             clock=authority_clock,
             recovery_authority=recovery_authority,
+            deletion_ledger=deletion_ledger,
             _construction_token=_AUTHORITY_ADAPTER_TOKEN,
         )
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as server:

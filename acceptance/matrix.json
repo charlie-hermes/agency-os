@@ -413,9 +413,18 @@
       "phase": 5,
       "owner": "platform-assurance-reviewer",
       "release_blocker": true,
-      "fixture": "current export checksum and two fictional tenants in the artifact authority",
+      "fixture": "current export checksum, two fictional tenants and a fresh same-ID/same-key recovery database sharing the protected deletion ledger",
       "command": "python3 -m unittest tests.test_platform_adapters.PlatformAdapterTests.test_artifact_offboarding_requires_current_export_and_is_durable",
-      "expected_evidence": "stale deletion denies; exact deletion survives restart, preserves the other tenant and retains only content-free deletion evidence"
+      "expected_evidence": "stale deletion denies; exact deletion survives restart, preserves the other tenant, retains only content-free evidence and blocks the retained signed export before any fresh-host record or restore audit"
+    },
+    {
+      "id": "ARTIFACT-DELETION-LEDGER-001",
+      "phase": 5,
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "fixture": "recovery hosts with a missing or wrong-authority deletion ledger plus a running host whose ledger path is replaced",
+      "command": "python3 -m unittest tests.test_platform_adapters.PlatformAdapterTests.test_recovery_host_requires_preprovisioned_deletion_ledger tests.test_platform_adapters.PlatformAdapterTests.test_replaced_deletion_ledger_identity_is_rejected",
+      "expected_evidence": "recovery refuses startup without the exact authority ledger and same-path ledger replacement makes artifact access fail closed"
     },
     {
       "id": "INSTALLED-PLATFORM-CONTRACT-001",

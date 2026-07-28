@@ -28,6 +28,7 @@ from agency_os.platform_authority_host import (
 )
 from agency_os.platform_adapters import (
     _AuthorityPaperclipAdapter,
+    _SQLiteArtifactDeletionLedger,
     ArtifactStoreError,
     EvidenceStoreError,
     FictionalBuzzAdapter,
@@ -45,6 +46,9 @@ class PlatformAdapterTests(unittest.TestCase):
         temporary_directory = tempfile.TemporaryDirectory()
         self.addCleanup(temporary_directory.cleanup)
         self.database_path = Path(temporary_directory.name) / "platform.sqlite3"
+        self.deletion_ledger_path = (
+            Path(temporary_directory.name) / "artifact-deletions.sqlite3"
+        )
         self.now = datetime(2026, 7, 27, 20, 45, tzinfo=timezone.utc)
         self.director = Principal(
             "agent_director", "agency-director", "brand_lantern"
@@ -75,6 +79,8 @@ class PlatformAdapterTests(unittest.TestCase):
         self.approval_signing_key = os.urandom(32)
         self.platform_host = _provision_platform_authority_host(
             self.database_path,
+            deletion_ledger_path=self.deletion_ledger_path,
+            initialize_deletion_ledger=True,
             authority_id="fictional_paperclip_approval_authority",
             approval_signing_key=self.approval_signing_key,
             initial_time=self.now,
@@ -241,6 +247,7 @@ class PlatformAdapterTests(unittest.TestCase):
         self.platform_host.close()
         restarted = _provision_platform_authority_host(
             self.database_path,
+            deletion_ledger_path=self.deletion_ledger_path,
             authority_id="fictional_paperclip_approval_authority",
             approval_signing_key=self.approval_signing_key,
             initial_time=self.now,
@@ -297,6 +304,7 @@ class PlatformAdapterTests(unittest.TestCase):
         restore_path = self.database_path.with_name("restore.sqlite3")
         restored_host = _provision_platform_authority_host(
             restore_path,
+            deletion_ledger_path=self.deletion_ledger_path,
             authority_id="fictional_paperclip_approval_authority",
             approval_signing_key=self.approval_signing_key,
             initial_time=self.now,
@@ -370,6 +378,7 @@ class PlatformAdapterTests(unittest.TestCase):
         wrong_key_path = self.database_path.with_name("wrong-key-restore.sqlite3")
         wrong_key_host = _provision_platform_authority_host(
             wrong_key_path,
+            deletion_ledger_path=self.deletion_ledger_path,
             authority_id="fictional_paperclip_approval_authority",
             approval_signing_key=os.urandom(32),
             initial_time=self.now,
@@ -430,9 +439,30 @@ class PlatformAdapterTests(unittest.TestCase):
         with self.assertRaises(AuthorizationError):
             self.artifacts.put(self.director, lantern_learning)
 
+        recovery_path = self.database_path.with_name(
+            "post-deletion-recovery.sqlite3"
+        )
+        recovery_host = _provision_platform_authority_host(
+            recovery_path,
+            deletion_ledger_path=self.deletion_ledger_path,
+            authority_id="fictional_paperclip_approval_authority",
+            approval_signing_key=self.approval_signing_key,
+            initial_time=self.now,
+            principals=self.provisioned_principals,
+        )
+        self.addCleanup(recovery_host.close)
+        recovery_paperclip = recovery_host.client(self.director)
+        recovery_artifacts = recovery_paperclip.artifacts()
+        with self.assertRaises(AuthorizationError):
+            recovery_artifacts.restore_tenant(self.director, tenant_export)
+        with self.assertRaises(KeyError):
+            recovery_artifacts.get(self.director, "learning_lantern")
+        self.assertEqual(recovery_paperclip.audit_events(self.director), [])
+
         self.platform_host.close()
         restarted = _provision_platform_authority_host(
             self.database_path,
+            deletion_ledger_path=self.deletion_ledger_path,
             authority_id="fictional_paperclip_approval_authority",
             approval_signing_key=self.approval_signing_key,
             initial_time=self.now,
@@ -1022,6 +1052,7 @@ class PlatformAdapterTests(unittest.TestCase):
             "FictionalPaperclipAdapter",
             "SQLiteTenantEvidenceStore",
             "SQLiteTenantArtifactStore",
+            "SQLiteArtifactDeletionLedger",
             "provision_platform_authority_host",
         ):
             self.assertFalse(hasattr(agency_os, forbidden_export))
@@ -1042,6 +1073,14 @@ class PlatformAdapterTests(unittest.TestCase):
             _AuthorityPaperclipAdapter(
                 self.database_path,
                 approval_authority=object(),
+                _construction_token=object(),
+            )
+        with self.assertRaises(ArtifactStoreError):
+            _SQLiteArtifactDeletionLedger(
+                self.database_path.with_name("attacker-deletions.sqlite3"),
+                authority_id="fictional_paperclip_approval_authority",
+                timeout_seconds=5.0,
+                allow_create=True,
                 _construction_token=object(),
             )
 
@@ -1092,6 +1131,8 @@ class PlatformAdapterTests(unittest.TestCase):
         redirected = self.platform_host.client(self.director)
         with self.assertRaises(AttributeError):
             object.__setattr__(redirected, "_approval_authority", object())
+        with self.assertRaises(AttributeError):
+            object.__setattr__(redirected, "_deletion_ledger", object())
         object.__setattr__(redirected, "_socket_path", str(self.database_path))
         with self.assertRaises(PlatformAuthorityUnavailable):
             redirected.close_task(
@@ -1134,6 +1175,7 @@ class PlatformAdapterTests(unittest.TestCase):
             )
         self.platform_host = _provision_platform_authority_host(
             self.database_path,
+            deletion_ledger_path=self.deletion_ledger_path,
             authority_id="fictional_paperclip_approval_authority",
             approval_signing_key=self.approval_signing_key,
             initial_time=self.now,
@@ -1382,12 +1424,66 @@ class PlatformAdapterTests(unittest.TestCase):
         with self.assertRaises(AuthorizationError):
             self.evidence.put(self.strategist, forged)
 
+    def test_recovery_host_requires_preprovisioned_deletion_ledger(self) -> None:
+        recovery_path = self.database_path.with_name("unprovisioned-recovery.sqlite3")
+        missing_ledger = self.database_path.with_name("missing-deletions.sqlite3")
+        with self.assertRaises(PlatformAuthorityUnavailable):
+            _provision_platform_authority_host(
+                recovery_path,
+                deletion_ledger_path=missing_ledger,
+                authority_id="fictional_paperclip_approval_authority",
+                approval_signing_key=self.approval_signing_key,
+                initial_time=self.now,
+                principals=self.provisioned_principals,
+            )
+        self.assertFalse(recovery_path.exists())
+        self.assertFalse(missing_ledger.exists())
+
+        wrong_authority_path = self.database_path.with_name(
+            "wrong-authority-recovery.sqlite3"
+        )
+        with self.assertRaises(PlatformAuthorityUnavailable):
+            _provision_platform_authority_host(
+                wrong_authority_path,
+                deletion_ledger_path=self.deletion_ledger_path,
+                authority_id="another_authority",
+                approval_signing_key=self.approval_signing_key,
+                initial_time=self.now,
+                principals=self.provisioned_principals,
+            )
+        self.assertFalse(wrong_authority_path.exists())
+
+    def test_replaced_deletion_ledger_identity_is_rejected(self) -> None:
+        learning = self._learning("learning_ledger_storage")
+        self.artifacts.put(self.director, learning)
+        replacement_database = self.database_path.with_name(
+            "replacement-ledger-host.sqlite3"
+        )
+        replacement_ledger = self.database_path.with_name(
+            "replacement-deletions.sqlite3"
+        )
+        replacement_host = _provision_platform_authority_host(
+            replacement_database,
+            deletion_ledger_path=replacement_ledger,
+            initialize_deletion_ledger=True,
+            authority_id="fictional_paperclip_approval_authority",
+            approval_signing_key=self.approval_signing_key,
+            initial_time=self.now,
+            principals=self.provisioned_principals,
+        )
+        replacement_host.close()
+        replacement_ledger.replace(self.deletion_ledger_path)
+
+        with self.assertRaises(ArtifactStoreError):
+            self.artifacts.get(self.director, "learning_ledger_storage")
+
     def test_replaced_storage_identity_is_rejected_by_all_authorities(self) -> None:
         self.paperclip.create_task(self.director, self._task("issue_asset"))
         self.artifacts.put(self.director, self._learning("learning_storage"))
         replacement_path = self.database_path.with_name("replacement.sqlite3")
         replacement_host = _provision_platform_authority_host(
             replacement_path,
+            deletion_ledger_path=self.deletion_ledger_path,
             authority_id="fictional_paperclip_approval_authority",
             approval_signing_key=os.urandom(32),
             initial_time=self.now,

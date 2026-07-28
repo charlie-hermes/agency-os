@@ -38,10 +38,14 @@
   exports bind content and authenticated provenance to one checksum, then the
   protected authority signs that checksum with the tenant, authority ID and
   export time under a domain separated from approval signatures. Restore is
-  same-tenant and empty-target only and requires the pinned authority identity
-  and recovery key. Artifact deletion needs the current export checksum,
-  tombstones reactivation and retains no deleted record content in its receipt.
-  This deletion does not yet cover Paperclip, evidence, Buzz or audit tables.
+  same-tenant and empty-target only and requires the pinned authority identity,
+  recovery key and separate authority-owned deletion ledger. That ledger is
+  outside the restorable artifact database, bound to the exact authority ID and
+  storage identity, and mandatory for every recovery host. Artifact deletion
+  needs the current export checksum and commits its content-free ledger tombstone
+  before artifact cleanup. The tombstone denies old signed backups even through
+  a fresh same-authority recovery database. This deletion does not yet cover
+  Paperclip, evidence, Buzz or audit tables, ledger replication, or media erasure.
 - Public fields and internal notes are separate values; only public fields
   cross the publication adapter.
 - Capability grants are immutable, brand-scoped records issued through an
@@ -175,10 +179,12 @@ Offboarding requires a human-approved plan that:
 7. records deletion evidence without retaining deleted content.
 
 The current fictional authority implements an authority-attested export and
-deletion receipt for artifact/learning rows only. It intentionally tombstones
-that tenant inside the artifact authority. It does not claim the full sequence
-above until Paperclip task/approval, evidence, Buzz, audit, credential and backup
-expiry are coordinated and tested together.
+deletion receipt for artifact/learning rows only. It records the tombstone in a
+separate protected authority ledger which every recovery host must share, so an
+old signed export cannot recreate that tenant in a fresh artifact database. It
+does not claim the full sequence above until Paperclip task/approval, evidence,
+Buzz, audit, credential and backup expiry, protected-ledger replication and
+storage-media erasure are coordinated and tested together.
 
 ## Audit and service objectives
 

@@ -113,24 +113,34 @@ clock rather than caller time.
 
 The store uses the authority SQLite database with WAL, full synchronous writes,
 owner-only mode and pinned file/parent identity. Records survive host restart.
+A separate authority-owned SQLite deletion ledger uses the same storage controls,
+is bound to the exact authority ID, and is deliberately not part of the
+restorable artifact database. Every source and recovery host must be explicitly
+provisioned with this same ledger; a missing, wrong-authority or replaced ledger
+fails host startup or artifact access closed.
+
 Only the agency director may export or restore a tenant. The canonical export
 binds every record and its original actor, role and storage time to one SHA-256.
 A domain-separated HMAC held only by the protected host additionally attests the
 authority ID, tenant, exact export checksum and authority export time. Restore
-requires a host provisioned with that same pinned authority identity and key, the
-same tenant, valid record checksums and provenance, an empty target and no prior
-deletion tombstone. Public checksum recomputation cannot create a valid export
-attestation.
+requires a host provisioned with that same pinned authority identity, key and
+deletion ledger, the same tenant, valid record checksums and provenance, an empty
+target and no authority-wide deletion tombstone. Public checksum recomputation
+cannot create a valid export attestation.
 
-Artifact/learning deletion requires the checksum of the current export in the
-same immediate transaction. A stale export makes no deletion. A successful
-deletion removes that tenant's artifact and learning content, preserves other
-tenants, blocks later restore or reactivation, and retains only a checksum/count
-receipt without deleted record content. This is not yet full Platform Authority
+Artifact/learning deletion requires the checksum of the current export while the
+artifact database and deletion ledger are both write-guarded. A stale export
+writes no tombstone. The protected authority durably commits the content-free
+tombstone before it removes artifact/learning rows, so a crash or cleanup error
+cannot reopen access or restore. A reported success also means the tenant rows
+were removed, other tenants were preserved, and only checksum/count deletion
+evidence remains. The tombstone denies a retained pre-deletion export on a fresh
+same-authority recovery database. This is not yet full Platform Authority
 offboarding: task, approval, evidence, Buzz-context and audit export/deletion,
-retention timing and storage-media erasure remain separate Gate 5 work. Local
-IPC requests and responses are capped at 4 MiB; production bulk export requires
-a separately designed streaming or protected object-transfer path.
+retention timing, replicated production ledger recovery and storage-media erasure
+remain separate Gate 5 work. Local IPC requests and responses are capped at 4
+MiB; production bulk export requires a separately designed streaming or
+protected object-transfer path.
 
 ## Tenant and storage controls
 
@@ -145,12 +155,13 @@ a separately designed streaming or protected object-transfer path.
   provenance is additionally authenticated by signing material held only in the
   host process; record checksums alone are not treated as proof of origin.
 - Worker clients contain only a socket path, exact bound principal and opaque
-  token. They receive no SQLite path, signer, verifier, policy catalogue or host
-  bootstrap handle.
-- The SQLite file is owner-only, its parent cannot be group/other writable, and
-  both the parent and database filesystem identities are pinned. Replacement or
+  token. They receive no SQLite path, deletion-ledger handle, signer, verifier,
+  policy catalogue or host bootstrap handle.
+- Both SQLite files are owner-only, their parent cannot be group/other writable,
+  and each parent and database filesystem identity is pinned. Replacement or
   symlink storage fails closed.
-- SQLite uses WAL mode and full synchronous durability for this local reference.
+- Both SQLite authorities use WAL mode and full synchronous durability for this
+  local reference.
 
 ## Executable denial evidence
 
@@ -180,7 +191,9 @@ a separately designed streaming or protected object-transfer path.
   rechecksummed content forgery, permitted-role actor forgery, changed authority,
   wrong recovery key, foreign tenant and non-empty restore denial;
 - stale-export deletion denial, durable content-free deletion evidence,
-  reactivation denial and preservation of a second tenant;
+  preservation of a second tenant, and denial of a retained signed export on a
+  fresh same-ID/same-key recovery database;
+- missing deletion-ledger provisioning and same-path ledger replacement denial;
 - tenant-scoped persistent audit; and
 - replacement of the running authority database across every authority view.
 
@@ -197,6 +210,8 @@ project still needs:
   rotation and recovery under an authority service account unavailable to
   workers;
 - queue leases, retries, dead-letter handling and reconciliation;
+- production backup, replication and disaster recovery for the protected
+  deletion ledger;
 - full Platform Authority backup/restore, task/evidence/Buzz/audit export and
   destructive offboarding, retention timing and storage-media erasure drills;
 - immutable audit-retention and tenant-scoped telemetry policy; and
