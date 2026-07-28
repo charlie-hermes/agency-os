@@ -4,8 +4,8 @@ The independently started host is the only process that receives the
 Paperclip SQLite path or approval HMAC key. Worker-facing code receives a
 ``PlatformAuthorityClient`` containing only a Unix-socket path, an exact bound
 principal and an opaque token. It receives no database path, host handle, signer,
-verifier or signing key. Evidence calls use a constrained view of the same
-client rather than opening SQLite directly.
+verifier or signing key. Evidence and artifact/learning calls use constrained
+views of the same client rather than opening SQLite directly.
 """
 
 from __future__ import annotations
@@ -24,21 +24,29 @@ from typing import Any, Callable, Mapping, Sequence
 from ._approval_authority import (
     _APPROVAL_AUTHORITY_TOKEN,
     _FictionalApprovalAuthority,
+    _FictionalRecoveryAuthority,
 )
 from .contracts import ContractError, canonical_bytes, parse_time
 from .platform_adapters import (
+    ArtifactStoreError,
     EvidenceStoreError,
     PlatformAdapterError,
     _AUTHORITY_ADAPTER_TOKEN,
+    _DELETION_LEDGER_TOKEN,
     _AuthorityPaperclipAdapter,
+    _AuthorityTenantArtifactStore,
     _AuthorityTenantEvidenceStore,
+    _SQLiteArtifactDeletionLedger,
 )
-from .runtime_security import _read_socket_line
+from .runtime_security import RuntimeIdentityError, _read_socket_line
 from .store import AuthorizationError, Principal
 
 
 class PlatformAuthorityUnavailable(PlatformAdapterError):
     """The protected fictional Platform Authority could not serve a request."""
+
+
+_MAX_PLATFORM_MESSAGE_BYTES = 4 * 1024 * 1024
 
 
 class PlatformAuthorityClient:
@@ -190,6 +198,9 @@ class PlatformAuthorityClient:
     def evidence(self) -> "TenantEvidenceClient":
         return TenantEvidenceClient(self)
 
+    def artifacts(self) -> "TenantArtifactClient":
+        return TenantArtifactClient(self)
+
     def _request(
         self, operation: str, principal: Principal, **arguments: Any
     ) -> Any:
@@ -207,8 +218,17 @@ class PlatformAuthorityClient:
                 client.settimeout(3)
                 client.connect(self._socket_path)
                 client.sendall(canonical_bytes(request) + b"\n")
-                response = json.loads(_read_socket_line(client))
-        except (OSError, ValueError, json.JSONDecodeError) as exc:
+                response = json.loads(
+                    _read_socket_line(
+                        client, maximum=_MAX_PLATFORM_MESSAGE_BYTES
+                    )
+                )
+        except (
+            OSError,
+            ValueError,
+            json.JSONDecodeError,
+            RuntimeIdentityError,
+        ) as exc:
             raise PlatformAuthorityUnavailable(
                 "Platform Authority is unavailable"
             ) from exc
@@ -250,6 +270,58 @@ class TenantEvidenceClient:
         )
 
 
+class TenantArtifactClient:
+    """Worker-side artifact and learning view backed by the authority host."""
+
+    __slots__ = ("_authority",)
+
+    def __init__(self, authority: PlatformAuthorityClient) -> None:
+        self._authority = authority
+
+    def put(self, principal: Principal, artifact: Mapping[str, Any]) -> str:
+        return self._authority._request(
+            "put_artifact", principal, artifact=dict(artifact)
+        )
+
+    def get(self, principal: Principal, record_id: str) -> dict[str, Any]:
+        return self._authority._request(
+            "get_artifact", principal, record_id=record_id
+        )
+
+    def active_learning(self, principal: Principal) -> list[dict[str, Any]]:
+        return self._authority._request("active_learning", principal)
+
+    def export_tenant(self, principal: Principal) -> dict[str, Any]:
+        return self._authority._request("export_artifacts", principal)
+
+    def restore_tenant(
+        self, principal: Principal, tenant_export: Mapping[str, Any]
+    ) -> int:
+        return self._authority._request(
+            "restore_artifacts",
+            principal,
+            tenant_export=dict(tenant_export),
+        )
+
+    def delete_tenant(
+        self, principal: Principal, expected_export_checksum: str
+    ) -> dict[str, Any]:
+        return self._authority._request(
+            "delete_artifacts",
+            principal,
+            expected_export_checksum=expected_export_checksum,
+        )
+
+    def deletion_receipt(
+        self, principal: Principal, receipt_id: str
+    ) -> dict[str, Any]:
+        return self._authority._request(
+            "artifact_deletion_receipt",
+            principal,
+            receipt_id=receipt_id,
+        )
+
+
 def _raise_remote_error(response: Mapping[str, Any]) -> None:
     message = str(response.get("message", "Platform Authority denied request"))
     error_type = response.get("error_type")
@@ -259,6 +331,8 @@ def _raise_remote_error(response: Mapping[str, Any]) -> None:
         raise ContractError(message)
     if error_type == "EvidenceStoreError":
         raise EvidenceStoreError(message)
+    if error_type == "ArtifactStoreError":
+        raise ArtifactStoreError(message)
     if error_type == "KeyError":
         subject = response.get("subject")
         raise KeyError(subject if isinstance(subject, str) else message)
@@ -292,6 +366,8 @@ class _PlatformAuthorityHost:
         self,
         database_path: str | os.PathLike[str],
         *,
+        deletion_ledger_path: str | os.PathLike[str],
+        initialize_deletion_ledger: bool,
         authority_id: str,
         approval_signing_key: bytes,
         timeout_seconds: float,
@@ -334,6 +410,8 @@ class _PlatformAuthorityHost:
             args=(
                 self.socket_path,
                 str(database_path),
+                str(deletion_ledger_path),
+                initialize_deletion_ledger,
                 authority_id,
                 bytes(approval_signing_key),
                 timeout_seconds,
@@ -416,6 +494,8 @@ class _PlatformAuthorityHost:
 def _provision_platform_authority_host(
     database_path: str | os.PathLike[str],
     *,
+    deletion_ledger_path: str | os.PathLike[str],
+    initialize_deletion_ledger: bool = False,
     authority_id: str,
     approval_signing_key: bytes,
     timeout_seconds: float = 5.0,
@@ -426,6 +506,8 @@ def _provision_platform_authority_host(
 
     return _PlatformAuthorityHost(
         database_path,
+        deletion_ledger_path=deletion_ledger_path,
+        initialize_deletion_ledger=initialize_deletion_ledger,
         authority_id=authority_id,
         approval_signing_key=approval_signing_key,
         timeout_seconds=timeout_seconds,
@@ -438,6 +520,8 @@ def _provision_platform_authority_host(
 def _run_platform_authority_host(
     socket_path: str,
     database_path: str,
+    deletion_ledger_path: str,
+    initialize_deletion_ledger: bool,
     authority_id: str,
     approval_signing_key: bytes,
     timeout_seconds: float,
@@ -452,6 +536,18 @@ def _run_platform_authority_host(
             signing_key=approval_signing_key,
             _construction_token=_APPROVAL_AUTHORITY_TOKEN,
         )
+        recovery_authority = _FictionalRecoveryAuthority(
+            authority_id=authority_id,
+            signing_key=approval_signing_key,
+            _construction_token=_APPROVAL_AUTHORITY_TOKEN,
+        )
+        deletion_ledger = _SQLiteArtifactDeletionLedger(
+            deletion_ledger_path,
+            authority_id=authority_id,
+            timeout_seconds=timeout_seconds,
+            allow_create=initialize_deletion_ledger,
+            _construction_token=_DELETION_LEDGER_TOKEN,
+        )
         paperclip = _AuthorityPaperclipAdapter(
             database_path,
             timeout_seconds=timeout_seconds,
@@ -462,6 +558,14 @@ def _run_platform_authority_host(
         evidence = _AuthorityTenantEvidenceStore(
             database_path,
             timeout_seconds=timeout_seconds,
+            _construction_token=_AUTHORITY_ADAPTER_TOKEN,
+        )
+        artifacts = _AuthorityTenantArtifactStore(
+            database_path,
+            timeout_seconds=timeout_seconds,
+            clock=authority_clock,
+            recovery_authority=recovery_authority,
+            deletion_ledger=deletion_ledger,
             _construction_token=_AUTHORITY_ADAPTER_TOKEN,
         )
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as server:
@@ -494,6 +598,7 @@ def _run_platform_authority_host(
                         connection,
                         paperclip,
                         evidence,
+                        artifacts,
                         client_principals,
                     )
                     connection.sendall(canonical_bytes(response) + b"\n")
@@ -530,10 +635,15 @@ def _handle_platform_request(
     connection: socket.socket,
     paperclip: _AuthorityPaperclipAdapter,
     evidence: _AuthorityTenantEvidenceStore,
+    artifacts: _AuthorityTenantArtifactStore,
     client_principals: Mapping[str, Principal],
 ) -> dict[str, Any]:
     try:
-        request = json.loads(_read_socket_line(connection))
+        request = json.loads(
+            _read_socket_line(
+                connection, maximum=_MAX_PLATFORM_MESSAGE_BYTES
+            )
+        )
         if not isinstance(request, dict) or set(request) != {
             "operation",
             "client_token",
@@ -562,6 +672,20 @@ def _handle_platform_request(
             result = evidence.get(principal, **arguments)
         elif operation == "list_evidence_for_issue":
             result = evidence.list_for_issue(principal, **arguments)
+        elif operation == "put_artifact":
+            result = artifacts.put(principal, **arguments)
+        elif operation == "get_artifact":
+            result = artifacts.get(principal, **arguments)
+        elif operation == "active_learning":
+            result = artifacts.active_learning(principal, **arguments)
+        elif operation == "export_artifacts":
+            result = artifacts.export_tenant(principal, **arguments)
+        elif operation == "restore_artifacts":
+            result = artifacts.restore_tenant(principal, **arguments)
+        elif operation == "delete_artifacts":
+            result = artifacts.delete_tenant(principal, **arguments)
+        elif operation == "artifact_deletion_receipt":
+            result = artifacts.deletion_receipt(principal, **arguments)
         else:
             raise ContractError("Platform Authority operation is not allowed")
         return {"outcome": "ALLOW", "result": result}
@@ -589,6 +713,12 @@ def _handle_platform_request(
         return {
             "outcome": "DENY",
             "error_type": "EvidenceStoreError",
+            "message": str(exc),
+        }
+    except ArtifactStoreError as exc:
+        return {
+            "outcome": "DENY",
+            "error_type": "ArtifactStoreError",
             "message": str(exc),
         }
     except PlatformAdapterError as exc:

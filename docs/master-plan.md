@@ -173,10 +173,25 @@ A local verifier rechecks those facts and fails closed on drift without credenti
 messages or task mutation. This admits the installed interface contract; it does
 not yet prove authenticated task, approval or Buzz lifecycle integration.
 
+The third bounded slice puts immutable artifacts and governed learning in the
+same protected authority database. Principal-bound clients provide role/tenant
+writes, authority-clock learning reads, authority-attested logical export and
+empty same-tenant restore under a pinned recovery identity. Current-export-bound
+artifact deletion writes a durable content-free tombstone to a separate protected
+authority ledger shared by every recovery host, so a retained signed export
+cannot recreate an offboarded tenant in a fresh artifact database. Full Platform
+Authority backup, production deletion-ledger replication, retention and
+offboarding remain future work.
+
 **Merged first-slice evidence:** PR #6, reviewed commit
 `5b53ef937bb0b05490e851660967c5ac39334ac4`, merge commit
 `4efc84fc36c4cd14d8226700162a4e8a4fbb3b57`, and Ubuntu repository gate
 `30309918344` with 94 tests and no real external write.
+
+**Merged second-slice evidence:** PR #7, reviewed commit
+`d8c360c23ea857266ccc8e55b759720294eea95b`, merge commit
+`23d8c0ff72bd7c8d46703e0a04978831660512ea`, and post-merge Ubuntu repository
+gate `30314681544` with 102 tests and no real external write.
 
 Implement:
 
@@ -184,7 +199,8 @@ Implement:
   closure;
 - a typed Buzz context/decision adapter that writes decisions back to
   Paperclip;
-- persistent tenant stores for evidence, artifacts and learning;
+- production deployment and isolation of the protected evidence, artifact and
+  learning stores;
 - audit events, traces and actionable failure records;
 - queue leases, retry/dead-letter handling and reconciliation;
 - backup, restore, retention, export and destructive offboarding drills; and

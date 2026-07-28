@@ -11,8 +11,16 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import agency_os
-from agency_os._approval_authority import _FictionalApprovalAuthority
-from agency_os.contracts import ContractError, canonical_bytes, finalize_record
+from agency_os._approval_authority import (
+    _FictionalApprovalAuthority,
+    _FictionalRecoveryAuthority,
+)
+from agency_os.contracts import (
+    ContractError,
+    canonical_bytes,
+    canonical_checksum,
+    finalize_record,
+)
 from agency_os.platform_authority_host import (
     PlatformAuthorityClient,
     PlatformAuthorityUnavailable,
@@ -20,6 +28,8 @@ from agency_os.platform_authority_host import (
 )
 from agency_os.platform_adapters import (
     _AuthorityPaperclipAdapter,
+    _SQLiteArtifactDeletionLedger,
+    ArtifactStoreError,
     EvidenceStoreError,
     FictionalBuzzAdapter,
     PlatformAdapterError,
@@ -36,6 +46,9 @@ class PlatformAdapterTests(unittest.TestCase):
         temporary_directory = tempfile.TemporaryDirectory()
         self.addCleanup(temporary_directory.cleanup)
         self.database_path = Path(temporary_directory.name) / "platform.sqlite3"
+        self.deletion_ledger_path = (
+            Path(temporary_directory.name) / "artifact-deletions.sqlite3"
+        )
         self.now = datetime(2026, 7, 27, 20, 45, tzinfo=timezone.utc)
         self.director = Principal(
             "agent_director", "agency-director", "brand_lantern"
@@ -66,6 +79,8 @@ class PlatformAdapterTests(unittest.TestCase):
         self.approval_signing_key = os.urandom(32)
         self.platform_host = _provision_platform_authority_host(
             self.database_path,
+            deletion_ledger_path=self.deletion_ledger_path,
+            initialize_deletion_ledger=True,
             authority_id="fictional_paperclip_approval_authority",
             approval_signing_key=self.approval_signing_key,
             initial_time=self.now,
@@ -81,6 +96,9 @@ class PlatformAdapterTests(unittest.TestCase):
         self.strategist_paperclip = self.platform_host.client(self.strategist)
         self.publisher_paperclip = self.platform_host.client(self.publisher)
         self.evidence = self.strategist_paperclip.evidence()
+        self.artifacts = self.paperclip.artifacts()
+        self.strategist_artifacts = self.strategist_paperclip.artifacts()
+        self.foreign_artifacts = self.foreign_paperclip.artifacts()
 
     def _task(
         self,
@@ -132,6 +150,59 @@ class PlatformAdapterTests(unittest.TestCase):
             created_by=self.strategist.actor_id,
         )
 
+    def _artifact(
+        self,
+        artifact_id: str,
+        *,
+        brand_id: str = "brand_lantern",
+    ) -> dict:
+        return finalize_record(
+            {
+                "schema_version": "1.0",
+                "artifact_type": "content_brief",
+                "artifact_id": artifact_id,
+                "brand_id": brand_id,
+                "campaign_id": "campaign_launch",
+                "created_by": self.strategist.actor_id,
+                "summary": "A fictional durable content brief.",
+            }
+        )
+
+    def _learning(
+        self,
+        learning_record_id: str,
+        *,
+        brand_id: str = "brand_lantern",
+    ) -> dict:
+        dispositioned_by = (
+            self.director.actor_id
+            if brand_id == self.director.brand_id
+            else self.foreign_director.actor_id
+        )
+        return finalize_record(
+            {
+                "schema_version": "1.0",
+                "artifact_type": "learning_record",
+                "learning_record_id": learning_record_id,
+                "version": 1,
+                "brand_id": brand_id,
+                "validation_status": "validated",
+                "lifecycle_status": "active",
+                "reuse_scope": "brand-only",
+                "expected_result": "The fictional first attempt succeeds.",
+                "actual_result": "The fictional first attempt failed.",
+                "attempted_approach": "approach-a",
+                "validated_correction": "approach-b",
+                "evidence_refs": ["evidence_fixture"],
+                "confidence": 0.9,
+                "limitations": [],
+                "fresh_until": (self.now + timedelta(days=1)).isoformat(),
+                "reviewed_at": self.now.isoformat(),
+                "supersedes": None,
+                "dispositioned_by": dispositioned_by,
+            }
+        )
+
     def _policy(
         self,
         *,
@@ -147,6 +218,268 @@ class PlatformAdapterTests(unittest.TestCase):
             issued_by=self.director.actor_id,
             effective_at=(self.now - timedelta(minutes=1)).isoformat(),
             previous_policy_checksum=previous_checksum,
+        )
+
+    def test_durable_artifacts_and_learning_survive_restart(self) -> None:
+        brief = self._artifact("brief_durable")
+        learning = self._learning("learning_durable")
+        self.assertEqual(
+            self.strategist_artifacts.put(self.strategist, brief),
+            "brief_durable",
+        )
+        self.assertEqual(
+            self.artifacts.put(self.director, learning),
+            "learning_durable",
+        )
+
+        changed = copy.deepcopy(brief)
+        changed["summary"] = "A conflicting replacement."
+        changed = finalize_record(changed)
+        with self.assertRaises(ContractError):
+            self.strategist_artifacts.put(self.strategist, changed)
+        with self.assertRaises(KeyError):
+            self.foreign_artifacts.get(self.foreign_director, "brief_durable")
+        with self.assertRaises(AuthorizationError):
+            self.publisher_paperclip.artifacts().get(
+                self.publisher, "learning_durable"
+            )
+
+        self.platform_host.close()
+        restarted = _provision_platform_authority_host(
+            self.database_path,
+            deletion_ledger_path=self.deletion_ledger_path,
+            authority_id="fictional_paperclip_approval_authority",
+            approval_signing_key=self.approval_signing_key,
+            initial_time=self.now,
+            principals=self.provisioned_principals,
+        )
+        self.addCleanup(restarted.close)
+        restarted_director = restarted.client(self.director).artifacts()
+        restarted_strategist = restarted.client(self.strategist).artifacts()
+        self.assertEqual(
+            restarted_strategist.get(self.strategist, "brief_durable"), brief
+        )
+        self.assertEqual(
+            restarted_director.get(self.director, "learning_durable"), learning
+        )
+        self.assertEqual(
+            [
+                record["learning_record_id"]
+                for record in restarted_director.active_learning(self.director)
+            ],
+            ["learning_durable"],
+        )
+
+    def test_artifact_export_restore_is_integrity_and_tenant_bound(self) -> None:
+        brief = self._artifact("brief_backup")
+        brief["summary"] = "fictional-export-payload-" + "x" * 32_768
+        brief = finalize_record(brief)
+        learning = self._learning("learning_backup")
+        self.strategist_artifacts.put(self.strategist, brief)
+        self.artifacts.put(self.director, learning)
+        tenant_export = self.artifacts.export_tenant(self.director)
+        self.assertEqual(tenant_export["record_count"], 2)
+        self.assertEqual(
+            set(tenant_export["records"]),
+            {"brief_backup", "learning_backup"},
+        )
+        self.assertEqual(tenant_export["exported_at"], self.now.isoformat())
+        self.assertEqual(
+            tenant_export["export_attestation"]["authority_id"],
+            "fictional_paperclip_approval_authority",
+        )
+        self.assertEqual(
+            tenant_export["export_attestation"]["brand_id"],
+            self.director.brand_id,
+        )
+        publisher_artifacts = self.publisher_paperclip.artifacts()
+        with self.assertRaises(AuthorizationError):
+            publisher_artifacts.export_tenant(self.publisher)
+        with self.assertRaises(AuthorizationError):
+            publisher_artifacts.delete_tenant(
+                self.publisher,
+                tenant_export["export_checksum"],
+            )
+
+        restore_path = self.database_path.with_name("restore.sqlite3")
+        restored_host = _provision_platform_authority_host(
+            restore_path,
+            deletion_ledger_path=self.deletion_ledger_path,
+            authority_id="fictional_paperclip_approval_authority",
+            approval_signing_key=self.approval_signing_key,
+            initial_time=self.now,
+            principals=self.provisioned_principals,
+        )
+        self.addCleanup(restored_host.close)
+        restored_paperclip = restored_host.client(self.director)
+        restored = restored_paperclip.artifacts()
+        foreign_restored = restored_host.client(self.foreign_director).artifacts()
+
+        def recompute_public_checksums(value: dict) -> None:
+            for record in value["records"].values():
+                refreshed = finalize_record(record)
+                record.clear()
+                record.update(refreshed)
+            payload = {
+                key: value[key]
+                for key in (
+                    "schema_version",
+                    "brand_id",
+                    "record_count",
+                    "records",
+                    "provenance",
+                )
+            }
+            value["export_checksum"] = canonical_checksum(payload)
+            value["export_attestation"]["export_checksum"] = value[
+                "export_checksum"
+            ]
+
+        tampered = copy.deepcopy(tenant_export)
+        tampered["records"]["brief_backup"]["summary"] = "attacker altered content"
+        recompute_public_checksums(tampered)
+        with self.assertRaises(ContractError):
+            restored.restore_tenant(self.director, tampered)
+
+        forged_actor = copy.deepcopy(tenant_export)
+        forged_actor["provenance"]["brief_backup"]["actor_id"] = (
+            "invented_strategist"
+        )
+        recompute_public_checksums(forged_actor)
+        with self.assertRaises(ContractError):
+            restored.restore_tenant(self.director, forged_actor)
+
+        forged_role = copy.deepcopy(tenant_export)
+        forged_role["provenance"]["brief_backup"]["role_id"] = (
+            "publishing-operator"
+        )
+        recompute_public_checksums(forged_role)
+        with self.assertRaises(ContractError):
+            restored.restore_tenant(self.director, forged_role)
+
+        changed_attestation = copy.deepcopy(tenant_export)
+        changed_attestation["export_attestation"]["authority_id"] = (
+            "attacker_authority"
+        )
+        with self.assertRaises(ContractError):
+            restored.restore_tenant(self.director, changed_attestation)
+
+        changed_time = copy.deepcopy(tenant_export)
+        changed_time["exported_at"] = (self.now + timedelta(minutes=1)).isoformat()
+        changed_time["export_attestation"]["exported_at"] = changed_time[
+            "exported_at"
+        ]
+        with self.assertRaises(ContractError):
+            restored.restore_tenant(self.director, changed_time)
+
+        with self.assertRaises(AuthorizationError):
+            foreign_restored.restore_tenant(self.foreign_director, tenant_export)
+
+        wrong_key_path = self.database_path.with_name("wrong-key-restore.sqlite3")
+        wrong_key_host = _provision_platform_authority_host(
+            wrong_key_path,
+            deletion_ledger_path=self.deletion_ledger_path,
+            authority_id="fictional_paperclip_approval_authority",
+            approval_signing_key=os.urandom(32),
+            initial_time=self.now,
+            principals=self.provisioned_principals,
+        )
+        self.addCleanup(wrong_key_host.close)
+        wrong_key_paperclip = wrong_key_host.client(self.director)
+        wrong_key_restore = wrong_key_paperclip.artifacts()
+        with self.assertRaises(ContractError):
+            wrong_key_restore.restore_tenant(self.director, tenant_export)
+        with self.assertRaises(KeyError):
+            wrong_key_restore.get(self.director, "brief_backup")
+        self.assertEqual(wrong_key_paperclip.audit_events(self.director), [])
+        self.assertEqual(restored_paperclip.audit_events(self.director), [])
+
+        self.assertEqual(restored.restore_tenant(self.director, tenant_export), 2)
+        self.assertEqual(restored.get(self.director, "brief_backup"), brief)
+        self.assertEqual(restored.get(self.director, "learning_backup"), learning)
+        with self.assertRaises(ContractError):
+            restored.restore_tenant(self.director, tenant_export)
+
+    def test_artifact_offboarding_requires_current_export_and_is_durable(self) -> None:
+        lantern_learning = self._learning("learning_lantern")
+        ember_learning = self._learning(
+            "learning_ember", brand_id=self.foreign_director.brand_id
+        )
+        self.artifacts.put(self.director, lantern_learning)
+        self.foreign_artifacts.put(self.foreign_director, ember_learning)
+        tenant_export = self.artifacts.export_tenant(self.director)
+
+        with self.assertRaises(ContractError):
+            self.artifacts.delete_tenant(self.director, "sha256:" + "0" * 64)
+        self.assertEqual(
+            self.artifacts.get(self.director, "learning_lantern"),
+            lantern_learning,
+        )
+
+        receipt = self.artifacts.delete_tenant(
+            self.director, tenant_export["export_checksum"]
+        )
+        receipt_id = receipt["deletion_receipt_id"]
+        self.assertEqual(receipt["record_count"], 1)
+        self.assertNotIn("validated_correction", canonical_bytes(receipt).decode())
+        artifact_audit = self.paperclip.audit_events(self.director)
+        self.assertEqual(
+            [event["event_type"] for event in artifact_audit],
+            ["artifact.tenant_deleted"],
+        )
+        self.assertNotIn("learning_lantern", canonical_bytes(artifact_audit).decode())
+        with self.assertRaises(KeyError):
+            self.artifacts.get(self.director, "learning_lantern")
+        self.assertEqual(
+            self.foreign_artifacts.get(self.foreign_director, "learning_ember"),
+            ember_learning,
+        )
+        with self.assertRaises(AuthorizationError):
+            self.artifacts.restore_tenant(self.director, tenant_export)
+        with self.assertRaises(AuthorizationError):
+            self.artifacts.put(self.director, lantern_learning)
+
+        recovery_path = self.database_path.with_name(
+            "post-deletion-recovery.sqlite3"
+        )
+        recovery_host = _provision_platform_authority_host(
+            recovery_path,
+            deletion_ledger_path=self.deletion_ledger_path,
+            authority_id="fictional_paperclip_approval_authority",
+            approval_signing_key=self.approval_signing_key,
+            initial_time=self.now,
+            principals=self.provisioned_principals,
+        )
+        self.addCleanup(recovery_host.close)
+        recovery_paperclip = recovery_host.client(self.director)
+        recovery_artifacts = recovery_paperclip.artifacts()
+        with self.assertRaises(AuthorizationError):
+            recovery_artifacts.restore_tenant(self.director, tenant_export)
+        with self.assertRaises(KeyError):
+            recovery_artifacts.get(self.director, "learning_lantern")
+        self.assertEqual(recovery_paperclip.audit_events(self.director), [])
+
+        self.platform_host.close()
+        restarted = _provision_platform_authority_host(
+            self.database_path,
+            deletion_ledger_path=self.deletion_ledger_path,
+            authority_id="fictional_paperclip_approval_authority",
+            approval_signing_key=self.approval_signing_key,
+            initial_time=self.now,
+            principals=self.provisioned_principals,
+        )
+        self.addCleanup(restarted.close)
+        restarted_artifacts = restarted.client(self.director).artifacts()
+        self.assertEqual(
+            restarted_artifacts.deletion_receipt(self.director, receipt_id), receipt
+        )
+        with self.assertRaises(KeyError):
+            restarted_artifacts.get(self.director, "learning_lantern")
+        self.assertEqual(
+            restarted.client(self.foreign_director)
+            .artifacts()
+            .get(self.foreign_director, "learning_ember"),
+            ember_learning,
         )
 
     def test_dependencies_budget_closure_and_restart_are_authoritative(self) -> None:
@@ -715,8 +1048,11 @@ class PlatformAdapterTests(unittest.TestCase):
         )
         for forbidden_export in (
             "FictionalApprovalAuthority",
+            "FictionalRecoveryAuthority",
             "FictionalPaperclipAdapter",
             "SQLiteTenantEvidenceStore",
+            "SQLiteTenantArtifactStore",
+            "SQLiteArtifactDeletionLedger",
             "provision_platform_authority_host",
         ):
             self.assertFalse(hasattr(agency_os, forbidden_export))
@@ -727,10 +1063,24 @@ class PlatformAdapterTests(unittest.TestCase):
                 signing_key=os.urandom(32),
                 _construction_token=object(),
             )
+        with self.assertRaises(ContractError):
+            _FictionalRecoveryAuthority(
+                authority_id="fictional_paperclip_approval_authority",
+                signing_key=os.urandom(32),
+                _construction_token=object(),
+            )
         with self.assertRaises(PlatformAdapterError):
             _AuthorityPaperclipAdapter(
                 self.database_path,
                 approval_authority=object(),
+                _construction_token=object(),
+            )
+        with self.assertRaises(ArtifactStoreError):
+            _SQLiteArtifactDeletionLedger(
+                self.database_path.with_name("attacker-deletions.sqlite3"),
+                authority_id="fictional_paperclip_approval_authority",
+                timeout_seconds=5.0,
+                allow_create=True,
                 _construction_token=object(),
             )
 
@@ -781,6 +1131,8 @@ class PlatformAdapterTests(unittest.TestCase):
         redirected = self.platform_host.client(self.director)
         with self.assertRaises(AttributeError):
             object.__setattr__(redirected, "_approval_authority", object())
+        with self.assertRaises(AttributeError):
+            object.__setattr__(redirected, "_deletion_ledger", object())
         object.__setattr__(redirected, "_socket_path", str(self.database_path))
         with self.assertRaises(PlatformAuthorityUnavailable):
             redirected.close_task(
@@ -823,6 +1175,7 @@ class PlatformAdapterTests(unittest.TestCase):
             )
         self.platform_host = _provision_platform_authority_host(
             self.database_path,
+            deletion_ledger_path=self.deletion_ledger_path,
             authority_id="fictional_paperclip_approval_authority",
             approval_signing_key=self.approval_signing_key,
             initial_time=self.now,
@@ -1071,11 +1424,66 @@ class PlatformAdapterTests(unittest.TestCase):
         with self.assertRaises(AuthorizationError):
             self.evidence.put(self.strategist, forged)
 
-    def test_replaced_storage_identity_is_rejected_by_both_authorities(self) -> None:
+    def test_recovery_host_requires_preprovisioned_deletion_ledger(self) -> None:
+        recovery_path = self.database_path.with_name("unprovisioned-recovery.sqlite3")
+        missing_ledger = self.database_path.with_name("missing-deletions.sqlite3")
+        with self.assertRaises(PlatformAuthorityUnavailable):
+            _provision_platform_authority_host(
+                recovery_path,
+                deletion_ledger_path=missing_ledger,
+                authority_id="fictional_paperclip_approval_authority",
+                approval_signing_key=self.approval_signing_key,
+                initial_time=self.now,
+                principals=self.provisioned_principals,
+            )
+        self.assertFalse(recovery_path.exists())
+        self.assertFalse(missing_ledger.exists())
+
+        wrong_authority_path = self.database_path.with_name(
+            "wrong-authority-recovery.sqlite3"
+        )
+        with self.assertRaises(PlatformAuthorityUnavailable):
+            _provision_platform_authority_host(
+                wrong_authority_path,
+                deletion_ledger_path=self.deletion_ledger_path,
+                authority_id="another_authority",
+                approval_signing_key=self.approval_signing_key,
+                initial_time=self.now,
+                principals=self.provisioned_principals,
+            )
+        self.assertFalse(wrong_authority_path.exists())
+
+    def test_replaced_deletion_ledger_identity_is_rejected(self) -> None:
+        learning = self._learning("learning_ledger_storage")
+        self.artifacts.put(self.director, learning)
+        replacement_database = self.database_path.with_name(
+            "replacement-ledger-host.sqlite3"
+        )
+        replacement_ledger = self.database_path.with_name(
+            "replacement-deletions.sqlite3"
+        )
+        replacement_host = _provision_platform_authority_host(
+            replacement_database,
+            deletion_ledger_path=replacement_ledger,
+            initialize_deletion_ledger=True,
+            authority_id="fictional_paperclip_approval_authority",
+            approval_signing_key=self.approval_signing_key,
+            initial_time=self.now,
+            principals=self.provisioned_principals,
+        )
+        replacement_host.close()
+        replacement_ledger.replace(self.deletion_ledger_path)
+
+        with self.assertRaises(ArtifactStoreError):
+            self.artifacts.get(self.director, "learning_ledger_storage")
+
+    def test_replaced_storage_identity_is_rejected_by_all_authorities(self) -> None:
         self.paperclip.create_task(self.director, self._task("issue_asset"))
+        self.artifacts.put(self.director, self._learning("learning_storage"))
         replacement_path = self.database_path.with_name("replacement.sqlite3")
         replacement_host = _provision_platform_authority_host(
             replacement_path,
+            deletion_ledger_path=self.deletion_ledger_path,
             authority_id="fictional_paperclip_approval_authority",
             approval_signing_key=os.urandom(32),
             initial_time=self.now,
@@ -1088,6 +1496,8 @@ class PlatformAdapterTests(unittest.TestCase):
             self.paperclip.get_task(self.director, "issue_asset")
         with self.assertRaises(EvidenceStoreError):
             self.evidence.get(self.strategist, "evidence_primary")
+        with self.assertRaises(ArtifactStoreError):
+            self.artifacts.get(self.director, "learning_storage")
 
     def test_audit_is_persistent_and_tenant_scoped(self) -> None:
         self.paperclip.create_task(self.director, self._task("issue_asset"))

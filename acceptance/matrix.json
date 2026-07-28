@@ -387,8 +387,44 @@
       "owner": "platform-assurance-reviewer",
       "release_blocker": true,
       "fixture": "a running authority whose SQLite path is replaced",
-      "command": "python3 -m unittest tests.test_platform_adapters.PlatformAdapterTests.test_replaced_storage_identity_is_rejected_by_both_authorities",
-      "expected_evidence": "Paperclip and evidence operations both fail closed after replacement"
+      "command": "python3 -m unittest tests.test_platform_adapters.PlatformAdapterTests.test_replaced_storage_identity_is_rejected_by_all_authorities",
+      "expected_evidence": "Paperclip, evidence and artifact/learning operations all fail closed after replacement"
+    },
+    {
+      "id": "ARTIFACT-DURABILITY-001",
+      "phase": 5,
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "fixture": "tenant artifacts and validated learning written through principal-bound Platform Authority clients",
+      "command": "python3 -m unittest tests.test_platform_adapters.PlatformAdapterTests.test_durable_artifacts_and_learning_survive_restart",
+      "expected_evidence": "immutable same-tenant records survive authority restart while cross-tenant and wrong-role reads deny"
+    },
+    {
+      "id": "ARTIFACT-RECOVERY-001",
+      "phase": 5,
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "fixture": "authority-attested tenant artifact export restored into an empty authority with the pinned recovery identity",
+      "command": "python3 -m unittest tests.test_platform_adapters.PlatformAdapterTests.test_artifact_export_restore_is_integrity_and_tenant_bound",
+      "expected_evidence": "valid same-tenant restore succeeds; fully rechecksummed content and actor forgeries, changed attestation, wrong recovery key, foreign tenant and non-empty target all deny without restore audit"
+    },
+    {
+      "id": "ARTIFACT-OFFBOARD-001",
+      "phase": 5,
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "fixture": "current export checksum, two fictional tenants and a fresh same-ID/same-key recovery database sharing the protected deletion ledger",
+      "command": "python3 -m unittest tests.test_platform_adapters.PlatformAdapterTests.test_artifact_offboarding_requires_current_export_and_is_durable",
+      "expected_evidence": "stale deletion denies; exact deletion survives restart, preserves the other tenant, retains only content-free evidence and blocks the retained signed export before any fresh-host record or restore audit"
+    },
+    {
+      "id": "ARTIFACT-DELETION-LEDGER-001",
+      "phase": 5,
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "fixture": "recovery hosts with a missing or wrong-authority deletion ledger plus a running host whose ledger path is replaced",
+      "command": "python3 -m unittest tests.test_platform_adapters.PlatformAdapterTests.test_recovery_host_requires_preprovisioned_deletion_ledger tests.test_platform_adapters.PlatformAdapterTests.test_replaced_deletion_ledger_identity_is_rejected",
+      "expected_evidence": "recovery refuses startup without the exact authority ledger and same-path ledger replacement makes artifact access fail closed"
     },
     {
       "id": "INSTALLED-PLATFORM-CONTRACT-001",

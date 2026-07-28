@@ -1,4 +1,4 @@
-"""Typed fictional Paperclip/Buzz adapters and persistent tenant evidence.
+"""Typed platform adapters plus persistent tenant evidence and artifacts.
 
 This module is a local Gate 5 reference boundary.  It deliberately performs no
 network calls and does not claim compatibility with an installed Paperclip or
@@ -17,10 +17,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
-from ._approval_authority import _FictionalApprovalAuthority
+from ._approval_authority import (
+    _FictionalApprovalAuthority,
+    _FictionalRecoveryAuthority,
+)
 from .contracts import (
     ContractError,
     canonical_bytes,
+    canonical_checksum,
     finalize_record,
     parse_time,
     utc_now,
@@ -32,7 +36,13 @@ from .sqlite_storage import (
     prepare_sqlite_storage,
     validate_sqlite_storage,
 )
-from .store import AuthorizationError, Principal
+from .store import (
+    RECORD_ID_FIELDS,
+    ROLE_READS,
+    ROLE_WRITES,
+    AuthorizationError,
+    Principal,
+)
 
 
 class PlatformAdapterError(RuntimeError):
@@ -41,6 +51,10 @@ class PlatformAdapterError(RuntimeError):
 
 class EvidenceStoreError(RuntimeError):
     """The persistent tenant evidence authority failed closed."""
+
+
+class ArtifactStoreError(RuntimeError):
+    """The persistent tenant artifact and learning authority failed closed."""
 
 
 TASK_STATUSES = frozenset(
@@ -353,6 +367,18 @@ class _SQLitePlatformDatabase:
                     created_at TEXT NOT NULL,
                     PRIMARY KEY (brand_id, evidence_id)
                 );
+                CREATE TABLE IF NOT EXISTS tenant_artifacts (
+                    brand_id TEXT NOT NULL,
+                    record_id TEXT NOT NULL,
+                    artifact_type TEXT NOT NULL,
+                    record_json TEXT NOT NULL,
+                    actor_id TEXT NOT NULL,
+                    role_id TEXT NOT NULL,
+                    stored_at TEXT NOT NULL,
+                    PRIMARY KEY (brand_id, record_id)
+                );
+                CREATE INDEX IF NOT EXISTS tenant_artifacts_by_type
+                    ON tenant_artifacts (brand_id, artifact_type, record_id);
                 CREATE TABLE IF NOT EXISTS platform_audit (
                     sequence INTEGER PRIMARY KEY AUTOINCREMENT,
                     brand_id TEXT NOT NULL,
@@ -402,6 +428,201 @@ class _SQLitePlatformDatabase:
             if connection is not None:
                 connection.close()
             raise self.error_type("could not open platform authority") from exc
+
+
+_DELETION_LEDGER_TOKEN = object()
+
+
+class _SQLiteArtifactDeletionLedger:
+    """Protected authority-wide tombstones shared by every recovery host."""
+
+    def __init__(
+        self,
+        database_path: str | os.PathLike[str],
+        *,
+        authority_id: str,
+        timeout_seconds: float,
+        allow_create: bool,
+        _construction_token: object,
+    ) -> None:
+        if _construction_token is not _DELETION_LEDGER_TOKEN:
+            raise ArtifactStoreError("artifact deletion ledger construction denied")
+        self.database_path = Path(database_path)
+        if str(database_path) == ":memory:":
+            raise ValueError("artifact deletion ledger requires a durable file path")
+        if not authority_id:
+            raise ValueError("artifact deletion ledger authority_id is required")
+        if timeout_seconds <= 0:
+            raise ValueError("timeout_seconds must be positive")
+        existed = self.database_path.exists()
+        if not existed and not allow_create:
+            raise ArtifactStoreError(
+                "artifact deletion ledger has not been provisioned"
+            )
+        self.authority_id = authority_id
+        self.timeout_seconds = timeout_seconds
+        try:
+            self.identity = prepare_sqlite_storage(self.database_path)
+        except SQLiteStorageError as exc:
+            raise ArtifactStoreError("unsafe artifact deletion ledger storage") from exc
+        if existed:
+            self._validate_existing()
+        else:
+            self._initialize_new()
+
+    def _initialize_new(self) -> None:
+        connection = self.connect()
+        try:
+            journal_mode = connection.execute("PRAGMA journal_mode = WAL").fetchone()
+            if journal_mode is None or str(journal_mode[0]).lower() != "wal":
+                raise ArtifactStoreError(
+                    "artifact deletion ledger requires SQLite WAL mode"
+                )
+            connection.execute("PRAGMA synchronous = FULL")
+            connection.executescript(
+                """
+                CREATE TABLE deletion_ledger_metadata (
+                    singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+                    authority_id TEXT NOT NULL
+                );
+                CREATE TABLE tenant_artifact_deletions (
+                    authority_id TEXT NOT NULL,
+                    brand_id TEXT NOT NULL,
+                    receipt_id TEXT NOT NULL UNIQUE,
+                    export_checksum TEXT NOT NULL,
+                    record_count INTEGER NOT NULL,
+                    receipt_json TEXT NOT NULL,
+                    deleted_at TEXT NOT NULL,
+                    PRIMARY KEY (authority_id, brand_id)
+                );
+                """
+            )
+            connection.execute(
+                """
+                INSERT INTO deletion_ledger_metadata (singleton, authority_id)
+                VALUES (1, ?)
+                """,
+                (self.authority_id,),
+            )
+            connection.commit()
+        except ArtifactStoreError:
+            raise
+        except sqlite3.Error as exc:
+            raise ArtifactStoreError(
+                "could not initialize artifact deletion ledger"
+            ) from exc
+        finally:
+            connection.close()
+
+    def _validate_existing(self) -> None:
+        connection = self.connect()
+        try:
+            journal_mode = connection.execute("PRAGMA journal_mode").fetchone()
+            metadata = connection.execute(
+                """
+                SELECT authority_id FROM deletion_ledger_metadata
+                WHERE singleton = 1
+                """
+            ).fetchone()
+            deletion_columns = {
+                str(row[1])
+                for row in connection.execute(
+                    "PRAGMA table_info(tenant_artifact_deletions)"
+                ).fetchall()
+            }
+            if journal_mode is None or str(journal_mode[0]).lower() != "wal":
+                raise ArtifactStoreError(
+                    "artifact deletion ledger requires SQLite WAL mode"
+                )
+            if metadata != (self.authority_id,):
+                raise ArtifactStoreError(
+                    "artifact deletion ledger authority identity is invalid"
+                )
+            if deletion_columns != {
+                "authority_id",
+                "brand_id",
+                "receipt_id",
+                "export_checksum",
+                "record_count",
+                "receipt_json",
+                "deleted_at",
+            }:
+                raise ArtifactStoreError(
+                    "artifact deletion ledger schema is invalid"
+                )
+        except ArtifactStoreError:
+            raise
+        except sqlite3.Error as exc:
+            raise ArtifactStoreError(
+                "could not validate artifact deletion ledger"
+            ) from exc
+        finally:
+            connection.close()
+
+    def connect(self) -> sqlite3.Connection:
+        connection: sqlite3.Connection | None = None
+        try:
+            validate_sqlite_storage(self.database_path, self.identity)
+            connection = sqlite3.connect(
+                self.database_path,
+                timeout=self.timeout_seconds,
+                isolation_level=None,
+            )
+            validate_sqlite_storage(self.database_path, self.identity)
+            connection.execute(
+                f"PRAGMA busy_timeout = {int(self.timeout_seconds * 1000)}"
+            )
+            connection.execute("PRAGMA synchronous = FULL")
+            return connection
+        except (SQLiteStorageError, sqlite3.Error) as exc:
+            if connection is not None:
+                connection.close()
+            raise ArtifactStoreError(
+                "could not open artifact deletion ledger"
+            ) from exc
+
+    def deleted_receipt(
+        self,
+        connection: sqlite3.Connection,
+        brand_id: str,
+    ) -> tuple[str] | None:
+        return connection.execute(
+            """
+            SELECT receipt_json FROM tenant_artifact_deletions
+            WHERE authority_id = ? AND brand_id = ?
+            """,
+            (self.authority_id, brand_id),
+        ).fetchone()
+
+    def insert_deletion(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        brand_id: str,
+        receipt: Mapping[str, Any],
+    ) -> None:
+        connection.execute(
+            """
+            INSERT INTO tenant_artifact_deletions (
+                authority_id,
+                brand_id,
+                receipt_id,
+                export_checksum,
+                record_count,
+                receipt_json,
+                deleted_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                self.authority_id,
+                brand_id,
+                receipt["deletion_receipt_id"],
+                receipt["export_checksum"],
+                receipt["record_count"],
+                canonical_bytes(receipt).decode("utf-8"),
+                receipt["deleted_at"],
+            ),
+        )
 
 
 _AUTHORITY_ADAPTER_TOKEN = object()
@@ -1487,6 +1708,607 @@ class _AuthorityTenantEvidenceStore:
             raise EvidenceStoreError("could not list tenant evidence") from exc
         finally:
             connection.close()
+
+
+class _AuthorityTenantArtifactStore:
+    """Durable immutable artifact and learning records inside the authority."""
+
+    def __init__(
+        self,
+        database_path: str | os.PathLike[str],
+        *,
+        timeout_seconds: float = 5.0,
+        clock: Callable[[], datetime],
+        recovery_authority: _FictionalRecoveryAuthority,
+        deletion_ledger: _SQLiteArtifactDeletionLedger,
+        _construction_token: object,
+    ) -> None:
+        if _construction_token is not _AUTHORITY_ADAPTER_TOKEN:
+            raise ArtifactStoreError(
+                "tenant artifact authority construction is denied"
+            )
+        self._clock = clock
+        self._recovery_authority = recovery_authority
+        self._deletion_ledger = deletion_ledger
+        self._database = _SQLitePlatformDatabase(
+            database_path,
+            timeout_seconds=timeout_seconds,
+            error_type=ArtifactStoreError,
+        )
+
+    @staticmethod
+    def _record_id(record: Mapping[str, Any]) -> str:
+        record_type = str(record.get("artifact_type"))
+        field = RECORD_ID_FIELDS.get(record_type, "artifact_id")
+        record_id = record.get(field)
+        if not isinstance(record_id, str) or not record_id:
+            raise ContractError("artifact record has no recognised identifier")
+        return record_id
+
+    @staticmethod
+    def _can_read(principal: Principal, record_type: object) -> bool:
+        allowed = ROLE_READS.get(principal.role_id, frozenset())
+        return "*" in allowed or record_type in allowed
+
+    def _begin_tenant_guard(
+        self,
+        brand_id: str,
+        *,
+        deleted_is_missing: bool = False,
+    ) -> sqlite3.Connection:
+        connection = self._deletion_ledger.connect()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            if self._deletion_ledger.deleted_receipt(connection, brand_id) is not None:
+                if deleted_is_missing:
+                    raise KeyError(brand_id)
+                raise AuthorizationError(
+                    "deleted tenant artifact authority cannot be used"
+                )
+            return connection
+        except (AuthorizationError, ArtifactStoreError, KeyError):
+            _rollback(connection)
+            connection.close()
+            raise
+        except sqlite3.Error as exc:
+            _rollback(connection)
+            connection.close()
+            raise ArtifactStoreError(
+                "could not consult artifact deletion ledger"
+            ) from exc
+
+    def put(self, principal: Principal, artifact: Mapping[str, Any]) -> str:
+        verify_record(artifact)
+        record = copy.deepcopy(dict(artifact))
+        if record.get("brand_id") != principal.brand_id:
+            raise AuthorizationError("cross-tenant artifact write denied")
+        record_type = record.get("artifact_type")
+        if not isinstance(record_type, str) or not record_type:
+            raise ContractError("artifact type is invalid")
+        if record_type not in ROLE_WRITES.get(principal.role_id, frozenset()):
+            raise AuthorizationError("role cannot write this artifact type")
+        if (
+            record_type == "approval_record"
+            and record.get("approver_id") != principal.actor_id
+        ):
+            raise AuthorizationError("approval signer does not match actor")
+        record_id = self._record_id(record)
+        record_json = canonical_bytes(record).decode("utf-8")
+        ledger_connection = self._begin_tenant_guard(principal.brand_id)
+        connection: sqlite3.Connection | None = None
+        try:
+            connection = self._database.connect()
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                """
+                SELECT record_json FROM tenant_artifacts
+                WHERE brand_id = ? AND record_id = ?
+                """,
+                (principal.brand_id, record_id),
+            ).fetchone()
+            if row is not None:
+                if str(row[0]) != record_json:
+                    raise ContractError(f"artifact {record_id!r} is immutable")
+                connection.commit()
+                ledger_connection.commit()
+                return record_id
+            stored_at = _authority_now(self._clock).isoformat()
+            connection.execute(
+                """
+                INSERT INTO tenant_artifacts (
+                    brand_id,
+                    record_id,
+                    artifact_type,
+                    record_json,
+                    actor_id,
+                    role_id,
+                    stored_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    principal.brand_id,
+                    record_id,
+                    record_type,
+                    record_json,
+                    principal.actor_id,
+                    principal.role_id,
+                    stored_at,
+                ),
+            )
+            _AuthorityPaperclipAdapter._insert_audit(
+                connection, principal, "artifact.recorded", record_id
+            )
+            connection.commit()
+            ledger_connection.commit()
+            return record_id
+        except (AuthorizationError, ContractError, ArtifactStoreError):
+            if connection is not None:
+                _rollback(connection)
+            _rollback(ledger_connection)
+            raise
+        except (sqlite3.Error, TypeError, ValueError) as exc:
+            if connection is not None:
+                _rollback(connection)
+            _rollback(ledger_connection)
+            raise ArtifactStoreError("could not persist tenant artifact") from exc
+        finally:
+            if connection is not None:
+                connection.close()
+            ledger_connection.close()
+
+    def get(self, principal: Principal, record_id: str) -> dict[str, Any]:
+        ledger_connection = self._begin_tenant_guard(
+            principal.brand_id,
+            deleted_is_missing=True,
+        )
+        connection: sqlite3.Connection | None = None
+        try:
+            connection = self._database.connect()
+            row = connection.execute(
+                """
+                SELECT artifact_type, record_json FROM tenant_artifacts
+                WHERE brand_id = ? AND record_id = ?
+                """,
+                (principal.brand_id, record_id),
+            ).fetchone()
+            if row is None:
+                raise KeyError(record_id)
+            if not self._can_read(principal, row[0]):
+                raise AuthorizationError("role cannot read this artifact type")
+            record = json.loads(row[1])
+            verify_record(record)
+            if (
+                record.get("brand_id") != principal.brand_id
+                or self._record_id(record) != record_id
+                or record.get("artifact_type") != row[0]
+            ):
+                raise ArtifactStoreError("stored tenant artifact identity is invalid")
+            ledger_connection.commit()
+            return record
+        except (KeyError, AuthorizationError, ContractError, ArtifactStoreError):
+            _rollback(ledger_connection)
+            raise
+        except (json.JSONDecodeError, sqlite3.Error, TypeError, ValueError) as exc:
+            _rollback(ledger_connection)
+            raise ArtifactStoreError("could not read tenant artifact") from exc
+        finally:
+            if connection is not None:
+                connection.close()
+            ledger_connection.close()
+
+    def active_learning(self, principal: Principal) -> list[dict[str, Any]]:
+        if not self._can_read(principal, "learning_record"):
+            raise AuthorizationError("role cannot read learning records")
+        now = _authority_now(self._clock)
+        ledger_connection = self._begin_tenant_guard(principal.brand_id)
+        connection: sqlite3.Connection | None = None
+        try:
+            connection = self._database.connect()
+            rows = connection.execute(
+                """
+                SELECT record_id, record_json FROM tenant_artifacts
+                WHERE brand_id = ? AND artifact_type = 'learning_record'
+                ORDER BY record_id
+                """,
+                (principal.brand_id,),
+            ).fetchall()
+            active: list[dict[str, Any]] = []
+            for record_id, record_json in rows:
+                record = json.loads(record_json)
+                verify_record(record)
+                if (
+                    self._record_id(record) != record_id
+                    or record.get("brand_id") != principal.brand_id
+                    or record.get("artifact_type") != "learning_record"
+                ):
+                    raise ArtifactStoreError(
+                        "stored learning record identity is invalid"
+                    )
+                if record.get("validation_status") != "validated":
+                    continue
+                if record.get("lifecycle_status") != "active":
+                    continue
+                if not record.get("evidence_refs"):
+                    continue
+                fresh_until = record.get("fresh_until")
+                if not isinstance(fresh_until, str) or not fresh_until:
+                    raise ArtifactStoreError("stored learning freshness is invalid")
+                if parse_time(fresh_until) <= now:
+                    continue
+                active.append(record)
+            ledger_connection.commit()
+            return active
+        except (AuthorizationError, ContractError, ArtifactStoreError):
+            _rollback(ledger_connection)
+            raise
+        except (json.JSONDecodeError, sqlite3.Error, TypeError, ValueError) as exc:
+            _rollback(ledger_connection)
+            raise ArtifactStoreError("could not read active learning") from exc
+        finally:
+            if connection is not None:
+                connection.close()
+            ledger_connection.close()
+
+    def export_tenant(self, principal: Principal) -> dict[str, Any]:
+        if principal.role_id != "agency-director":
+            raise AuthorizationError("only the agency director may export a tenant")
+        ledger_connection = self._begin_tenant_guard(principal.brand_id)
+        connection: sqlite3.Connection | None = None
+        try:
+            connection = self._database.connect()
+            exported = self._export_from_connection(connection, principal.brand_id)
+            exported["exported_at"] = _authority_now(self._clock).isoformat()
+            exported["export_attestation"] = self._recovery_authority.attest(
+                exported
+            )
+            _AuthorityPaperclipAdapter._insert_audit(
+                connection,
+                principal,
+                "artifact.tenant_exported",
+                exported["export_checksum"],
+            )
+            connection.commit()
+            ledger_connection.commit()
+            return exported
+        except (AuthorizationError, ContractError, ArtifactStoreError):
+            if connection is not None:
+                _rollback(connection)
+            _rollback(ledger_connection)
+            raise
+        except (json.JSONDecodeError, sqlite3.Error, TypeError, ValueError) as exc:
+            if connection is not None:
+                _rollback(connection)
+            _rollback(ledger_connection)
+            raise ArtifactStoreError("could not export tenant artifacts") from exc
+        finally:
+            if connection is not None:
+                connection.close()
+            ledger_connection.close()
+
+    def restore_tenant(
+        self, principal: Principal, tenant_export: Mapping[str, Any]
+    ) -> int:
+        if principal.role_id != "agency-director":
+            raise AuthorizationError("only the agency director may restore a tenant")
+        records, provenance = self._validate_export(principal, tenant_export)
+        ledger_connection = self._begin_tenant_guard(principal.brand_id)
+        connection: sqlite3.Connection | None = None
+        try:
+            connection = self._database.connect()
+            connection.execute("BEGIN IMMEDIATE")
+            existing = connection.execute(
+                """
+                SELECT 1 FROM tenant_artifacts
+                WHERE brand_id = ? LIMIT 1
+                """,
+                (principal.brand_id,),
+            ).fetchone()
+            if existing is not None:
+                raise ContractError("restore target tenant is not empty")
+            for record_id in sorted(records):
+                record = records[record_id]
+                record_provenance = provenance[record_id]
+                connection.execute(
+                    """
+                    INSERT INTO tenant_artifacts (
+                        brand_id,
+                        record_id,
+                        artifact_type,
+                        record_json,
+                        actor_id,
+                        role_id,
+                        stored_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        principal.brand_id,
+                        record_id,
+                        record["artifact_type"],
+                        canonical_bytes(record).decode("utf-8"),
+                        record_provenance["actor_id"],
+                        record_provenance["role_id"],
+                        record_provenance["stored_at"],
+                    ),
+                )
+            _AuthorityPaperclipAdapter._insert_audit(
+                connection,
+                principal,
+                "artifact.tenant_restored",
+                tenant_export["export_checksum"],
+            )
+            connection.commit()
+            ledger_connection.commit()
+            return len(records)
+        except (AuthorizationError, ContractError, ArtifactStoreError):
+            if connection is not None:
+                _rollback(connection)
+            _rollback(ledger_connection)
+            raise
+        except (sqlite3.Error, TypeError, ValueError) as exc:
+            if connection is not None:
+                _rollback(connection)
+            _rollback(ledger_connection)
+            raise ArtifactStoreError("could not restore tenant artifacts") from exc
+        finally:
+            if connection is not None:
+                connection.close()
+            ledger_connection.close()
+
+    def delete_tenant(
+        self, principal: Principal, expected_export_checksum: str
+    ) -> dict[str, Any]:
+        if principal.role_id != "agency-director":
+            raise AuthorizationError("only the agency director may delete a tenant")
+        ledger_connection = self._begin_tenant_guard(principal.brand_id)
+        connection: sqlite3.Connection | None = None
+        try:
+            connection = self._database.connect()
+            connection.execute("BEGIN IMMEDIATE")
+            exported = self._export_from_connection(connection, principal.brand_id)
+            if exported["record_count"] < 1:
+                raise ContractError("tenant has no artifacts to delete")
+            if expected_export_checksum != exported["export_checksum"]:
+                raise ContractError("tenant export checksum is stale or incorrect")
+            deleted_at = _authority_now(self._clock).isoformat()
+            receipt_seed = {
+                "brand_id": principal.brand_id,
+                "export_checksum": expected_export_checksum,
+                "record_count": exported["record_count"],
+                "requested_by": principal.actor_id,
+                "deleted_at": deleted_at,
+            }
+            receipt_id = canonical_checksum(receipt_seed)
+            receipt = finalize_record(
+                {
+                    "schema_version": "1.0",
+                    "artifact_type": "tenant_artifact_deletion_receipt",
+                    "deletion_receipt_id": receipt_id,
+                    **receipt_seed,
+                }
+            )
+            self._deletion_ledger.insert_deletion(
+                ledger_connection,
+                brand_id=principal.brand_id,
+                receipt=receipt,
+            )
+            ledger_connection.commit()
+            audit_rows = connection.execute(
+                """
+                SELECT sequence, event_json FROM platform_audit
+                WHERE brand_id = ?
+                """,
+                (principal.brand_id,),
+            ).fetchall()
+            for sequence, event_json in audit_rows:
+                event = json.loads(event_json)
+                if str(event.get("event_type", "")).startswith("artifact."):
+                    connection.execute(
+                        "DELETE FROM platform_audit WHERE sequence = ?",
+                        (sequence,),
+                    )
+            connection.execute(
+                "DELETE FROM tenant_artifacts WHERE brand_id = ?",
+                (principal.brand_id,),
+            )
+            _AuthorityPaperclipAdapter._insert_audit(
+                connection,
+                principal,
+                "artifact.tenant_deleted",
+                receipt_id,
+            )
+            connection.commit()
+            return receipt
+        except (AuthorizationError, ContractError, ArtifactStoreError):
+            if connection is not None:
+                _rollback(connection)
+            _rollback(ledger_connection)
+            raise
+        except (json.JSONDecodeError, sqlite3.Error, TypeError, ValueError) as exc:
+            if connection is not None:
+                _rollback(connection)
+            _rollback(ledger_connection)
+            raise ArtifactStoreError("could not delete tenant artifacts") from exc
+        finally:
+            if connection is not None:
+                connection.close()
+            ledger_connection.close()
+
+    def deletion_receipt(
+        self, principal: Principal, receipt_id: str
+    ) -> dict[str, Any]:
+        if principal.role_id not in {
+            "agency-director",
+            "platform-assurance-reviewer",
+        }:
+            raise AuthorizationError("role cannot read deletion evidence")
+        connection = self._deletion_ledger.connect()
+        try:
+            row = self._deletion_ledger.deleted_receipt(
+                connection, principal.brand_id
+            )
+            if row is None:
+                raise KeyError(receipt_id)
+            receipt = json.loads(row[0])
+            verify_record(receipt)
+            if (
+                receipt.get("artifact_type")
+                != "tenant_artifact_deletion_receipt"
+                or receipt.get("deletion_receipt_id") != receipt_id
+                or receipt.get("brand_id") != principal.brand_id
+            ):
+                raise ArtifactStoreError("stored deletion receipt is invalid")
+            return receipt
+        except (KeyError, AuthorizationError, ContractError, ArtifactStoreError):
+            raise
+        except (json.JSONDecodeError, sqlite3.Error, TypeError, ValueError) as exc:
+            raise ArtifactStoreError("could not read deletion evidence") from exc
+        finally:
+            connection.close()
+
+    def _export_from_connection(
+        self, connection: sqlite3.Connection, brand_id: str
+    ) -> dict[str, Any]:
+        rows = connection.execute(
+            """
+            SELECT record_id, artifact_type, record_json, actor_id, role_id, stored_at
+            FROM tenant_artifacts
+            WHERE brand_id = ?
+            ORDER BY record_id
+            """,
+            (brand_id,),
+        ).fetchall()
+        records: dict[str, dict[str, Any]] = {}
+        provenance: dict[str, dict[str, str]] = {}
+        for record_id, record_type, record_json, actor_id, role_id, stored_at in rows:
+            record = json.loads(record_json)
+            verify_record(record)
+            if (
+                record.get("brand_id") != brand_id
+                or self._record_id(record) != record_id
+                or record.get("artifact_type") != record_type
+            ):
+                raise ArtifactStoreError("stored tenant artifact identity is invalid")
+            if not all(
+                isinstance(value, str) and value
+                for value in (actor_id, role_id, stored_at)
+            ):
+                raise ArtifactStoreError("stored artifact provenance is invalid")
+            if record_type not in ROLE_WRITES.get(role_id, frozenset()):
+                raise ArtifactStoreError("stored artifact provenance role is invalid")
+            if (
+                record_type == "approval_record"
+                and record.get("approver_id") != actor_id
+            ):
+                raise ArtifactStoreError("stored approval provenance is invalid")
+            parse_time(stored_at)
+            records[record_id] = record
+            provenance[record_id] = {
+                "actor_id": actor_id,
+                "role_id": role_id,
+                "stored_at": stored_at,
+            }
+        payload = {
+            "schema_version": "1.0",
+            "brand_id": brand_id,
+            "record_count": len(records),
+            "records": records,
+            "provenance": provenance,
+        }
+        return {**payload, "export_checksum": canonical_checksum(payload)}
+
+    def _validate_export(
+        self, principal: Principal, tenant_export: Mapping[str, Any]
+    ) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, str]]]:
+        exported = copy.deepcopy(dict(tenant_export))
+        if set(exported) != {
+            "schema_version",
+            "brand_id",
+            "record_count",
+            "records",
+            "provenance",
+            "export_checksum",
+            "exported_at",
+            "export_attestation",
+        }:
+            raise ContractError("tenant artifact export shape is invalid")
+        if exported["schema_version"] != "1.0":
+            raise ContractError("tenant artifact export version is unsupported")
+        if exported["brand_id"] != principal.brand_id:
+            raise AuthorizationError("cross-tenant artifact restore denied")
+        exported_at = exported["exported_at"]
+        if not isinstance(exported_at, str) or not exported_at:
+            raise ContractError("tenant artifact export time is invalid")
+        parse_time(exported_at)
+        records = exported["records"]
+        provenance = exported["provenance"]
+        if not isinstance(records, dict) or not isinstance(provenance, dict):
+            raise ContractError("tenant artifact export records are invalid")
+        if set(records) != set(provenance):
+            raise ContractError("tenant artifact export provenance is incomplete")
+        record_count = exported["record_count"]
+        if (
+            isinstance(record_count, bool)
+            or not isinstance(record_count, int)
+            or record_count != len(records)
+        ):
+            raise ContractError("tenant artifact export count is invalid")
+        payload = {
+            key: exported[key]
+            for key in (
+                "schema_version",
+                "brand_id",
+                "record_count",
+                "records",
+                "provenance",
+            )
+        }
+        if exported["export_checksum"] != canonical_checksum(payload):
+            raise ContractError("tenant artifact export checksum is invalid")
+        self._recovery_authority.verify(
+            exported,
+            exported["export_attestation"],
+        )
+        validated_records: dict[str, dict[str, Any]] = {}
+        validated_provenance: dict[str, dict[str, str]] = {}
+        for record_id, raw_record in records.items():
+            if not isinstance(record_id, str) or not isinstance(raw_record, dict):
+                raise ContractError("tenant artifact export record is invalid")
+            verify_record(raw_record)
+            if (
+                raw_record.get("brand_id") != principal.brand_id
+                or self._record_id(raw_record) != record_id
+            ):
+                raise ContractError("tenant artifact export identity is invalid")
+            raw_provenance = provenance[record_id]
+            if not isinstance(raw_provenance, dict) or set(raw_provenance) != {
+                "actor_id",
+                "role_id",
+                "stored_at",
+            }:
+                raise ContractError("tenant artifact provenance is invalid")
+            actor_id = raw_provenance.get("actor_id")
+            role_id = raw_provenance.get("role_id")
+            stored_at = raw_provenance.get("stored_at")
+            if not all(isinstance(value, str) and value for value in (actor_id, role_id, stored_at)):
+                raise ContractError("tenant artifact provenance is invalid")
+            record_type = raw_record.get("artifact_type")
+            if not isinstance(record_type, str) or not record_type:
+                raise ContractError("tenant artifact type is invalid")
+            if record_type not in ROLE_WRITES.get(role_id, frozenset()):
+                raise ContractError("tenant artifact provenance role is invalid")
+            if (
+                raw_record.get("artifact_type") == "approval_record"
+                and raw_record.get("approver_id") != actor_id
+            ):
+                raise ContractError("tenant approval provenance is invalid")
+            parse_time(stored_at)
+            validated_records[record_id] = copy.deepcopy(raw_record)
+            validated_provenance[record_id] = {
+                "actor_id": actor_id,
+                "role_id": role_id,
+                "stored_at": stored_at,
+            }
+        return validated_records, validated_provenance
 
 
 def _authority_now(clock: Callable[[], datetime]) -> datetime:

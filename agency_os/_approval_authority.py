@@ -1,9 +1,10 @@
-"""Authority-owned attestation for fictional Paperclip approvals.
+"""Authority-owned attestations for fictional approvals and tenant exports.
 
 The signing key must be supplied and held by a protected authority host and is
-never persisted in the worker-writable Paperclip SQLite boundary. This local
-reference uses a standard-library HMAC; a production Paperclip integration must
-replace it with its independently operated approval identity and key custody.
+never persisted in the worker-writable Paperclip SQLite boundary. Approval and
+recovery signatures use separate domains. This local reference uses a
+standard-library HMAC; a production Paperclip integration must replace it with
+independently operated signing identities and key custody.
 """
 
 from __future__ import annotations
@@ -72,6 +73,78 @@ class _FictionalApprovalAuthority:
         expected = self._signature(body)
         if not hmac.compare_digest(attestation["signature"], expected):
             raise ContractError("Paperclip approval authority attestation is invalid")
+
+    def _signature(self, body: Mapping[str, Any]) -> str:
+        return hmac.new(
+            self._signing_key,
+            self._DOMAIN + canonical_bytes(body),
+            hashlib.sha256,
+        ).hexdigest()
+
+
+class _FictionalRecoveryAuthority:
+    """Attest and verify tenant exports inside the protected authority host."""
+
+    _ALGORITHM = "HMAC-SHA256"
+    _DOMAIN = b"agency-os.tenant-artifact-export.v1\x00"
+
+    def __init__(
+        self,
+        *,
+        authority_id: str,
+        signing_key: bytes,
+        _construction_token: object,
+    ) -> None:
+        if _construction_token is not _APPROVAL_AUTHORITY_TOKEN:
+            raise ContractError("recovery authority construction is denied")
+        if not authority_id:
+            raise ValueError("recovery authority_id is required")
+        if not isinstance(signing_key, bytes) or len(signing_key) < 32:
+            raise ValueError("recovery authority signing key must be at least 32 bytes")
+        self._authority_id = authority_id
+        self._signing_key = bytes(signing_key)
+
+    def attest(self, tenant_export: Mapping[str, Any]) -> dict[str, str]:
+        """Return an origin attestation bound to an exact tenant export."""
+
+        body = self._attestation_body(tenant_export)
+        return {**body, "signature": self._signature(body)}
+
+    def verify(
+        self,
+        tenant_export: Mapping[str, Any],
+        attestation: object,
+    ) -> None:
+        """Reject exports not cryptographically issued by this authority."""
+
+        expected_body = self._attestation_body(tenant_export)
+        if (
+            not isinstance(attestation, Mapping)
+            or set(attestation) != {*expected_body, "signature"}
+            or any(attestation.get(key) != value for key, value in expected_body.items())
+            or not isinstance(attestation.get("signature"), str)
+        ):
+            raise ContractError("tenant export authority attestation is invalid")
+        expected_signature = self._signature(expected_body)
+        if not hmac.compare_digest(attestation["signature"], expected_signature):
+            raise ContractError("tenant export authority attestation is invalid")
+
+    def _attestation_body(self, tenant_export: Mapping[str, Any]) -> dict[str, str]:
+        brand_id = tenant_export.get("brand_id")
+        exported_at = tenant_export.get("exported_at")
+        export_checksum = tenant_export.get("export_checksum")
+        if not all(
+            isinstance(value, str) and value
+            for value in (brand_id, exported_at, export_checksum)
+        ):
+            raise ContractError("tenant export attestation fields are invalid")
+        return {
+            "authority_id": self._authority_id,
+            "algorithm": self._ALGORITHM,
+            "brand_id": brand_id,
+            "exported_at": exported_at,
+            "export_checksum": export_checksum,
+        }
 
     def _signature(self, body: Mapping[str, Any]) -> str:
         return hmac.new(
