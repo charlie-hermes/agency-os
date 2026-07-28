@@ -1,10 +1,11 @@
 """Authority-owned attestations for fictional approvals and tenant exports.
 
 The signing key must be supplied and held by a protected authority host and is
-never persisted in the worker-writable Paperclip SQLite boundary. Approval and
-recovery signatures use separate domains. This local reference uses a
-standard-library HMAC; a production Paperclip integration must replace it with
-independently operated signing identities and key custody.
+never persisted in the worker-writable Paperclip SQLite boundary. Approval,
+retention-policy, opaque evidence-reference and recovery signatures use separate
+domains. This local reference uses a standard-library HMAC; a production
+Paperclip integration must replace it with independently operated signing
+identities and key custody.
 """
 
 from __future__ import annotations
@@ -78,6 +79,82 @@ class _FictionalApprovalAuthority:
         return hmac.new(
             self._signing_key,
             self._DOMAIN + canonical_bytes(body),
+            hashlib.sha256,
+        ).hexdigest()
+
+
+class _FictionalAuditRetentionAuthority:
+    """Authenticate retention policies and opaque evidence references."""
+
+    _ALGORITHM = "HMAC-SHA256"
+    _POLICY_DOMAIN = b"agency-os.audit-retention-policy.v1\x00"
+    _EVIDENCE_REFERENCE_DOMAIN = b"agency-os.audit-expiration-evidence.v1\x00"
+
+    def __init__(
+        self,
+        *,
+        authority_id: str,
+        signing_key: bytes,
+        _construction_token: object,
+    ) -> None:
+        if _construction_token is not _APPROVAL_AUTHORITY_TOKEN:
+            raise ContractError("audit retention authority construction is denied")
+        if not authority_id:
+            raise ValueError("audit retention authority_id is required")
+        if not isinstance(signing_key, bytes) or len(signing_key) < 32:
+            raise ValueError(
+                "audit retention authority signing key must be at least 32 bytes"
+            )
+        self._authority_id = authority_id
+        self._signing_key = bytes(signing_key)
+
+    def attest(self, policy_body: Mapping[str, Any]) -> dict[str, Any]:
+        """Return a finalized policy bearing this authority's attestation."""
+
+        body = copy.deepcopy(dict(policy_body))
+        if "content_checksum" in body or "audit_retention_attestation" in body:
+            raise ContractError(
+                "audit retention policy cannot contain derived authority fields"
+            )
+        body["audit_retention_attestation"] = {
+            "authority_id": self._authority_id,
+            "algorithm": self._ALGORITHM,
+            "signature": self._signature(self._POLICY_DOMAIN, body),
+        }
+        return finalize_record(body)
+
+    def verify(self, policy: Mapping[str, Any]) -> None:
+        """Reject retention policies not issued by this protected authority."""
+
+        verify_record(policy)
+        body = copy.deepcopy(dict(policy))
+        body.pop("content_checksum")
+        attestation = body.pop("audit_retention_attestation", None)
+        if (
+            not isinstance(attestation, Mapping)
+            or set(attestation) != {"authority_id", "algorithm", "signature"}
+            or attestation.get("authority_id") != self._authority_id
+            or attestation.get("algorithm") != self._ALGORITHM
+            or not isinstance(attestation.get("signature"), str)
+        ):
+            raise ContractError("audit retention authority attestation is invalid")
+        expected = self._signature(self._POLICY_DOMAIN, body)
+        if not hmac.compare_digest(attestation["signature"], expected):
+            raise ContractError("audit retention authority attestation is invalid")
+
+    def evidence_reference(self, brand_id: str, evidence_ref: str) -> str:
+        """Return a tenant-bound opaque binding without retaining caller text."""
+
+        signature = self._signature(
+            self._EVIDENCE_REFERENCE_DOMAIN,
+            {"brand_id": brand_id, "evidence_ref": evidence_ref},
+        )
+        return f"hmac-sha256:{signature}"
+
+    def _signature(self, domain: bytes, body: Mapping[str, Any]) -> str:
+        return hmac.new(
+            self._signing_key,
+            domain + canonical_bytes(body),
             hashlib.sha256,
         ).hexdigest()
 

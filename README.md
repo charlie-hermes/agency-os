@@ -15,7 +15,8 @@ This fictional reference deliberately does five things:
    approvals, deadline-enforced restartable collaboration decisions, tenant
    evidence/artifact durability, a fictional durable lease/retry queue,
    exact-manifest coordinated local tenant offboarding, and complete attested
-   logical tenant export/restore; and
+   logical tenant export/restore, plus crash-recoverable versioned local
+   audit-retention policy and content-free tenant telemetry; and
 5. admits one exact installed Paperclip/Buzz command contract from read-only,
    checksum-pinned target-host evidence while failing closed on drift.
 
@@ -44,7 +45,8 @@ connect real client data, call a real provider, or publish externally.
   boundary, a protected fictional Platform Authority host with principal-bound
   worker clients, typed Buzz context, persistent tenant evidence/artifacts, a
   protected fictional durable work queue, coordinated local offboarding, and
-  complete logical tenant authority export/restore.
+  complete logical tenant authority export/restore with local audit-retention
+  governance and tenant-scoped telemetry.
 - `config/installed-platforms.json` — non-secret, read-only target-host version,
   executable/unit checksum, service, health, exact API and Buzz command evidence.
 - `scripts/verify-installed-platforms` — explicit read-only live drift check.

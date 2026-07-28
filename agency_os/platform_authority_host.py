@@ -24,6 +24,7 @@ from typing import Any, Callable, Mapping, Sequence
 from ._approval_authority import (
     _APPROVAL_AUTHORITY_TOKEN,
     _FictionalApprovalAuthority,
+    _FictionalAuditRetentionAuthority,
     _FictionalRecoveryAuthority,
 )
 from .contracts import ContractError, canonical_bytes, parse_time
@@ -198,6 +199,54 @@ class PlatformAuthorityClient:
 
     def audit_events(self, principal: Principal) -> list[dict[str, Any]]:
         return self._request("audit_events", principal)
+
+    def set_audit_retention_policy(
+        self,
+        principal: Principal,
+        *,
+        minimum_retention_days: int,
+        evidence_ref: str,
+    ) -> dict[str, Any]:
+        return self._request(
+            "set_audit_retention_policy",
+            principal,
+            minimum_retention_days=minimum_retention_days,
+            evidence_ref=evidence_ref,
+        )
+
+    def audit_retention_policy(self, principal: Principal) -> dict[str, Any]:
+        return self._request("audit_retention_policy", principal)
+
+    def audit_telemetry(self, principal: Principal) -> dict[str, Any]:
+        return self._request("audit_telemetry", principal)
+
+    def prepare_audit_expiration(self, principal: Principal) -> dict[str, Any]:
+        return self._request("prepare_audit_expiration", principal)
+
+    def expire_audit_events(
+        self,
+        principal: Principal,
+        *,
+        manifest: Mapping[str, Any],
+        evidence_ref: str,
+    ) -> dict[str, Any]:
+        return self._request(
+            "expire_audit_events",
+            principal,
+            manifest=dict(manifest),
+            evidence_ref=evidence_ref,
+        )
+
+    def audit_expiration_receipt(
+        self,
+        principal: Principal,
+        receipt_id: str,
+    ) -> dict[str, Any]:
+        return self._request(
+            "audit_expiration_receipt",
+            principal,
+            receipt_id=receipt_id,
+        )
 
     def export_tenant_authority(
         self, principal: Principal
@@ -653,6 +702,23 @@ class _PlatformAuthorityHost:
                 "Platform Authority rejected its control request"
             )
 
+    def inject_audit_retention_failure(self, point: str) -> None:
+        if self._closed or not self._process.is_alive():
+            raise PlatformAuthorityUnavailable(
+                "Platform Authority is unavailable"
+            )
+        self._control_parent.send(
+            {"operation": "inject_audit_retention_failure", "point": point}
+        )
+        if not self._control_parent.poll(3):
+            raise PlatformAuthorityUnavailable(
+                "Platform Authority is unavailable"
+            )
+        if self._control_parent.recv() != "AUDIT_RETENTION_FAILURE_SET":
+            raise PlatformAuthorityUnavailable(
+                "Platform Authority rejected its control request"
+            )
+
     def close(self) -> None:
         if self._closed:
             return
@@ -724,6 +790,11 @@ def _run_platform_authority_host(
             signing_key=approval_signing_key,
             _construction_token=_APPROVAL_AUTHORITY_TOKEN,
         )
+        audit_retention_authority = _FictionalAuditRetentionAuthority(
+            authority_id=authority_id,
+            signing_key=approval_signing_key,
+            _construction_token=_APPROVAL_AUTHORITY_TOKEN,
+        )
         recovery_authority = _FictionalRecoveryAuthority(
             authority_id=authority_id,
             signing_key=approval_signing_key,
@@ -747,8 +818,11 @@ def _run_platform_authority_host(
             timeout_seconds=timeout_seconds,
             clock=authority_clock,
             approval_authority=signer,
+            audit_retention_authority=audit_retention_authority,
+            deletion_ledger=deletion_ledger,
             _construction_token=_AUTHORITY_ADAPTER_TOKEN,
         )
+        paperclip.reconcile_audit_retention_intents()
         evidence = _AuthorityTenantEvidenceStore(
             database_path,
             timeout_seconds=timeout_seconds,
@@ -781,6 +855,8 @@ def _run_platform_authority_host(
             timeout_seconds=timeout_seconds,
             clock=authority_clock,
             recovery_authority=full_recovery_authority,
+            audit_retention_authority=audit_retention_authority,
+            deletion_ledger=deletion_ledger,
             artifacts=artifacts,
             _construction_token=_AUTHORITY_ADAPTER_TOKEN,
         )
@@ -803,6 +879,14 @@ def _run_platform_authority_host(
                     ):
                         authority_clock.set(parse_time(command["value"]))
                         control.send("TIME_SET")
+                    elif (
+                        isinstance(command, dict)
+                        and command.get("operation")
+                        == "inject_audit_retention_failure"
+                        and isinstance(command.get("point"), str)
+                    ):
+                        paperclip._inject_audit_retention_failure(command["point"])
+                        control.send("AUDIT_RETENTION_FAILURE_SET")
                     else:
                         control.send("AUTHORITY_CONTROL_INVALID")
                 try:
@@ -846,6 +930,12 @@ _PAPERCLIP_OPERATIONS = frozenset(
         "record_buzz_decision",
         "get_buzz_decision",
         "audit_events",
+        "set_audit_retention_policy",
+        "audit_retention_policy",
+        "audit_telemetry",
+        "prepare_audit_expiration",
+        "expire_audit_events",
+        "audit_expiration_receipt",
     }
 )
 
@@ -891,6 +981,7 @@ def _handle_platform_request(
             "tenant_offboarding_receipt",
             "artifact_deletion_receipt",
             "queue_cancellation_receipt",
+            "audit_expiration_receipt",
         }
         if (
             operation not in post_offboarding_operations
