@@ -21,6 +21,7 @@ from typing import Any, Callable, Mapping, Sequence
 
 from ._approval_authority import (
     _FictionalApprovalAuthority,
+    _FictionalAuditRetentionAuthority,
     _FictionalRecoveryAuthority,
 )
 from .contracts import (
@@ -674,6 +675,16 @@ class _SQLiteArtifactDeletionLedger:
                     offboarded_at TEXT NOT NULL,
                     PRIMARY KEY (authority_id, brand_id)
                 );
+                CREATE TABLE tenant_audit_retention_anchors (
+                    authority_id TEXT NOT NULL,
+                    brand_id TEXT NOT NULL,
+                    revision INTEGER NOT NULL,
+                    policy_checksum TEXT NOT NULL,
+                    minimum_retention_days INTEGER NOT NULL,
+                    anchored_at TEXT NOT NULL,
+                    PRIMARY KEY (authority_id, brand_id, revision),
+                    UNIQUE (authority_id, brand_id, policy_checksum)
+                );
                 """
             )
             connection.execute(
@@ -765,6 +776,37 @@ class _SQLiteArtifactDeletionLedger:
                 raise ArtifactStoreError(
                     "tenant authority offboarding ledger schema is invalid"
                 )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS tenant_audit_retention_anchors (
+                    authority_id TEXT NOT NULL,
+                    brand_id TEXT NOT NULL,
+                    revision INTEGER NOT NULL,
+                    policy_checksum TEXT NOT NULL,
+                    minimum_retention_days INTEGER NOT NULL,
+                    anchored_at TEXT NOT NULL,
+                    PRIMARY KEY (authority_id, brand_id, revision),
+                    UNIQUE (authority_id, brand_id, policy_checksum)
+                )
+                """
+            )
+            anchor_columns = {
+                str(row[1])
+                for row in connection.execute(
+                    "PRAGMA table_info(tenant_audit_retention_anchors)"
+                ).fetchall()
+            }
+            if anchor_columns != {
+                "authority_id",
+                "brand_id",
+                "revision",
+                "policy_checksum",
+                "minimum_retention_days",
+                "anchored_at",
+            }:
+                raise ArtifactStoreError(
+                    "audit retention anchor ledger schema is invalid"
+                )
             connection.commit()
         except ArtifactStoreError:
             raise
@@ -840,6 +882,76 @@ class _SQLiteArtifactDeletionLedger:
             ),
         )
 
+    def audit_retention_anchors(
+        self,
+        connection: sqlite3.Connection,
+        brand_id: str,
+    ) -> list[tuple[int, str, int, str]]:
+        rows = connection.execute(
+            """
+            SELECT revision, policy_checksum, minimum_retention_days, anchored_at
+            FROM tenant_audit_retention_anchors
+            WHERE authority_id = ? AND brand_id = ?
+            ORDER BY revision
+            """,
+            (self.authority_id, brand_id),
+        ).fetchall()
+        validated: list[tuple[int, str, int, str]] = []
+        previous_days = 0
+        for expected_revision, row in enumerate(rows, start=1):
+            revision, policy_checksum, retention_days, anchored_at = row
+            if (
+                revision != expected_revision
+                or not isinstance(policy_checksum, str)
+                or not policy_checksum.startswith("sha256:")
+                or isinstance(retention_days, bool)
+                or not isinstance(retention_days, int)
+                or not 1 <= retention_days <= 3650
+                or retention_days < previous_days
+                or not isinstance(anchored_at, str)
+            ):
+                raise ArtifactStoreError("audit retention anchor is invalid")
+            parse_time(anchored_at)
+            validated.append(
+                (revision, policy_checksum, retention_days, anchored_at)
+            )
+            previous_days = retention_days
+        return validated
+
+    def insert_audit_retention_anchor(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        brand_id: str,
+        policy: Mapping[str, Any],
+    ) -> None:
+        anchors = self.audit_retention_anchors(connection, brand_id)
+        expected_revision = len(anchors) + 1
+        if (
+            policy["revision"] != expected_revision
+            or (
+                anchors
+                and policy["minimum_retention_days"] < anchors[-1][2]
+            )
+        ):
+            raise ArtifactStoreError("audit retention anchor is invalid")
+        connection.execute(
+            """
+            INSERT INTO tenant_audit_retention_anchors (
+                authority_id, brand_id, revision, policy_checksum,
+                minimum_retention_days, anchored_at
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                self.authority_id,
+                brand_id,
+                policy["revision"],
+                policy["content_checksum"],
+                policy["minimum_retention_days"],
+                policy["effective_at"],
+            ),
+        )
+
     def authority_offboarding_receipt(
         self,
         connection: sqlite3.Connection,
@@ -901,6 +1013,8 @@ class _AuthorityPaperclipAdapter:
         timeout_seconds: float = 5.0,
         clock: Callable[[], datetime] | None = None,
         approval_authority: _FictionalApprovalAuthority,
+        audit_retention_authority: _FictionalAuditRetentionAuthority,
+        deletion_ledger: _SQLiteArtifactDeletionLedger,
         _construction_token: object,
     ) -> None:
         if _construction_token is not _AUTHORITY_ADAPTER_TOKEN:
@@ -914,6 +1028,8 @@ class _AuthorityPaperclipAdapter:
         )
         self._clock = clock or (lambda: datetime.now(timezone.utc))
         self._approval_authority = approval_authority
+        self._audit_retention_authority = audit_retention_authority
+        self._deletion_ledger = deletion_ledger
 
     def create_task(self, principal: Principal, task: Mapping[str, Any]) -> str:
         self._require_director(principal)
@@ -1565,8 +1681,12 @@ class _AuthorityPaperclipAdapter:
             or len(evidence_ref) > 512
         ):
             raise ContractError("audit retention policy evidence is required")
-        connection = self._database.connect()
+        connection: sqlite3.Connection | None = None
+        anchor_connection: sqlite3.Connection | None = None
         try:
+            anchor_connection = self._deletion_ledger.connect()
+            anchor_connection.execute("BEGIN IMMEDIATE")
+            connection = self._database.connect()
             connection.execute("BEGIN IMMEDIATE")
             row = connection.execute(
                 """
@@ -1578,7 +1698,9 @@ class _AuthorityPaperclipAdapter:
             current = None
             if row is not None:
                 current = self._current_audit_retention_policy(
-                    connection, principal.brand_id
+                    connection,
+                    principal.brand_id,
+                    anchor_connection=anchor_connection,
                 )
                 if minimum_retention_days < current["minimum_retention_days"]:
                     raise ContractError("audit retention cannot be shortened")
@@ -1586,10 +1708,15 @@ class _AuthorityPaperclipAdapter:
                     minimum_retention_days == current["minimum_retention_days"]
                     and evidence_ref == current["evidence_ref"]
                 ):
+                    anchor_connection.commit()
                     connection.commit()
                     return current
+            elif self._deletion_ledger.audit_retention_anchors(
+                anchor_connection, principal.brand_id
+            ):
+                raise PlatformAdapterError("audit retention policy is invalid")
             effective_at = _authority_now(self._clock).isoformat()
-            policy = finalize_record(
+            policy = self._audit_retention_authority.attest(
                 {
                     "schema_version": "1.0",
                     "artifact_type": "tenant_audit_retention_policy",
@@ -1618,24 +1745,45 @@ class _AuthorityPaperclipAdapter:
                     effective_at,
                 ),
             )
+            self._deletion_ledger.insert_audit_retention_anchor(
+                anchor_connection,
+                brand_id=principal.brand_id,
+                policy=policy,
+            )
             self._insert_audit(
                 connection,
                 principal,
                 "authority.audit_retention_policy.recorded",
                 policy["content_checksum"],
             )
+            anchor_connection.commit()
             connection.commit()
             return policy
         except (AuthorizationError, ContractError, PlatformAdapterError):
-            _rollback(connection)
+            if connection is not None:
+                _rollback(connection)
+            if anchor_connection is not None:
+                _rollback(anchor_connection)
             raise
-        except (json.JSONDecodeError, sqlite3.Error, TypeError, ValueError) as exc:
-            _rollback(connection)
+        except (
+            ArtifactStoreError,
+            json.JSONDecodeError,
+            sqlite3.Error,
+            TypeError,
+            ValueError,
+        ) as exc:
+            if connection is not None:
+                _rollback(connection)
+            if anchor_connection is not None:
+                _rollback(anchor_connection)
             raise PlatformAdapterError(
                 "could not record audit retention policy"
             ) from exc
         finally:
-            connection.close()
+            if connection is not None:
+                connection.close()
+            if anchor_connection is not None:
+                anchor_connection.close()
 
     def audit_retention_policy(self, principal: Principal) -> dict[str, Any]:
         self._require_audit_reader(principal)
@@ -1799,6 +1947,10 @@ class _AuthorityPaperclipAdapter:
             or len(evidence_ref) > 512
         ):
             raise ContractError("audit expiration evidence is required")
+        evidence_reference = self._audit_retention_authority.evidence_reference(
+            principal.brand_id,
+            evidence_ref,
+        )
         expired_before = parse_time(prepared["expired_before"])
         prepared_at = parse_time(prepared["prepared_at"])
         connection = self._database.connect()
@@ -1830,7 +1982,7 @@ class _AuthorityPaperclipAdapter:
                     raise PlatformAdapterError(
                         "audit expiration evidence is invalid"
                     )
-                if existing["evidence_ref"] != evidence_ref:
+                if existing["evidence_reference"] != evidence_reference:
                     raise ContractError("audit expiration receipt is immutable")
                 connection.commit()
                 return existing
@@ -1878,8 +2030,7 @@ class _AuthorityPaperclipAdapter:
                 "expired_before": prepared["expired_before"],
                 "event_count": len(sequences),
                 "events_checksum": state["events_checksum"],
-                "evidence_ref": evidence_ref,
-                "requested_by": principal.actor_id,
+                "evidence_reference": evidence_reference,
                 "expired_at": expired_at,
             }
             receipt = finalize_record(
@@ -1972,11 +2123,12 @@ class _AuthorityPaperclipAdapter:
         finally:
             connection.close()
 
-    @classmethod
     def _current_audit_retention_policy(
-        cls,
+        self,
         connection: sqlite3.Connection,
         brand_id: str,
+        *,
+        anchor_connection: sqlite3.Connection | None = None,
     ) -> dict[str, Any]:
         rows = connection.execute(
             """
@@ -1988,11 +2140,31 @@ class _AuthorityPaperclipAdapter:
         ).fetchall()
         if not rows:
             raise ContractError("audit retention policy is not configured")
+        owns_anchor_connection = anchor_connection is None
+        try:
+            if anchor_connection is None:
+                anchor_connection = self._deletion_ledger.connect()
+            anchors = self._deletion_ledger.audit_retention_anchors(
+                anchor_connection, brand_id
+            )
+        except ArtifactStoreError as exc:
+            raise PlatformAdapterError(
+                "audit retention policy is invalid"
+            ) from exc
+        finally:
+            if owns_anchor_connection and anchor_connection is not None:
+                anchor_connection.close()
+        if len(anchors) != len(rows):
+            raise PlatformAdapterError("audit retention policy is invalid")
         previous_checksum: str | None = None
         current: dict[str, Any] | None = None
-        for expected_revision, row in enumerate(rows, start=1):
-            policy = cls._validated_audit_retention_policy(
-                json.loads(row[1]), brand_id
+        for expected_revision, (row, anchor) in enumerate(
+            zip(rows, anchors, strict=True), start=1
+        ):
+            policy = self._validated_audit_retention_policy(
+                json.loads(row[1]),
+                brand_id,
+                self._audit_retention_authority,
             )
             if (
                 row[0] != expected_revision
@@ -2000,6 +2172,13 @@ class _AuthorityPaperclipAdapter:
                 or policy["previous_checksum"] != previous_checksum
                 or policy["content_checksum"] != row[2]
                 or policy["effective_at"] != row[3]
+                or anchor
+                != (
+                    policy["revision"],
+                    policy["content_checksum"],
+                    policy["minimum_retention_days"],
+                    policy["effective_at"],
+                )
             ):
                 raise PlatformAdapterError("audit retention policy is invalid")
             previous_checksum = policy["content_checksum"]
@@ -2012,9 +2191,15 @@ class _AuthorityPaperclipAdapter:
     def _validated_audit_retention_policy(
         policy: Mapping[str, Any],
         brand_id: str,
+        authority: _FictionalAuditRetentionAuthority,
     ) -> dict[str, Any]:
         validated = copy.deepcopy(dict(policy))
-        verify_record(validated)
+        try:
+            authority.verify(validated)
+        except ContractError as exc:
+            raise PlatformAdapterError(
+                "audit retention policy is invalid"
+            ) from exc
         if (
             set(validated)
             != {
@@ -2027,6 +2212,7 @@ class _AuthorityPaperclipAdapter:
                 "evidence_ref",
                 "approved_by",
                 "effective_at",
+                "audit_retention_attestation",
                 "content_checksum",
             }
             or validated.get("schema_version") != "1.0"
@@ -2073,8 +2259,7 @@ class _AuthorityPaperclipAdapter:
             "audit_expiration_manifest_checksum",
             "expired_before",
             "events_checksum",
-            "evidence_ref",
-            "requested_by",
+            "evidence_reference",
             "expired_at",
         }
         if (
@@ -2090,8 +2275,7 @@ class _AuthorityPaperclipAdapter:
                 "expired_before",
                 "event_count",
                 "events_checksum",
-                "evidence_ref",
-                "requested_by",
+                "evidence_reference",
                 "expired_at",
                 "content_checksum",
             }
@@ -2115,7 +2299,12 @@ class _AuthorityPaperclipAdapter:
                 "sha256:"
             )
             or not validated["events_checksum"].startswith("sha256:")
-            or not validated["evidence_ref"].startswith("evidence://")
+            or not validated["evidence_reference"].startswith("hmac-sha256:")
+            or len(validated["evidence_reference"]) != 76
+            or any(
+                character not in "0123456789abcdef"
+                for character in validated["evidence_reference"][12:]
+            )
         ):
             raise PlatformAdapterError("audit expiration evidence is invalid")
         seed = {
@@ -2128,8 +2317,7 @@ class _AuthorityPaperclipAdapter:
                 "expired_before",
                 "event_count",
                 "events_checksum",
-                "evidence_ref",
-                "requested_by",
+                "evidence_reference",
                 "expired_at",
             )
         }
@@ -3425,6 +3613,8 @@ class _AuthorityTenantRecovery:
         timeout_seconds: float,
         clock: Callable[[], datetime],
         recovery_authority: _FictionalRecoveryAuthority,
+        audit_retention_authority: _FictionalAuditRetentionAuthority,
+        deletion_ledger: _SQLiteArtifactDeletionLedger,
         artifacts: _AuthorityTenantArtifactStore,
         _construction_token: object,
     ) -> None:
@@ -3432,6 +3622,8 @@ class _AuthorityTenantRecovery:
             raise PlatformAdapterError("tenant recovery construction is denied")
         self._clock = clock
         self._recovery_authority = recovery_authority
+        self._audit_retention_authority = audit_retention_authority
+        self._deletion_ledger = deletion_ledger
         self._artifacts = artifacts
         self._database = _SQLitePlatformDatabase(
             database_path,
@@ -3446,7 +3638,11 @@ class _AuthorityTenantRecovery:
         try:
             connection = self._database.connect()
             connection.execute("BEGIN IMMEDIATE")
-            tables = self._snapshot(connection, principal.brand_id)
+            tables = self._snapshot(
+                connection,
+                ledger_connection,
+                principal.brand_id,
+            )
             table_row_counts = {
                 table: len(rows) for table, rows in sorted(tables.items())
             }
@@ -3495,10 +3691,14 @@ class _AuthorityTenantRecovery:
         tenant_export: Mapping[str, Any],
     ) -> dict[str, int]:
         self._require_director(principal)
-        tables = self._validated_export(principal, tenant_export)
         ledger_connection = self._artifacts._begin_tenant_guard(principal.brand_id)
         connection: sqlite3.Connection | None = None
         try:
+            tables = self._validated_export(
+                principal,
+                tenant_export,
+                ledger_connection,
+            )
             connection = self._database.connect()
             connection.execute("BEGIN IMMEDIATE")
             for table in self._TABLES:
@@ -3543,6 +3743,7 @@ class _AuthorityTenantRecovery:
     def _snapshot(
         self,
         connection: sqlite3.Connection,
+        ledger_connection: sqlite3.Connection,
         brand_id: str,
     ) -> dict[str, list[dict[str, Any]]]:
         tables: dict[str, list[dict[str, Any]]] = {}
@@ -3556,12 +3757,18 @@ class _AuthorityTenantRecovery:
             for row in exported_rows:
                 self._validate_row(table, row, brand_id)
             tables[table] = exported_rows
+        self._validate_audit_retention_anchors(
+            ledger_connection,
+            tables["tenant_audit_retention_policies"],
+            brand_id,
+        )
         return tables
 
     def _validated_export(
         self,
         principal: Principal,
         tenant_export: Mapping[str, Any],
+        ledger_connection: sqlite3.Connection,
     ) -> dict[str, list[dict[str, Any]]]:
         exported = copy.deepcopy(dict(tenant_export))
         if set(exported) != {
@@ -3615,6 +3822,11 @@ class _AuthorityTenantRecovery:
                 self._validate_row(table, raw_row, principal.brand_id)
                 validated_rows.append(copy.deepcopy(raw_row))
             validated_tables[table] = validated_rows
+        self._validate_audit_retention_anchors(
+            ledger_connection,
+            validated_tables["tenant_audit_retention_policies"],
+            principal.brand_id,
+        )
         payload = {
             key: exported[key]
             for key in (
@@ -3633,8 +3845,38 @@ class _AuthorityTenantRecovery:
         )
         return validated_tables
 
-    @staticmethod
+    def _validate_audit_retention_anchors(
+        self,
+        ledger_connection: sqlite3.Connection,
+        rows: Sequence[Mapping[str, Any]],
+        brand_id: str,
+    ) -> None:
+        try:
+            anchors = self._deletion_ledger.audit_retention_anchors(
+                ledger_connection, brand_id
+            )
+        except ArtifactStoreError as exc:
+            raise PlatformAdapterError(
+                "tenant authority audit retention anchor is invalid"
+            ) from exc
+        if len(anchors) != len(rows):
+            raise PlatformAdapterError(
+                "tenant authority audit retention anchor is invalid"
+            )
+        for row, anchor in zip(rows, anchors, strict=True):
+            policy = json.loads(str(row["record_json"]))
+            if anchor != (
+                policy["revision"],
+                policy["content_checksum"],
+                policy["minimum_retention_days"],
+                policy["effective_at"],
+            ):
+                raise PlatformAdapterError(
+                    "tenant authority audit retention anchor is invalid"
+                )
+
     def _validate_row(
+        self,
         table: str,
         row: Mapping[str, Any],
         brand_id: str,
@@ -3750,7 +3992,9 @@ class _AuthorityTenantRecovery:
         if table == "tenant_audit_retention_policies":
             validated_policy = (
                 _AuthorityPaperclipAdapter._validated_audit_retention_policy(
-                    record, brand_id
+                    record,
+                    brand_id,
+                    self._audit_retention_authority,
                 )
             )
             if (

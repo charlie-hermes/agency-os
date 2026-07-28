@@ -246,10 +246,13 @@ Production remains blocked until the human owner approves the targets and a
 real persistent deployment meets them.
 
 The fictional single-host Platform Authority does not activate those values. It
-requires a director to record an explicit evidence-bound value, retains every
-policy revision, refuses to shorten the current minimum, and expires audit rows
-only from an exact current manifest after the configured window. Its telemetry
-is local, tenant-scoped and content-free. This proves the control shape and
+requires a director to record an explicit evidence-bound value, authenticates
+every revision with a host-held domain-separated key, anchors each revision in
+the separate protected ledger, refuses rewritten or rolled-back history and
+expires audit rows only from an exact current manifest after
+the configured window. Its retained receipt replaces caller evidence text with a
+secret-keyed opaque reference and stores no actor ID. Its telemetry is local,
+tenant-scoped and content-free. This proves the control shape and
 failure semantics only; it is not production monitoring, a legal-records
 schedule, an external telemetry pipeline, multi-host expiration, backup expiry
 or media erasure.

@@ -14,6 +14,7 @@ from pathlib import Path
 import agency_os
 from agency_os._approval_authority import (
     _FictionalApprovalAuthority,
+    _FictionalAuditRetentionAuthority,
     _FictionalRecoveryAuthority,
 )
 from agency_os.contracts import (
@@ -1103,6 +1104,7 @@ class PlatformAdapterTests(unittest.TestCase):
         self.assertEqual(TenantWorkQueueClient.__slots__, ("_authority",))
         for forbidden_export in (
             "FictionalApprovalAuthority",
+            "FictionalAuditRetentionAuthority",
             "FictionalRecoveryAuthority",
             "FictionalPaperclipAdapter",
             "SQLiteTenantEvidenceStore",
@@ -1121,6 +1123,12 @@ class PlatformAdapterTests(unittest.TestCase):
                 _construction_token=object(),
             )
         with self.assertRaises(ContractError):
+            _FictionalAuditRetentionAuthority(
+                authority_id="fictional_paperclip_approval_authority",
+                signing_key=os.urandom(32),
+                _construction_token=object(),
+            )
+        with self.assertRaises(ContractError):
             _FictionalRecoveryAuthority(
                 authority_id="fictional_paperclip_approval_authority",
                 signing_key=os.urandom(32),
@@ -1130,6 +1138,8 @@ class PlatformAdapterTests(unittest.TestCase):
             _AuthorityPaperclipAdapter(
                 self.database_path,
                 approval_authority=object(),
+                audit_retention_authority=object(),
+                deletion_ledger=object(),
                 _construction_token=object(),
             )
         with self.assertRaises(ArtifactStoreError):
@@ -2780,6 +2790,11 @@ class PlatformAdapterTests(unittest.TestCase):
         )
         self.addCleanup(migrated.close)
         director = migrated.client(self.director)
+        director.set_audit_retention_policy(
+            self.director,
+            minimum_retention_days=30,
+            evidence_ref="evidence://audit/legacy-ledger-policy",
+        )
         director.work_queue().cancel_tenant(
             self.director,
             evidence_ref="evidence://offboarding/legacy-ledger",
@@ -2817,6 +2832,36 @@ class PlatformAdapterTests(unittest.TestCase):
                     "receipt_json",
                     "offboarded_at",
                 },
+            )
+            self.assertEqual(
+                {
+                    row[1]
+                    for row in connection.execute(
+                        "PRAGMA table_info(tenant_audit_retention_anchors)"
+                    )
+                },
+                {
+                    "authority_id",
+                    "brand_id",
+                    "revision",
+                    "policy_checksum",
+                    "minimum_retention_days",
+                    "anchored_at",
+                },
+            )
+            self.assertEqual(
+                connection.execute(
+                    """
+                    SELECT revision, minimum_retention_days
+                    FROM tenant_audit_retention_anchors
+                    WHERE authority_id = ? AND brand_id = ?
+                    """,
+                    (
+                        "fictional_paperclip_approval_authority",
+                        self.director.brand_id,
+                    ),
+                ).fetchone(),
+                (1, 30),
             )
 
     def test_recovery_host_requires_preprovisioned_deletion_ledger(self) -> None:
@@ -2984,11 +3029,29 @@ class PlatformAdapterTests(unittest.TestCase):
         )
         self.assertEqual(strengthened["revision"], 2)
         self.assertEqual(strengthened["previous_checksum"], policy["content_checksum"])
-        forged_policy = copy.deepcopy(strengthened)
-        forged_policy.pop("content_checksum")
-        forged_policy["previous_checksum"] = f"sha256:{'0' * 64}"
-        forged_policy = finalize_record(forged_policy)
+        forged_first = copy.deepcopy(policy)
+        forged_first.pop("content_checksum")
+        forged_first["minimum_retention_days"] = 1
+        forged_first = finalize_record(forged_first)
+        forged_second = copy.deepcopy(strengthened)
+        forged_second.pop("content_checksum")
+        forged_second["minimum_retention_days"] = 2
+        forged_second["previous_checksum"] = forged_first["content_checksum"]
+        forged_second = finalize_record(forged_second)
+        before_chain_rewrite_denial = self.paperclip.audit_events(self.director)
         with sqlite3.connect(self.database_path) as connection:
+            connection.execute(
+                """
+                UPDATE tenant_audit_retention_policies
+                SET record_json = ?, checksum = ?
+                WHERE brand_id = ? AND revision = 1
+                """,
+                (
+                    canonical_bytes(forged_first).decode(),
+                    forged_first["content_checksum"],
+                    self.director.brand_id,
+                ),
+            )
             connection.execute(
                 """
                 UPDATE tenant_audit_retention_policies
@@ -2996,16 +3059,48 @@ class PlatformAdapterTests(unittest.TestCase):
                 WHERE brand_id = ? AND revision = 2
                 """,
                 (
-                    canonical_bytes(forged_policy).decode(),
-                    forged_policy["content_checksum"],
+                    canonical_bytes(forged_second).decode(),
+                    forged_second["content_checksum"],
                     self.director.brand_id,
                 ),
             )
         with self.assertRaises(PlatformAdapterError):
             reviewer.audit_retention_policy(self.reviewer)
         with self.assertRaises(PlatformAdapterError):
+            reviewer.audit_telemetry(self.reviewer)
+        with self.assertRaises(PlatformAdapterError):
             self.paperclip.prepare_audit_expiration(self.director)
+        with self.assertRaises(PlatformAdapterError):
+            self.paperclip.expire_audit_events(
+                self.director,
+                manifest=stale_manifest,
+                evidence_ref="evidence://audit/whole-chain-rewrite",
+            )
+        with self.assertRaises(PlatformAdapterError):
+            self.paperclip.export_tenant_authority(self.director)
+        self.assertEqual(
+            self.paperclip.audit_events(self.director),
+            before_chain_rewrite_denial,
+        )
         with sqlite3.connect(self.database_path) as connection:
+            self.assertEqual(
+                connection.execute(
+                    "SELECT COUNT(*) FROM tenant_audit_expirations"
+                ).fetchone()[0],
+                0,
+            )
+            connection.execute(
+                """
+                UPDATE tenant_audit_retention_policies
+                SET record_json = ?, checksum = ?
+                WHERE brand_id = ? AND revision = 1
+                """,
+                (
+                    canonical_bytes(policy).decode(),
+                    policy["content_checksum"],
+                    self.director.brand_id,
+                ),
+            )
             connection.execute(
                 """
                 UPDATE tenant_audit_retention_policies
@@ -3016,6 +3111,51 @@ class PlatformAdapterTests(unittest.TestCase):
                     canonical_bytes(strengthened).decode(),
                     strengthened["content_checksum"],
                     self.director.brand_id,
+                ),
+            )
+        with sqlite3.connect(self.database_path) as connection:
+            connection.execute(
+                """
+                DELETE FROM tenant_audit_retention_policies
+                WHERE brand_id = ? AND revision = 2
+                """,
+                (self.director.brand_id,),
+            )
+        with self.assertRaises(PlatformAdapterError):
+            reviewer.audit_retention_policy(self.reviewer)
+        with self.assertRaises(PlatformAdapterError):
+            self.paperclip.prepare_audit_expiration(self.director)
+        with self.assertRaises(PlatformAdapterError):
+            self.paperclip.expire_audit_events(
+                self.director,
+                manifest=stale_manifest,
+                evidence_ref="evidence://audit/authentic-prefix-rollback",
+            )
+        with self.assertRaises(PlatformAdapterError):
+            self.paperclip.export_tenant_authority(self.director)
+        self.assertEqual(
+            self.paperclip.audit_events(self.director),
+            before_chain_rewrite_denial,
+        )
+        with sqlite3.connect(self.database_path) as connection:
+            self.assertEqual(
+                connection.execute(
+                    "SELECT COUNT(*) FROM tenant_audit_expirations"
+                ).fetchone()[0],
+                0,
+            )
+            connection.execute(
+                """
+                INSERT INTO tenant_audit_retention_policies (
+                    brand_id, revision, record_json, checksum, effective_at
+                ) VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    self.director.brand_id,
+                    strengthened["revision"],
+                    canonical_bytes(strengthened).decode(),
+                    strengthened["content_checksum"],
+                    strengthened["effective_at"],
                 ),
             )
         with self.assertRaises(ContractError):
@@ -3070,7 +3210,7 @@ class PlatformAdapterTests(unittest.TestCase):
         receipt = self.paperclip.expire_audit_events(
             self.director,
             manifest=manifest,
-            evidence_ref="evidence://audit/retention-window-elapsed",
+            evidence_ref="evidence://review/subject-123",
         )
         self.assertEqual(receipt["event_count"], 5)
         receipt_id = receipt["audit_expiration_receipt_id"]
@@ -3078,7 +3218,7 @@ class PlatformAdapterTests(unittest.TestCase):
             self.paperclip.expire_audit_events(
                 self.director,
                 manifest=manifest,
-                evidence_ref="evidence://audit/retention-window-elapsed",
+                evidence_ref="evidence://review/subject-123",
             ),
             receipt,
         )
@@ -3095,6 +3235,11 @@ class PlatformAdapterTests(unittest.TestCase):
         receipt_bytes = canonical_bytes(receipt).decode()
         self.assertNotIn("issue_audit_old", receipt_bytes)
         self.assertNotIn("evidence_audit_old", receipt_bytes)
+        self.assertNotIn("subject-123", receipt_bytes)
+        self.assertNotIn(self.director.actor_id, receipt_bytes)
+        self.assertNotIn("evidence_ref", receipt)
+        self.assertNotIn("requested_by", receipt)
+        self.assertRegex(receipt["evidence_reference"], r"^hmac-sha256:[0-9a-f]{64}$")
         remaining_types = [
             event["event_type"]
             for event in self.paperclip.audit_events(self.director)
@@ -3217,7 +3362,7 @@ class PlatformAdapterTests(unittest.TestCase):
             )
         forged_receipt = copy.deepcopy(receipt)
         forged_receipt.pop("content_checksum")
-        forged_receipt["requested_by"] = "forged-director"
+        forged_receipt["evidence_reference"] = f"hmac-sha256:{'0' * 64}"
         forged_seed = {
             key: forged_receipt[key]
             for key in (
@@ -3228,8 +3373,7 @@ class PlatformAdapterTests(unittest.TestCase):
                 "expired_before",
                 "event_count",
                 "events_checksum",
-                "evidence_ref",
-                "requested_by",
+                "evidence_reference",
                 "expired_at",
             )
         }

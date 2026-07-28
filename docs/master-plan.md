@@ -220,12 +220,14 @@ key rotation, retention expiry, measured recovery objectives or multi-host
 disaster recovery.
 
 The eighth bounded slice adds fictional single-host audit governance without
-selecting a production value. A director records an immutable, versioned and
-evidence-bound minimum which can only be strengthened. Director/reviewer
-telemetry exposes tenant-scoped content-free counts and timestamps. Expiration
-requires an exact current manifest after the window, preserves an immutable
-content-free receipt, survives restart and logical recovery, and retains the
-expiration audit event. Offboarding removes policy content but preserves the
+selecting a production value. A director records an immutable, versioned,
+evidence-bound and host-authenticated minimum which can only be strengthened;
+a protected append-only anchor rejects rewritten or rolled-back history.
+Director/reviewer telemetry exposes tenant-scoped content-free counts and
+timestamps. Expiration requires an exact current manifest after the window,
+preserves an immutable receipt with only an opaque evidence binding and no actor
+ID, survives restart and logical recovery, and retains the expiration audit
+event. Offboarding removes policy content but preserves the
 receipt. This is not owner approval of the proposed 400-day target, production
 monitoring, a deployed scheduler, multi-host expiry, backup expiry or media
 erasure.

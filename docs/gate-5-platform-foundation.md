@@ -237,9 +237,14 @@ RTO, retention expiry, media erasure or multi-host recovery.
 
 The protected host now requires an explicit director-controlled retention policy
 before it exposes audit telemetry or permits expiration. Policies are immutable,
-versioned, checksum-chained and evidence-referenced. This reference permits only
-monotonic strengthening from 1 to 3,650 days; it does not select a default and it
-does not treat the proposed 400-day production target as approved.
+versioned, checksum-chained, evidence-referenced and authenticated by a
+host-held, domain-separated authority key. A separate protected append-only
+anchor keeps each revision, checksum and minimum, so deleting or replaying an
+older authentic prefix also fails closed. Rewriting and recomputing the complete
+public checksum chain cannot lower retention without that authority. This
+reference permits only monotonic strengthening from 1 to 3,650 days; it does not
+select a default and it does not treat the proposed 400-day production target as
+approved.
 
 Telemetry contains tenant-scoped counts, event-type counts and oldest/newest
 timestamps only. It contains no audit subjects, actor IDs, task IDs, evidence
@@ -250,9 +255,11 @@ Audit expiration is director-only and uses an exact checksum-bound manifest of
 the currently eligible events. A policy revision, changed eligible row set,
 forged count/checksum, future preparation time, non-elapsed window or empty
 selection fails before deletion. Successful expiration and its content-free,
-immutable receipt commit in one immediate transaction; retry is idempotent only
-for the exact original evidence. The expiration itself creates a new retained
-audit event. Policies and receipts survive restart and logical recovery.
+immutable receipt commit in one immediate transaction; the receipt replaces the
+caller evidence text with a domain-separated HMAC reference and stores no actor
+ID. Retry is idempotent only for the exact original evidence. The expiration
+itself creates a new retained audit event. Policies and receipts survive restart
+and logical recovery.
 Offboarding deletes policy content but preserves content-free expiration
 receipts for director/reviewer inspection while denying workers and all other
 tenant access.

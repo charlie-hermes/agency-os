@@ -24,6 +24,7 @@ from typing import Any, Callable, Mapping, Sequence
 from ._approval_authority import (
     _APPROVAL_AUTHORITY_TOKEN,
     _FictionalApprovalAuthority,
+    _FictionalAuditRetentionAuthority,
     _FictionalRecoveryAuthority,
 )
 from .contracts import ContractError, canonical_bytes, parse_time
@@ -772,6 +773,11 @@ def _run_platform_authority_host(
             signing_key=approval_signing_key,
             _construction_token=_APPROVAL_AUTHORITY_TOKEN,
         )
+        audit_retention_authority = _FictionalAuditRetentionAuthority(
+            authority_id=authority_id,
+            signing_key=approval_signing_key,
+            _construction_token=_APPROVAL_AUTHORITY_TOKEN,
+        )
         recovery_authority = _FictionalRecoveryAuthority(
             authority_id=authority_id,
             signing_key=approval_signing_key,
@@ -795,6 +801,8 @@ def _run_platform_authority_host(
             timeout_seconds=timeout_seconds,
             clock=authority_clock,
             approval_authority=signer,
+            audit_retention_authority=audit_retention_authority,
+            deletion_ledger=deletion_ledger,
             _construction_token=_AUTHORITY_ADAPTER_TOKEN,
         )
         evidence = _AuthorityTenantEvidenceStore(
@@ -829,6 +837,8 @@ def _run_platform_authority_host(
             timeout_seconds=timeout_seconds,
             clock=authority_clock,
             recovery_authority=full_recovery_authority,
+            audit_retention_authority=audit_retention_authority,
+            deletion_ledger=deletion_ledger,
             artifacts=artifacts,
             _construction_token=_AUTHORITY_ADAPTER_TOKEN,
         )
