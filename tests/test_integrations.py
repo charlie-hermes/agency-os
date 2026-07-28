@@ -46,6 +46,7 @@ class IntegrationTests(unittest.TestCase):
         captured = {}
 
         def opener(request: object, *, timeout: float) -> _Response:
+            captured["calls"] = captured.get("calls", 0) + 1
             captured["request"] = request
             captured["timeout"] = timeout
             return _Response({"ok": True})
@@ -65,15 +66,34 @@ class IntegrationTests(unittest.TestCase):
         with self.assertRaises(IntegrationError):
             transport.request("DELETE", "/api/issues/one")
         approval_id = "00000000-0000-4000-8000-000000000901"
+        admitted = (
+            ("GET", f"/api/companies/{COMPANY_ID}/issues"),
+            ("POST", f"/api/companies/{COMPANY_ID}/issues"),
+            ("POST", f"/api/companies/{COMPANY_ID}/approvals"),
+            ("POST", f"/api/companies/{COMPANY_ID}/cost-events"),
+            ("GET", f"/api/issues/{approval_id}"),
+            ("PATCH", f"/api/issues/{approval_id}"),
+            ("POST", f"/api/issues/{approval_id}/checkout"),
+            ("POST", f"/api/issues/{approval_id}/release"),
+            ("POST", f"/api/issues/{approval_id}/comments"),
+            ("GET", f"/api/approvals/{approval_id}"),
+            ("GET", f"/api/approvals/{approval_id}/issues"),
+        )
+        for method, path in admitted:
+            self.assertEqual(transport.request(method, path, {}), {"ok": True})
+        admitted_calls = captured["calls"]
         for path in (
             f"/api/approvals/{approval_id}/approve",
             f"/api/approvals/{approval_id}/approve?bypass=1",
+            f"/api//approvals/{approval_id}/approve",
+            f"/api/issues/../approvals/{approval_id}/approve",
         ):
             with self.assertRaises(IntegrationError):
                 transport.request(
                     "POST", path,
                     {"decisionNote": "must use board identity"},
                 )
+        self.assertEqual(captured["calls"], admitted_calls)
 
         board_captured = {}
 

@@ -110,6 +110,48 @@ class PaperclipBrandBinding:
             raise ValueError("Paperclip brand_id is invalid")
 
 
+def _paperclip_lifecycle_route_admitted(method: str, path: str) -> bool:
+    """Admit only exact canonical routes used by the lifecycle adapter."""
+
+    if method == "GET" and path == "/api/health":
+        return True
+    parts = path.split("/")
+    if (
+        len(parts) < 4
+        or parts[:2] != ["", "api"]
+        or any(part in {"", ".", ".."} for part in parts[2:])
+        or any("%" in part for part in parts)
+    ):
+        return False
+
+    def canonical_uuid(index: int) -> bool:
+        try:
+            return str(UUID(parts[index])) == parts[index]
+        except (ValueError, IndexError):
+            return False
+
+    if parts[2] == "companies" and len(parts) == 5 and canonical_uuid(3):
+        return (method, parts[4]) in {
+            ("GET", "issues"),
+            ("POST", "issues"),
+            ("POST", "approvals"),
+            ("POST", "cost-events"),
+        }
+    if parts[2] == "issues" and canonical_uuid(3):
+        if len(parts) == 4:
+            return method in {"GET", "PATCH"}
+        return (method, parts[4]) in {
+            ("POST", "checkout"),
+            ("POST", "release"),
+            ("POST", "comments"),
+        } and len(parts) == 5
+    if parts[2] == "approvals" and canonical_uuid(3):
+        return (len(parts) == 4 and method == "GET") or (
+            len(parts) == 5 and method == "GET" and parts[4] == "issues"
+        )
+    return False
+
+
 class PaperclipHTTPTransport:
     """Authenticated lifecycle transport with no unguarded sender method."""
 
@@ -148,18 +190,8 @@ class PaperclipHTTPTransport:
         path: str,
         payload: Mapping[str, Any] | None = None,
     ) -> Any:
-        if method not in {"GET", "POST", "PATCH"} or not path.startswith("/api/"):
-            raise IntegrationError("Paperclip operation is not admitted")
-        parsed_path = urllib.parse.urlsplit(path)
-        if (
-            parsed_path.query
-            or parsed_path.fragment
-            or parsed_path.path != path
-            or "%" in path
-        ):
-            raise IntegrationError("Paperclip query routes are not admitted")
-        if method == "POST" and parsed_path.path.startswith("/api/approvals/"):
-            raise IntegrationError("Paperclip board operation requires board transport")
+        if not _paperclip_lifecycle_route_admitted(method, path):
+            raise IntegrationError("Paperclip lifecycle route is not admitted")
         body = None if payload is None else canonical_bytes(dict(payload))
         request = urllib.request.Request(
             f"{self._base_url}{path}",
