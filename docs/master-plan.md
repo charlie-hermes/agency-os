@@ -198,6 +198,16 @@ future worker access or queue mutation across restart, and produces a
 content-free receipt which artifact deletion must bind. This is not deployed
 cross-host cancellation, retention expiry or full tenant-data offboarding.
 
+The sixth bounded slice coordinates destructive offboarding inside the same
+fictional local authority. A director prepares a content-free manifest of table
+counts and aggregate checksums after queue cancellation. The exact-current
+manifest then binds artifact and authority tombstones before task, approval,
+Buzz, evidence, artifact, queue and ordinary audit content is removed. Old
+clients fail closed immediately; an interrupted cleanup resumes only with the
+same manifest and evidence, restart cannot reactivate the tenant, and another
+tenant remains isolated. This is not a restorable full-authority export,
+production backup/media erasure, credential revocation or multi-host deletion.
+
 **Merged first-slice evidence:** PR #6, reviewed commit
 `5b53ef937bb0b05490e851660967c5ac39334ac4`, merge commit
 `4efc84fc36c4cd14d8226700162a4e8a4fbb3b57`, and Ubuntu repository gate
@@ -212,6 +222,16 @@ gate `30314681544` with 102 tests and no real external write.
 `388cdee05b522d01515b98cc6864b731ab4fbcef`, merge commit
 `edac6d0acaa455a3a39c8130e4c8f99bb14a1afc`, and post-merge Ubuntu repository
 gate `30333066091` with 107 tests and no real external write.
+
+**Merged fourth-slice evidence:** PR #9, reviewed commit
+`34156a623896f9659f4ee8f46a6f3c1e6972ab1f`, merge commit
+`b9b4eb93864f87db6b0218de4c0bf20221601242`, and post-merge Ubuntu repository
+gate `30335486258` with 111 tests and no real external write.
+
+**Merged fifth-slice evidence:** PR #10, reviewed commit
+`46c4d48a9025e430a122291b8e577000880c7815`, merge commit
+`85c7c7f1c9b5e4042e80d4d615d33014bef9a4a3`, and post-merge Ubuntu repository
+gate `30339639182` with 112 tests and no real external write.
 
 Implement:
 

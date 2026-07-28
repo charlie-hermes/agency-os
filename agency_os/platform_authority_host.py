@@ -36,6 +36,7 @@ from .platform_adapters import (
     _DELETION_LEDGER_TOKEN,
     _AuthorityPaperclipAdapter,
     _AuthorityTenantArtifactStore,
+    _AuthorityTenantOffboarding,
     _AuthorityWorkQueue,
     _AuthorityTenantEvidenceStore,
     _SQLiteArtifactDeletionLedger,
@@ -196,6 +197,38 @@ class PlatformAuthorityClient:
 
     def audit_events(self, principal: Principal) -> list[dict[str, Any]]:
         return self._request("audit_events", principal)
+
+    def prepare_tenant_offboarding(
+        self, principal: Principal
+    ) -> dict[str, Any]:
+        return self._request("prepare_tenant_offboarding", principal)
+
+    def offboard_tenant(
+        self,
+        principal: Principal,
+        *,
+        expected_authority_manifest_checksum: str,
+        evidence_ref: str,
+    ) -> dict[str, Any]:
+        return self._request(
+            "offboard_tenant",
+            principal,
+            expected_authority_manifest_checksum=(
+                expected_authority_manifest_checksum
+            ),
+            evidence_ref=evidence_ref,
+        )
+
+    def tenant_offboarding_receipt(
+        self,
+        principal: Principal,
+        receipt_id: str,
+    ) -> dict[str, Any]:
+        return self._request(
+            "tenant_offboarding_receipt",
+            principal,
+            receipt_id=receipt_id,
+        )
 
     def evidence(self) -> "TenantEvidenceClient":
         return TenantEvidenceClient(self)
@@ -712,6 +745,14 @@ def _run_platform_authority_host(
             clock=authority_clock,
             _construction_token=_AUTHORITY_ADAPTER_TOKEN,
         )
+        tenant_offboarding = _AuthorityTenantOffboarding(
+            database_path,
+            timeout_seconds=timeout_seconds,
+            clock=authority_clock,
+            artifacts=artifacts,
+            deletion_ledger=deletion_ledger,
+            _construction_token=_AUTHORITY_ADAPTER_TOKEN,
+        )
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as server:
             server.bind(socket_path)
             os.chmod(socket_path, 0o600)
@@ -744,6 +785,7 @@ def _run_platform_authority_host(
                         evidence,
                         artifacts,
                         work_queue,
+                        tenant_offboarding,
                         client_principals,
                     )
                     connection.sendall(canonical_bytes(response) + b"\n")
@@ -782,6 +824,7 @@ def _handle_platform_request(
     evidence: _AuthorityTenantEvidenceStore,
     artifacts: _AuthorityTenantArtifactStore,
     work_queue: _AuthorityWorkQueue,
+    tenant_offboarding: _AuthorityTenantOffboarding,
     client_principals: Mapping[str, Principal],
 ) -> dict[str, Any]:
     try:
@@ -809,6 +852,19 @@ def _handle_platform_request(
         if principal is None:
             raise AuthorizationError(
                 "Platform Authority client binding is not provisioned"
+            )
+        post_offboarding_operations = {
+            "offboard_tenant",
+            "tenant_offboarding_receipt",
+            "artifact_deletion_receipt",
+            "queue_cancellation_receipt",
+        }
+        if (
+            operation not in post_offboarding_operations
+            and tenant_offboarding.is_offboarded(principal.brand_id)
+        ):
+            raise AuthorizationError(
+                "tenant Platform Authority access is closed after offboarding"
             )
         if operation in _PAPERCLIP_OPERATIONS:
             result = getattr(paperclip, operation)(principal, **arguments)
@@ -856,6 +912,12 @@ def _handle_platform_request(
             result = work_queue.cancel_tenant(principal, **arguments)
         elif operation == "queue_cancellation_receipt":
             result = work_queue.cancellation_receipt(principal, **arguments)
+        elif operation == "prepare_tenant_offboarding":
+            result = tenant_offboarding.prepare(principal, **arguments)
+        elif operation == "offboard_tenant":
+            result = tenant_offboarding.offboard(principal, **arguments)
+        elif operation == "tenant_offboarding_receipt":
+            result = tenant_offboarding.receipt(principal, **arguments)
         else:
             raise ContractError("Platform Authority operation is not allowed")
         return {"outcome": "ALLOW", "result": result}

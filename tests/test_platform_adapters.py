@@ -71,6 +71,9 @@ class PlatformAdapterTests(unittest.TestCase):
         self.publisher = Principal(
             "agent_publisher", "publishing-operator", "brand_lantern"
         )
+        self.reviewer = Principal(
+            "agent_reviewer", "platform-assurance-reviewer", "brand_lantern"
+        )
         self.provisioned_principals = (
             self.director,
             self.foreign_director,
@@ -78,6 +81,7 @@ class PlatformAdapterTests(unittest.TestCase):
             self.unlisted_approver,
             self.strategist,
             self.publisher,
+            self.reviewer,
         )
         self.approval_signing_key = os.urandom(32)
         self.platform_host = _provision_platform_authority_host(
@@ -1965,6 +1969,402 @@ class PlatformAdapterTests(unittest.TestCase):
                 self.strategist, 10
             )
 
+    def test_full_local_tenant_offboarding_is_coordinated_and_durable(self) -> None:
+        self.paperclip.create_task(
+            self.director, self._task("issue_authority_offboard")
+        )
+        task = self.paperclip.set_status(
+            self.director,
+            "issue_authority_offboard",
+            self.paperclip.get_task(
+                self.director, "issue_authority_offboard"
+            )["content_checksum"],
+            "ready",
+        )
+        self.evidence.put(
+            self.strategist,
+            self._evidence(
+                "evidence_authority_offboard",
+                issue_id="issue_authority_offboard",
+            ),
+        )
+        lantern_learning = self._learning("learning_authority_offboard")
+        self.artifacts.put(self.director, lantern_learning)
+        context = make_buzz_context_packet(
+            context_id="context_authority_offboard",
+            brand_id=self.director.brand_id,
+            campaign_id="campaign_launch",
+            paperclip_issue_id="issue_authority_offboard",
+            purpose="Prepare fictional local tenant offboarding.",
+            decision_needed="Confirm the bounded deletion manifest.",
+            participants=(self.director.actor_id, self.strategist.actor_id),
+            source_artifact_ids=("evidence_authority_offboard",),
+            constraints=("No production activation.",),
+            deadline=(self.now + timedelta(hours=1)).isoformat(),
+            exit_condition="The local offboarding receipt is durable.",
+            created_by=self.director.actor_id,
+            created_at=self.now.isoformat(),
+        )
+        self.paperclip.record_buzz_context(self.director, context)
+        queue = self.paperclip.work_queue()
+        queue.enqueue(
+            self.director,
+            self._work_item("work_authority_offboard", task),
+        )
+
+        ember_task = self._task(
+            "issue_authority_ember",
+            brand_id=self.foreign_director.brand_id,
+            created_by=self.foreign_director.actor_id,
+        )
+        self.foreign_paperclip.create_task(self.foreign_director, ember_task)
+        ember_learning = self._learning(
+            "learning_authority_ember",
+            brand_id=self.foreign_director.brand_id,
+        )
+        self.foreign_artifacts.put(self.foreign_director, ember_learning)
+
+        with self.assertRaises(ContractError):
+            self.paperclip.prepare_tenant_offboarding(self.director)
+        queue_receipt = queue.cancel_tenant(
+            self.director,
+            evidence_ref="evidence://offboarding/authority-approved",
+        )
+        stale_manifest = self.paperclip.prepare_tenant_offboarding(self.director)
+        self.evidence.put(
+            self.strategist,
+            self._evidence(
+                "evidence_after_manifest",
+                issue_id="issue_authority_offboard",
+            ),
+        )
+        with self.assertRaises(ContractError):
+            self.paperclip.offboard_tenant(
+                self.director,
+                expected_authority_manifest_checksum=stale_manifest[
+                    "authority_manifest_checksum"
+                ],
+                evidence_ref="evidence://offboarding/full-local",
+            )
+        self.assertEqual(
+            self.paperclip.get_task(self.director, "issue_authority_offboard"),
+            task,
+        )
+        self.assertEqual(
+            self.artifacts.get(self.director, "learning_authority_offboard"),
+            lantern_learning,
+        )
+
+        manifest = self.paperclip.prepare_tenant_offboarding(self.director)
+        self.assertEqual(
+            manifest["queue_cancellation_receipt_id"],
+            queue_receipt["queue_cancellation_receipt_id"],
+        )
+        self.assertGreater(manifest["tables"]["platform_audit"]["row_count"], 0)
+        with self.assertRaises(AuthorizationError):
+            self.strategist_paperclip.offboard_tenant(
+                self.strategist,
+                expected_authority_manifest_checksum=manifest[
+                    "authority_manifest_checksum"
+                ],
+                evidence_ref="evidence://offboarding/full-local",
+            )
+
+        receipt = self.paperclip.offboard_tenant(
+            self.director,
+            expected_authority_manifest_checksum=manifest[
+                "authority_manifest_checksum"
+            ],
+            evidence_ref="evidence://offboarding/full-local",
+        )
+        receipt_id = receipt["tenant_offboarding_receipt_id"]
+        self.assertEqual(
+            receipt["queue_cancellation_receipt_id"],
+            queue_receipt["queue_cancellation_receipt_id"],
+        )
+        receipt_text = canonical_bytes(receipt).decode()
+        for deleted_identifier in (
+            "issue_authority_offboard",
+            "evidence_authority_offboard",
+            "evidence_after_manifest",
+            "context_authority_offboard",
+            "learning_authority_offboard",
+            "work_authority_offboard",
+        ):
+            self.assertNotIn(deleted_identifier, receipt_text)
+        self.assertEqual(
+            self.paperclip.offboard_tenant(
+                self.director,
+                expected_authority_manifest_checksum=manifest[
+                    "authority_manifest_checksum"
+                ],
+                evidence_ref="evidence://offboarding/full-local",
+            ),
+            receipt,
+        )
+        with self.assertRaises(ContractError):
+            self.paperclip.offboard_tenant(
+                self.director,
+                expected_authority_manifest_checksum=manifest[
+                    "authority_manifest_checksum"
+                ],
+                evidence_ref="evidence://offboarding/replacement",
+            )
+
+        reviewer_client = self.platform_host.client(self.reviewer)
+        self.assertEqual(
+            reviewer_client.tenant_offboarding_receipt(
+                self.reviewer, receipt_id
+            ),
+            receipt,
+        )
+        self.assertEqual(
+            self.artifacts.deletion_receipt(
+                self.director, receipt["artifact_deletion_receipt_id"]
+            )["queue_cancellation_receipt_id"],
+            queue_receipt["queue_cancellation_receipt_id"],
+        )
+        self.assertEqual(
+            queue.cancellation_receipt(
+                self.director, queue_receipt["queue_cancellation_receipt_id"]
+            ),
+            queue_receipt,
+        )
+        with self.assertRaises(AuthorizationError):
+            self.strategist_paperclip.tenant_offboarding_receipt(
+                self.strategist, receipt_id
+            )
+        for denied_call in (
+            lambda: self.paperclip.get_task(
+                self.director, "issue_authority_offboard"
+            ),
+            lambda: self.evidence.get(
+                self.strategist, "evidence_authority_offboard"
+            ),
+            lambda: self.artifacts.get(
+                self.director, "learning_authority_offboard"
+            ),
+            lambda: self.paperclip.get_buzz_context(
+                self.director, "context_authority_offboard"
+            ),
+            lambda: self.paperclip.audit_events(self.director),
+            lambda: self.paperclip.prepare_tenant_offboarding(self.director),
+        ):
+            with self.assertRaises(AuthorizationError):
+                denied_call()
+
+        self.assertEqual(
+            self.foreign_paperclip.get_task(
+                self.foreign_director, "issue_authority_ember"
+            ),
+            ember_task,
+        )
+        self.assertEqual(
+            self.foreign_artifacts.get(
+                self.foreign_director, "learning_authority_ember"
+            ),
+            ember_learning,
+        )
+        with sqlite3.connect(self.database_path) as connection:
+            for table in (
+                "paperclip_task_versions",
+                "paperclip_approver_policies",
+                "paperclip_approvals",
+                "paperclip_buzz_contexts",
+                "paperclip_buzz_decisions",
+                "tenant_evidence",
+                "tenant_artifacts",
+                "platform_work_queue",
+                "platform_audit",
+            ):
+                count = connection.execute(
+                    f"SELECT COUNT(*) FROM {table} WHERE brand_id = ?",
+                    (self.director.brand_id,),
+                ).fetchone()[0]
+                self.assertEqual(count, 0, table)
+            self.assertEqual(
+                connection.execute(
+                    """
+                    SELECT COUNT(*) FROM tenant_queue_cancellations
+                    WHERE brand_id = ?
+                    """,
+                    (self.director.brand_id,),
+                ).fetchone()[0],
+                1,
+            )
+
+        self.platform_host.close()
+        restarted = _provision_platform_authority_host(
+            self.database_path,
+            deletion_ledger_path=self.deletion_ledger_path,
+            authority_id="fictional_paperclip_approval_authority",
+            approval_signing_key=self.approval_signing_key,
+            initial_time=self.now,
+            principals=self.provisioned_principals,
+        )
+        self.addCleanup(restarted.close)
+        restarted_director = restarted.client(self.director)
+        self.assertEqual(
+            restarted_director.tenant_offboarding_receipt(
+                self.director, receipt_id
+            ),
+            receipt,
+        )
+        with self.assertRaises(AuthorizationError):
+            restarted_director.get_task(
+                self.director, "issue_authority_offboard"
+            )
+        self.assertEqual(
+            restarted.client(self.foreign_director).get_task(
+                self.foreign_director, "issue_authority_ember"
+            ),
+            ember_task,
+        )
+
+        recovery_path = self.database_path.with_name(
+            "authority-offboarding-recovery.sqlite3"
+        )
+        recovery = _provision_platform_authority_host(
+            recovery_path,
+            deletion_ledger_path=self.deletion_ledger_path,
+            authority_id="fictional_paperclip_approval_authority",
+            approval_signing_key=self.approval_signing_key,
+            initial_time=self.now,
+            principals=self.provisioned_principals,
+        )
+        self.addCleanup(recovery.close)
+        recovery_director = recovery.client(self.director)
+        self.assertEqual(
+            recovery_director.tenant_offboarding_receipt(
+                self.director, receipt_id
+            ),
+            receipt,
+        )
+        with self.assertRaises(AuthorizationError):
+            recovery_director.create_task(
+                self.director, self._task("issue_resurrection")
+            )
+
+    def test_tenant_offboarding_failure_closes_access_and_resumes(self) -> None:
+        self.paperclip.create_task(
+            self.director, self._task("issue_offboard_resume")
+        )
+        self.evidence.put(
+            self.strategist,
+            self._evidence(
+                "evidence_offboard_resume",
+                issue_id="issue_offboard_resume",
+            ),
+        )
+        self.artifacts.put(
+            self.director, self._learning("learning_offboard_resume")
+        )
+        self.paperclip.work_queue().cancel_tenant(
+            self.director,
+            evidence_ref="evidence://offboarding/resume-approved",
+        )
+        manifest = self.paperclip.prepare_tenant_offboarding(self.director)
+        with sqlite3.connect(self.database_path) as connection:
+            connection.execute(
+                """
+                CREATE TRIGGER fail_tenant_offboarding
+                BEFORE DELETE ON tenant_evidence
+                WHEN OLD.brand_id = 'brand_lantern'
+                BEGIN
+                    SELECT RAISE(ABORT, 'fictional cleanup failure');
+                END
+                """
+            )
+
+        with self.assertRaises(PlatformAdapterError):
+            self.paperclip.offboard_tenant(
+                self.director,
+                expected_authority_manifest_checksum=manifest[
+                    "authority_manifest_checksum"
+                ],
+                evidence_ref="evidence://offboarding/resume",
+            )
+        with self.assertRaises(AuthorizationError):
+            self.paperclip.get_task(self.director, "issue_offboard_resume")
+        with sqlite3.connect(self.database_path) as connection:
+            self.assertEqual(
+                connection.execute(
+                    """
+                    SELECT COUNT(*) FROM tenant_evidence
+                    WHERE brand_id = ?
+                    """,
+                    (self.director.brand_id,),
+                ).fetchone()[0],
+                1,
+            )
+            connection.execute("DROP TRIGGER fail_tenant_offboarding")
+
+        receipt = self.paperclip.offboard_tenant(
+            self.director,
+            expected_authority_manifest_checksum=manifest[
+                "authority_manifest_checksum"
+            ],
+            evidence_ref="evidence://offboarding/resume",
+        )
+        self.assertEqual(
+            receipt["authority_manifest_checksum"],
+            manifest["authority_manifest_checksum"],
+        )
+        with sqlite3.connect(self.database_path) as connection:
+            self.assertEqual(
+                connection.execute(
+                    """
+                    SELECT COUNT(*) FROM tenant_evidence
+                    WHERE brand_id = ?
+                    """,
+                    (self.director.brand_id,),
+                ).fetchone()[0],
+                0,
+            )
+        self.assertEqual(
+            self.paperclip.tenant_offboarding_receipt(
+                self.director, receipt["tenant_offboarding_receipt_id"]
+            ),
+            receipt,
+        )
+        forged = copy.deepcopy(receipt)
+        forged.pop("content_checksum")
+        forged["evidence_ref"] = "evidence://offboarding/forged"
+        forged_seed = {
+            key: forged[key]
+            for key in (
+                "brand_id",
+                "authority_manifest_checksum",
+                "artifact_deletion_receipt_id",
+                "queue_cancellation_receipt_id",
+                "manifest_table_row_counts",
+                "evidence_ref",
+                "requested_by",
+                "offboarded_at",
+            )
+        }
+        forged["tenant_offboarding_receipt_id"] = canonical_checksum(
+            forged_seed
+        )
+        forged = finalize_record(forged)
+        with sqlite3.connect(self.deletion_ledger_path) as connection:
+            connection.execute(
+                """
+                UPDATE tenant_authority_offboardings
+                SET receipt_json = ?
+                WHERE authority_id = ? AND brand_id = ?
+                """,
+                (
+                    canonical_bytes(forged).decode(),
+                    "fictional_paperclip_approval_authority",
+                    self.director.brand_id,
+                ),
+            )
+        with self.assertRaises(PlatformAdapterError):
+            self.paperclip.tenant_offboarding_receipt(
+                self.director, receipt["tenant_offboarding_receipt_id"]
+            )
+
     def test_queue_is_tenant_role_immutable_and_task_version_bound(self) -> None:
         self.paperclip.create_task(self.director, self._task("issue_queue_bound"))
         draft = self.paperclip.get_task(self.director, "issue_queue_bound")
@@ -2004,6 +2404,92 @@ class PlatformAdapterTests(unittest.TestCase):
         dead_letter = director_queue.get(self.director, "work_bound")
         self.assertEqual(dead_letter["state"], "DEAD_LETTER")
         self.assertEqual(dead_letter["error_classes"], ["TASK_DRIFT"])
+
+    def test_existing_deletion_ledger_migrates_for_authority_offboarding(
+        self,
+    ) -> None:
+        legacy_ledger_path = self.deletion_ledger_path.with_name(
+            "legacy-artifact-deletions.sqlite3"
+        )
+        with sqlite3.connect(legacy_ledger_path) as connection:
+            connection.execute("PRAGMA journal_mode = WAL")
+            connection.executescript(
+                """
+                CREATE TABLE deletion_ledger_metadata (
+                    singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+                    authority_id TEXT NOT NULL
+                );
+                CREATE TABLE tenant_artifact_deletions (
+                    authority_id TEXT NOT NULL,
+                    brand_id TEXT NOT NULL,
+                    receipt_id TEXT NOT NULL UNIQUE,
+                    export_checksum TEXT NOT NULL,
+                    record_count INTEGER NOT NULL,
+                    receipt_json TEXT NOT NULL,
+                    deleted_at TEXT NOT NULL,
+                    PRIMARY KEY (authority_id, brand_id)
+                );
+                """
+            )
+            connection.execute(
+                """
+                INSERT INTO deletion_ledger_metadata (singleton, authority_id)
+                VALUES (1, ?)
+                """,
+                ("fictional_paperclip_approval_authority",),
+            )
+        os.chmod(legacy_ledger_path, 0o600)
+        migrated_database_path = self.database_path.with_name(
+            "legacy-ledger-platform.sqlite3"
+        )
+        migrated = _provision_platform_authority_host(
+            migrated_database_path,
+            deletion_ledger_path=legacy_ledger_path,
+            authority_id="fictional_paperclip_approval_authority",
+            approval_signing_key=self.approval_signing_key,
+            initial_time=self.now,
+            principals=self.provisioned_principals,
+        )
+        self.addCleanup(migrated.close)
+        director = migrated.client(self.director)
+        director.work_queue().cancel_tenant(
+            self.director,
+            evidence_ref="evidence://offboarding/legacy-ledger",
+        )
+        manifest = director.prepare_tenant_offboarding(self.director)
+        receipt = director.offboard_tenant(
+            self.director,
+            expected_authority_manifest_checksum=manifest[
+                "authority_manifest_checksum"
+            ],
+            evidence_ref="evidence://offboarding/legacy-ledger",
+        )
+        self.assertEqual(
+            director.tenant_offboarding_receipt(
+                self.director, receipt["tenant_offboarding_receipt_id"]
+            ),
+            receipt,
+        )
+        with sqlite3.connect(legacy_ledger_path) as connection:
+            self.assertEqual(
+                {
+                    row[1]
+                    for row in connection.execute(
+                        "PRAGMA table_info(tenant_authority_offboardings)"
+                    )
+                },
+                {
+                    "authority_id",
+                    "brand_id",
+                    "receipt_id",
+                    "authority_manifest_checksum",
+                    "artifact_deletion_receipt_id",
+                    "queue_cancellation_receipt_id",
+                    "evidence_ref",
+                    "receipt_json",
+                    "offboarded_at",
+                },
+            )
 
     def test_recovery_host_requires_preprovisioned_deletion_ledger(self) -> None:
         recovery_path = self.database_path.with_name("unprovisioned-recovery.sqlite3")

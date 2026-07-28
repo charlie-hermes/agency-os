@@ -643,6 +643,18 @@ class _SQLiteArtifactDeletionLedger:
                     deleted_at TEXT NOT NULL,
                     PRIMARY KEY (authority_id, brand_id)
                 );
+                CREATE TABLE tenant_authority_offboardings (
+                    authority_id TEXT NOT NULL,
+                    brand_id TEXT NOT NULL,
+                    receipt_id TEXT NOT NULL UNIQUE,
+                    authority_manifest_checksum TEXT NOT NULL,
+                    artifact_deletion_receipt_id TEXT NOT NULL,
+                    queue_cancellation_receipt_id TEXT NOT NULL,
+                    evidence_ref TEXT NOT NULL,
+                    receipt_json TEXT NOT NULL,
+                    offboarded_at TEXT NOT NULL,
+                    PRIMARY KEY (authority_id, brand_id)
+                );
                 """
             )
             connection.execute(
@@ -698,6 +710,43 @@ class _SQLiteArtifactDeletionLedger:
                 raise ArtifactStoreError(
                     "artifact deletion ledger schema is invalid"
                 )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS tenant_authority_offboardings (
+                    authority_id TEXT NOT NULL,
+                    brand_id TEXT NOT NULL,
+                    receipt_id TEXT NOT NULL UNIQUE,
+                    authority_manifest_checksum TEXT NOT NULL,
+                    artifact_deletion_receipt_id TEXT NOT NULL,
+                    queue_cancellation_receipt_id TEXT NOT NULL,
+                    evidence_ref TEXT NOT NULL,
+                    receipt_json TEXT NOT NULL,
+                    offboarded_at TEXT NOT NULL,
+                    PRIMARY KEY (authority_id, brand_id)
+                )
+                """
+            )
+            offboarding_columns = {
+                str(row[1])
+                for row in connection.execute(
+                    "PRAGMA table_info(tenant_authority_offboardings)"
+                ).fetchall()
+            }
+            if offboarding_columns != {
+                "authority_id",
+                "brand_id",
+                "receipt_id",
+                "authority_manifest_checksum",
+                "artifact_deletion_receipt_id",
+                "queue_cancellation_receipt_id",
+                "evidence_ref",
+                "receipt_json",
+                "offboarded_at",
+            }:
+                raise ArtifactStoreError(
+                    "tenant authority offboarding ledger schema is invalid"
+                )
+            connection.commit()
         except ArtifactStoreError:
             raise
         except sqlite3.Error as exc:
@@ -733,10 +782,10 @@ class _SQLiteArtifactDeletionLedger:
         self,
         connection: sqlite3.Connection,
         brand_id: str,
-    ) -> tuple[str] | None:
+    ) -> tuple[str, str] | None:
         return connection.execute(
             """
-            SELECT receipt_json FROM tenant_artifact_deletions
+            SELECT receipt_id, receipt_json FROM tenant_artifact_deletions
             WHERE authority_id = ? AND brand_id = ?
             """,
             (self.authority_id, brand_id),
@@ -769,6 +818,53 @@ class _SQLiteArtifactDeletionLedger:
                 receipt["record_count"],
                 canonical_bytes(receipt).decode("utf-8"),
                 receipt["deleted_at"],
+            ),
+        )
+
+    def authority_offboarding_receipt(
+        self,
+        connection: sqlite3.Connection,
+        brand_id: str,
+    ) -> tuple[str, str] | None:
+        return connection.execute(
+            """
+            SELECT receipt_id, receipt_json FROM tenant_authority_offboardings
+            WHERE authority_id = ? AND brand_id = ?
+            """,
+            (self.authority_id, brand_id),
+        ).fetchone()
+
+    def insert_authority_offboarding(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        brand_id: str,
+        receipt: Mapping[str, Any],
+    ) -> None:
+        connection.execute(
+            """
+            INSERT INTO tenant_authority_offboardings (
+                authority_id,
+                brand_id,
+                receipt_id,
+                authority_manifest_checksum,
+                artifact_deletion_receipt_id,
+                queue_cancellation_receipt_id,
+                evidence_ref,
+                receipt_json,
+                offboarded_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                self.authority_id,
+                brand_id,
+                receipt["tenant_offboarding_receipt_id"],
+                receipt["authority_manifest_checksum"],
+                receipt["artifact_deletion_receipt_id"],
+                receipt["queue_cancellation_receipt_id"],
+                receipt["evidence_ref"],
+                canonical_bytes(receipt).decode("utf-8"),
+                receipt["offboarded_at"],
             ),
         )
 
@@ -2325,11 +2421,12 @@ class _AuthorityTenantArtifactStore:
             )
             if row is None:
                 raise KeyError(receipt_id)
-            receipt = json.loads(row[0])
+            receipt = json.loads(row[1])
             verify_record(receipt)
             if (
                 receipt.get("artifact_type")
                 != "tenant_artifact_deletion_receipt"
+                or receipt.get("deletion_receipt_id") != row[0]
                 or receipt.get("deletion_receipt_id") != receipt_id
                 or receipt.get("brand_id") != principal.brand_id
             ):
@@ -2486,6 +2583,505 @@ class _AuthorityTenantArtifactStore:
                 "stored_at": stored_at,
             }
         return validated_records, validated_provenance
+
+
+class _AuthorityTenantOffboarding:
+    """Irreversible local tenant cleanup coordinated by the protected authority."""
+
+    _TENANT_TABLES = (
+        ("paperclip_task_versions", "issue_id, version"),
+        ("paperclip_approver_policies", "policy_id, revision"),
+        ("paperclip_approvals", "approval_id"),
+        ("paperclip_buzz_contexts", "context_id"),
+        ("paperclip_buzz_decisions", "decision_id"),
+        ("tenant_evidence", "evidence_id"),
+        ("tenant_artifacts", "record_id"),
+        ("platform_work_queue", "work_item_id"),
+        ("tenant_queue_cancellations", "brand_id"),
+        ("platform_audit", "sequence"),
+    )
+    _DELETED_TABLES = (
+        "paperclip_task_versions",
+        "paperclip_approver_policies",
+        "paperclip_approvals",
+        "paperclip_buzz_contexts",
+        "paperclip_buzz_decisions",
+        "tenant_evidence",
+        "tenant_artifacts",
+        "platform_work_queue",
+        "platform_audit",
+    )
+
+    def __init__(
+        self,
+        database_path: str | os.PathLike[str],
+        *,
+        timeout_seconds: float,
+        clock: Callable[[], datetime],
+        artifacts: _AuthorityTenantArtifactStore,
+        deletion_ledger: _SQLiteArtifactDeletionLedger,
+        _construction_token: object,
+    ) -> None:
+        if _construction_token is not _AUTHORITY_ADAPTER_TOKEN:
+            raise PlatformAdapterError("tenant offboarding construction is denied")
+        self._clock = clock
+        self._artifacts = artifacts
+        self._deletion_ledger = deletion_ledger
+        self._database = _SQLitePlatformDatabase(
+            database_path,
+            timeout_seconds=timeout_seconds,
+            error_type=PlatformAdapterError,
+        )
+
+    def prepare(self, principal: Principal) -> dict[str, Any]:
+        self._require_director(principal)
+        ledger_connection = self._deletion_ledger.connect()
+        connection: sqlite3.Connection | None = None
+        try:
+            if (
+                self._deletion_ledger.authority_offboarding_receipt(
+                    ledger_connection, principal.brand_id
+                )
+                is not None
+            ):
+                raise ContractError("tenant authority is already offboarded")
+            connection = self._database.connect()
+            connection.execute("BEGIN IMMEDIATE")
+            queue_receipt = self._queue_cancellation_receipt(
+                connection, principal.brand_id
+            )
+            manifest = self._manifest(
+                connection,
+                principal.brand_id,
+                queue_receipt["queue_cancellation_receipt_id"],
+            )
+            connection.commit()
+            return manifest
+        except (AuthorizationError, ContractError, PlatformAdapterError):
+            if connection is not None:
+                _rollback(connection)
+            raise
+        except (json.JSONDecodeError, sqlite3.Error, TypeError, ValueError) as exc:
+            if connection is not None:
+                _rollback(connection)
+            raise PlatformAdapterError(
+                "could not prepare tenant authority offboarding"
+            ) from exc
+        finally:
+            if connection is not None:
+                connection.close()
+            ledger_connection.close()
+
+    def offboard(
+        self,
+        principal: Principal,
+        *,
+        expected_authority_manifest_checksum: str,
+        evidence_ref: str,
+    ) -> dict[str, Any]:
+        self._require_director(principal)
+        if (
+            not isinstance(expected_authority_manifest_checksum, str)
+            or not expected_authority_manifest_checksum.startswith("sha256:")
+        ):
+            raise ContractError("tenant authority manifest checksum is required")
+        if (
+            not isinstance(evidence_ref, str)
+            or not evidence_ref.startswith("evidence://")
+            or len(evidence_ref) > 512
+        ):
+            raise ContractError("tenant authority offboarding evidence is required")
+        ledger_connection = self._deletion_ledger.connect()
+        connection: sqlite3.Connection | None = None
+        ledger_committed = False
+        try:
+            ledger_connection.execute("BEGIN IMMEDIATE")
+            existing = self._deletion_ledger.authority_offboarding_receipt(
+                ledger_connection, principal.brand_id
+            )
+            if existing is not None:
+                receipt = self._validated_receipt(
+                    json.loads(existing[1]), principal.brand_id
+                )
+                if receipt["tenant_offboarding_receipt_id"] != existing[0]:
+                    raise PlatformAdapterError(
+                        "tenant offboarding evidence is invalid"
+                    )
+                if (
+                    receipt["authority_manifest_checksum"]
+                    != expected_authority_manifest_checksum
+                    or receipt["evidence_ref"] != evidence_ref
+                ):
+                    raise ContractError("tenant authority offboarding is immutable")
+                ledger_connection.commit()
+                ledger_committed = True
+                self._delete_tenant_rows(principal.brand_id)
+                return receipt
+
+            connection = self._database.connect()
+            connection.execute("BEGIN IMMEDIATE")
+            queue_receipt = self._queue_cancellation_receipt(
+                connection, principal.brand_id
+            )
+            queue_receipt_id = queue_receipt["queue_cancellation_receipt_id"]
+            manifest = self._manifest(
+                connection, principal.brand_id, queue_receipt_id
+            )
+            if (
+                manifest["authority_manifest_checksum"]
+                != expected_authority_manifest_checksum
+            ):
+                raise ContractError("tenant authority manifest is stale or incorrect")
+
+            exported = self._artifacts._export_from_connection(
+                connection, principal.brand_id
+            )
+            now = _authority_now(self._clock).isoformat()
+            deletion_row = self._deletion_ledger.deleted_receipt(
+                ledger_connection, principal.brand_id
+            )
+            if deletion_row is None:
+                deletion_seed = {
+                    "brand_id": principal.brand_id,
+                    "export_checksum": exported["export_checksum"],
+                    "record_count": exported["record_count"],
+                    "queue_cancellation_receipt_id": queue_receipt_id,
+                    "requested_by": principal.actor_id,
+                    "deleted_at": now,
+                }
+                deletion_receipt = finalize_record(
+                    {
+                        "schema_version": "1.0",
+                        "artifact_type": "tenant_artifact_deletion_receipt",
+                        "deletion_receipt_id": canonical_checksum(deletion_seed),
+                        **deletion_seed,
+                    }
+                )
+                self._deletion_ledger.insert_deletion(
+                    ledger_connection,
+                    brand_id=principal.brand_id,
+                    receipt=deletion_receipt,
+                )
+            else:
+                deletion_receipt = self._validated_artifact_deletion_receipt(
+                    json.loads(deletion_row[1]),
+                    principal.brand_id,
+                    queue_receipt_id,
+                )
+                if deletion_receipt["deletion_receipt_id"] != deletion_row[0]:
+                    raise PlatformAdapterError(
+                        "artifact deletion evidence is invalid"
+                    )
+
+            row_counts = {
+                table: manifest["tables"][table]["row_count"]
+                for table in sorted(manifest["tables"])
+            }
+            receipt_seed = {
+                "brand_id": principal.brand_id,
+                "authority_manifest_checksum": expected_authority_manifest_checksum,
+                "artifact_deletion_receipt_id": deletion_receipt[
+                    "deletion_receipt_id"
+                ],
+                "queue_cancellation_receipt_id": queue_receipt_id,
+                "manifest_table_row_counts": row_counts,
+                "evidence_ref": evidence_ref,
+                "requested_by": principal.actor_id,
+                "offboarded_at": now,
+            }
+            receipt = finalize_record(
+                {
+                    "schema_version": "1.0",
+                    "artifact_type": "tenant_authority_offboarding_receipt",
+                    "tenant_offboarding_receipt_id": canonical_checksum(
+                        receipt_seed
+                    ),
+                    **receipt_seed,
+                }
+            )
+            self._deletion_ledger.insert_authority_offboarding(
+                ledger_connection,
+                brand_id=principal.brand_id,
+                receipt=receipt,
+            )
+            ledger_connection.commit()
+            ledger_committed = True
+            self._delete_rows(connection, principal.brand_id)
+            connection.commit()
+            return receipt
+        except (AuthorizationError, ContractError, PlatformAdapterError):
+            if connection is not None:
+                _rollback(connection)
+            if not ledger_committed:
+                _rollback(ledger_connection)
+            raise
+        except (json.JSONDecodeError, sqlite3.Error, TypeError, ValueError) as exc:
+            if connection is not None:
+                _rollback(connection)
+            if not ledger_committed:
+                _rollback(ledger_connection)
+            raise PlatformAdapterError("could not offboard tenant authority") from exc
+        finally:
+            if connection is not None:
+                connection.close()
+            ledger_connection.close()
+
+    def receipt(
+        self,
+        principal: Principal,
+        receipt_id: str,
+    ) -> dict[str, Any]:
+        if principal.role_id not in {
+            "agency-director",
+            "platform-assurance-reviewer",
+        }:
+            raise AuthorizationError("role cannot read tenant offboarding evidence")
+        connection = self._deletion_ledger.connect()
+        try:
+            row = self._deletion_ledger.authority_offboarding_receipt(
+                connection, principal.brand_id
+            )
+            if row is None:
+                raise KeyError(receipt_id)
+            receipt = self._validated_receipt(
+                json.loads(row[1]), principal.brand_id
+            )
+            if receipt["tenant_offboarding_receipt_id"] != row[0]:
+                raise PlatformAdapterError(
+                    "tenant offboarding evidence is invalid"
+                )
+            if receipt["tenant_offboarding_receipt_id"] != receipt_id:
+                raise KeyError(receipt_id)
+            return receipt
+        except (
+            AuthorizationError,
+            ContractError,
+            KeyError,
+            PlatformAdapterError,
+        ):
+            raise
+        except (json.JSONDecodeError, sqlite3.Error, TypeError, ValueError) as exc:
+            raise PlatformAdapterError(
+                "could not read tenant offboarding evidence"
+            ) from exc
+        finally:
+            connection.close()
+
+    def is_offboarded(self, brand_id: str) -> bool:
+        connection = self._deletion_ledger.connect()
+        try:
+            return (
+                self._deletion_ledger.authority_offboarding_receipt(
+                    connection, brand_id
+                )
+                is not None
+            )
+        except sqlite3.Error as exc:
+            raise PlatformAdapterError(
+                "could not consult tenant offboarding authority"
+            ) from exc
+        finally:
+            connection.close()
+
+    def _delete_tenant_rows(self, brand_id: str) -> None:
+        connection = self._database.connect()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            self._delete_rows(connection, brand_id)
+            connection.commit()
+        except (PlatformAdapterError, sqlite3.Error) as exc:
+            _rollback(connection)
+            raise PlatformAdapterError(
+                "could not complete tenant authority cleanup"
+            ) from exc
+        finally:
+            connection.close()
+
+    @classmethod
+    def _delete_rows(
+        cls,
+        connection: sqlite3.Connection,
+        brand_id: str,
+    ) -> None:
+        for table in cls._DELETED_TABLES:
+            connection.execute(
+                f"DELETE FROM {table} WHERE brand_id = ?",
+                (brand_id,),
+            )
+
+    def _manifest(
+        self,
+        connection: sqlite3.Connection,
+        brand_id: str,
+        queue_cancellation_receipt_id: str,
+    ) -> dict[str, Any]:
+        tables: dict[str, dict[str, Any]] = {}
+        for table, order_by in self._TENANT_TABLES:
+            rows = connection.execute(
+                f"SELECT * FROM {table} WHERE brand_id = ? ORDER BY {order_by}",
+                (brand_id,),
+            ).fetchall()
+            row_checksums = [canonical_checksum(list(row)) for row in rows]
+            tables[table] = {
+                "row_count": len(rows),
+                "rows_checksum": canonical_checksum(row_checksums),
+            }
+        state = {
+            "brand_id": brand_id,
+            "queue_cancellation_receipt_id": queue_cancellation_receipt_id,
+            "tables": tables,
+        }
+        return finalize_record(
+            {
+                "schema_version": "1.0",
+                "artifact_type": "tenant_authority_offboarding_manifest",
+                **state,
+                "authority_manifest_checksum": canonical_checksum(state),
+                "prepared_at": _authority_now(self._clock).isoformat(),
+            }
+        )
+
+    @staticmethod
+    def _queue_cancellation_receipt(
+        connection: sqlite3.Connection,
+        brand_id: str,
+    ) -> dict[str, Any]:
+        row = connection.execute(
+            """
+            SELECT receipt_id, receipt_json FROM tenant_queue_cancellations
+            WHERE brand_id = ?
+            """,
+            (brand_id,),
+        ).fetchone()
+        if row is None:
+            raise ContractError(
+                "tenant work queue must be cancelled before authority offboarding"
+            )
+        try:
+            receipt = _AuthorityWorkQueue._validated_cancellation_receipt(
+                json.loads(row[1]), brand_id
+            )
+        except WorkQueueError as exc:
+            raise PlatformAdapterError(
+                "tenant queue cancellation evidence is invalid"
+            ) from exc
+        if receipt["queue_cancellation_receipt_id"] != row[0]:
+            raise ContractError("tenant queue cancellation evidence is invalid")
+        return receipt
+
+    @staticmethod
+    def _validated_artifact_deletion_receipt(
+        receipt: Mapping[str, Any],
+        brand_id: str,
+        queue_cancellation_receipt_id: str,
+    ) -> dict[str, Any]:
+        validated = copy.deepcopy(dict(receipt))
+        verify_record(validated)
+        string_fields = {
+            "deletion_receipt_id",
+            "export_checksum",
+            "queue_cancellation_receipt_id",
+            "requested_by",
+            "deleted_at",
+        }
+        if (
+            validated.get("artifact_type")
+            != "tenant_artifact_deletion_receipt"
+            or validated.get("brand_id") != brand_id
+            or any(
+                not isinstance(validated.get(field), str)
+                or not validated[field]
+                for field in string_fields
+            )
+            or validated.get("queue_cancellation_receipt_id")
+            != queue_cancellation_receipt_id
+            or isinstance(validated.get("record_count"), bool)
+            or not isinstance(validated.get("record_count"), int)
+            or validated["record_count"] < 0
+        ):
+            raise PlatformAdapterError("artifact deletion evidence is invalid")
+        deletion_seed = {
+            key: validated[key]
+            for key in (
+                "brand_id",
+                "export_checksum",
+                "record_count",
+                "queue_cancellation_receipt_id",
+                "requested_by",
+                "deleted_at",
+            )
+        }
+        if validated["deletion_receipt_id"] != canonical_checksum(deletion_seed):
+            raise PlatformAdapterError("artifact deletion evidence is invalid")
+        parse_time(validated["deleted_at"])
+        return validated
+
+    @classmethod
+    def _validated_receipt(
+        cls,
+        receipt: Mapping[str, Any],
+        brand_id: str,
+    ) -> dict[str, Any]:
+        validated = copy.deepcopy(dict(receipt))
+        verify_record(validated)
+        required = {
+            "tenant_offboarding_receipt_id",
+            "authority_manifest_checksum",
+            "artifact_deletion_receipt_id",
+            "queue_cancellation_receipt_id",
+            "manifest_table_row_counts",
+            "evidence_ref",
+            "requested_by",
+            "offboarded_at",
+        }
+        if (
+            validated.get("artifact_type")
+            != "tenant_authority_offboarding_receipt"
+            or validated.get("brand_id") != brand_id
+            or not required.issubset(validated)
+            or any(
+                not isinstance(validated[field], str) or not validated[field]
+                for field in required - {"manifest_table_row_counts"}
+            )
+            or not isinstance(validated["manifest_table_row_counts"], dict)
+            or set(validated["manifest_table_row_counts"])
+            != {table for table, _order_by in cls._TENANT_TABLES}
+            or any(
+                isinstance(count, bool)
+                or not isinstance(count, int)
+                or count < 0
+                for count in validated["manifest_table_row_counts"].values()
+            )
+            or not validated["authority_manifest_checksum"].startswith("sha256:")
+            or not validated["artifact_deletion_receipt_id"].startswith("sha256:")
+            or not validated["queue_cancellation_receipt_id"].startswith("sha256:")
+            or not validated["evidence_ref"].startswith("evidence://")
+        ):
+            raise PlatformAdapterError("tenant offboarding evidence is invalid")
+        seed = {
+            key: validated[key]
+            for key in (
+                "brand_id",
+                "authority_manifest_checksum",
+                "artifact_deletion_receipt_id",
+                "queue_cancellation_receipt_id",
+                "manifest_table_row_counts",
+                "evidence_ref",
+                "requested_by",
+                "offboarded_at",
+            )
+        }
+        if validated["tenant_offboarding_receipt_id"] != canonical_checksum(seed):
+            raise PlatformAdapterError("tenant offboarding evidence is invalid")
+        parse_time(validated["offboarded_at"])
+        return validated
+
+    @staticmethod
+    def _require_director(principal: Principal) -> None:
+        if principal.role_id != "agency-director":
+            raise AuthorizationError(
+                "only the agency director may offboard a tenant authority"
+            )
 
 
 class _AuthorityWorkQueue:
