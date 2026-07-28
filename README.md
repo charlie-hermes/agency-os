@@ -17,11 +17,13 @@ This fictional reference deliberately does six things:
    exact-manifest coordinated local tenant offboarding, and complete attested
    logical tenant export/restore, plus crash-recoverable versioned local
    audit-retention policy and content-free tenant telemetry; and
-5. admits one exact installed Paperclip/Buzz command contract from read-only,
-   checksum-pinned target-host evidence while failing closed on drift; and
+5. implements injectable Paperclip lifecycle and separate board-decision
+   transports plus a strict Buzz command allowlist, all pinned to the reviewed
+   target-host contract and fail-closed on drift; and
 6. proves the complete Lantern Search Authority Core workflow, including a real
-   reject/revise path, exact human approval, sandbox publication, measurement,
-   learning and Paperclip closure across eight checksum-bound Core roles.
+   reject/revise path and exact Paperclip board approval before sandbox
+   publication; the receipt binds that approval's ID and evidence checksum before
+   measurement, learning and closure across eight checksum-bound Core roles.
 
 It does **not** claim Hermes target activation, make authenticated target-service
 mutations, connect real client data, call a real provider, or publish externally.
@@ -54,11 +56,12 @@ mutations, connect real client data, call a real provider, or publish externally
   executable/unit checksum, service, health, exact API and Buzz command evidence.
 - `scripts/verify-installed-platforms` — explicit read-only live drift check.
 - `config/runtime-bundles.json` — exact `AGENTS.md`/`SOUL.md` checksums for the
-  eight Core runtime bundle candidates and their honest activation status.
-- `agency_os/integrations.py` — real private Paperclip HTTP and installed Buzz
-  CLI transports behind typed lifecycle adapters.
-- `agency_os/core_workflow.py` — complete fictional Core orchestration and
-  Paperclip-derived operator projection.
+  eight Core runtime bundle candidates; fresh-process checksum verification is
+  distinct from still-pending Hermes activation.
+- `agency_os/integrations.py` — private Paperclip HTTP and installed Buzz CLI
+  transports behind tenant-scoped lifecycle, board and collaboration adapters.
+- `agency_os/core_workflow.py` — injectable, transport-opaque Core orchestration
+  and campaign-ID-scoped Paperclip operator projection.
 - `docs/delivery-rebaseline.md` — product-first Gate 5–7 scope decision.
 - `fixtures/` — fictional tenant input.
 - `acceptance/matrix.json` — release criteria mapped to executable evidence.

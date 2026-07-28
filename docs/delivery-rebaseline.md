@@ -18,19 +18,24 @@ does not weaken them.
 
 1. **Retention merged.** PR #13 supplies the eighth bounded Gate 5 slice.
 2. **Installed bindings.** `PaperclipLifecycleAdapter` uses the reviewed
-   `2026.720.0` issue, approval and cost routes. `TypedBuzzAdapter` uses the
-   installed private channel/message CLI, rejects broadcast, and treats every
-   decision as non-authoritative until written to Paperclip.
+   `2026.720.0` issue, approval and cost routes with UUID validation and an
+   immutable one-company-per-brand binding. A separate board-authenticated
+   adapter owns approval decisions. `TypedBuzzAdapter` uses only allowlisted
+   private channel/message commands and treats every decision as
+   non-authoritative until written to Paperclip.
 3. **Complete Core proof.** Lantern moves from brand intake through research,
    strategy, draft, optimisation, independent QA, a real `REVISE` loop, exact
-   human approval, protected sandbox publication, validation, measurement,
-   optimisation proposal, learning and Paperclip closure.
+   Paperclip board approval and then protected sandbox publication. Rejected,
+   pending or altered approval evidence causes zero publisher calls; successful
+   receipts bind the Paperclip approval ID and evidence checksum before
+   validation, measurement, optimisation, learning and closure.
 4. **Eight Core roles.** Each required runtime role has a checksum-bound
-   `AGENTS.md`/`SOUL.md` bundle and a fresh-process reference-load check. The
-   target Hermes executable is absent on this host, so Hermes load evidence is
-   explicitly pending rather than claimed.
+   `AGENTS.md`/`SOUL.md` bundle verified by checksum in a fresh Python process.
+   This is not a runtime-load test. The target Hermes executable is absent on
+   this host, so Hermes activation evidence is explicitly pending.
 5. **Thin operator experience.** A read-only campaign projection exposes
-   Paperclip tasks, dependencies, artifact references and approval state. It has
+   only the known campaign's Paperclip task IDs, dependencies, artifact
+   references and approval state. It excludes unrelated same-company work, has
    no mutation path and is not a replacement task database.
 6. **Product decisions.** Gate 6 becomes a time-boxed owner decision packet
    needed before staged real integrations, not a blocker for fictional Core

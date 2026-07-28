@@ -274,14 +274,16 @@ gate `30348732163` with 116 tests and no real external write.
 
 The rebaselined Gate 5 exit is intentionally bounded to:
 
-- exact typed adapters for the installed Paperclip issue, approval and cost
-  routes and installed Buzz private context/message commands;
-- Paperclip-authoritative Buzz decision write-back, credential-minimising
-  transports and actionable integration failures;
+- exact typed lifecycle adapters for the installed Paperclip issue, approval and
+  cost routes;
+- a separate board decision transport, UUID-valid native records and an immutable
+  one-company-per-brand binding;
+- Paperclip-authoritative Buzz decision write-back, a strict command/flag
+  allowlist, credential-minimising transports and actionable failures;
 - the already-proven single-host tenant, evidence, artifact, learning, queue,
   audit, recovery and offboarding controls; and
-- checksum-bound bundle candidates and fresh-process reference-load evidence
-  for the eight Core runtime roles.
+- checksum-bound bundle candidates and fresh-process checksum verification for
+  all eight Core roles, without claiming target runtime loading.
 
 Authenticated target-service mutations and Hermes fresh-session loads remain
 activation evidence, not claims made by the repository. Production store
@@ -361,8 +363,11 @@ The existing reference flow is test scaffolding, not completion of this gate.
 
 The Lantern candidate now proves all ten stages on the installed Paperclip/Buzz
 adapter contracts, including a checksum-bound `REVISE` then `PASS`, exact human
-approval, one protected mock publication, measurement, optimisation proposal,
-learning, and closure of eight role-owned Paperclip tasks. The only remaining
+board approval before one protected mock publication, and a receipt that binds
+the Paperclip approval ID and evidence checksum. Rejected, pending and altered
+approvals all leave the publisher call count at zero. Measurement, optimisation,
+learning and closure cover eight role-owned Paperclip tasks through a
+transport-opaque engine and campaign-scoped operator projection. The remaining
 activation evidence is authenticated target-service execution and fresh-session
 loading by an installed Hermes runtime; neither is claimed by local tests.
 
