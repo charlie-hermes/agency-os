@@ -110,17 +110,19 @@ class PlatformAdapterTests(unittest.TestCase):
         dependencies: tuple[str, ...] = (),
         approval_required: bool = False,
         budget_limit_minor: int = 1_000,
+        brand_id: str = "brand_lantern",
+        created_by: str | None = None,
     ) -> dict:
         return make_paperclip_task(
             issue_id=issue_id,
-            brand_id="brand_lantern",
+            brand_id=brand_id,
             campaign_id="campaign_launch",
             task_type="fictional_content_task",
             title=f"Task {issue_id}",
             dependencies=dependencies,
             acceptance_criteria=("retains evidence",),
             budget_limit_minor=budget_limit_minor,
-            created_by=self.director.actor_id,
+            created_by=created_by or self.director.actor_id,
             approval_required=approval_required,
             created_at=self.now.isoformat(),
         )
@@ -142,17 +144,19 @@ class PlatformAdapterTests(unittest.TestCase):
         work_kind: str = "internal",
         worker_role: str = "search-content-strategist",
         max_attempts: int = 2,
+        brand_id: str = "brand_lantern",
+        created_by: str | None = None,
     ) -> dict:
         return make_work_queue_item(
             work_item_id=work_item_id,
-            brand_id="brand_lantern",
+            brand_id=brand_id,
             paperclip_issue_id=task["paperclip_issue_id"],
             paperclip_task_checksum=task["content_checksum"],
             work_kind=work_kind,
             worker_role=worker_role,
             payload={"fictional_operation": "draft-local-artifact"},
             max_attempts=max_attempts,
-            created_by=self.director.actor_id,
+            created_by=created_by or self.director.actor_id,
             created_at=self.now.isoformat(),
         )
 
@@ -441,16 +445,28 @@ class PlatformAdapterTests(unittest.TestCase):
             lantern_learning,
         )
 
+        with self.assertRaises(ContractError):
+            self.artifacts.delete_tenant(
+                self.director, tenant_export["export_checksum"]
+            )
+        queue_receipt = self.paperclip.work_queue().cancel_tenant(
+            self.director,
+            evidence_ref="evidence://offboarding/lantern-approved",
+        )
         receipt = self.artifacts.delete_tenant(
             self.director, tenant_export["export_checksum"]
         )
         receipt_id = receipt["deletion_receipt_id"]
         self.assertEqual(receipt["record_count"], 1)
+        self.assertEqual(
+            receipt["queue_cancellation_receipt_id"],
+            queue_receipt["queue_cancellation_receipt_id"],
+        )
         self.assertNotIn("validated_correction", canonical_bytes(receipt).decode())
         artifact_audit = self.paperclip.audit_events(self.director)
         self.assertEqual(
             [event["event_type"] for event in artifact_audit],
-            ["artifact.tenant_deleted"],
+            ["queue.tenant.cancelled", "artifact.tenant_deleted"],
         )
         self.assertNotIn("learning_lantern", canonical_bytes(artifact_audit).decode())
         with self.assertRaises(KeyError):
@@ -497,6 +513,14 @@ class PlatformAdapterTests(unittest.TestCase):
         restarted_artifacts = restarted.client(self.director).artifacts()
         self.assertEqual(
             restarted_artifacts.deletion_receipt(self.director, receipt_id), receipt
+        )
+        self.assertEqual(
+            restarted.client(self.director)
+            .work_queue()
+            .cancellation_receipt(
+                self.director, queue_receipt["queue_cancellation_receipt_id"]
+            ),
+            queue_receipt,
         )
         with self.assertRaises(KeyError):
             restarted_artifacts.get(self.director, "learning_lantern")
@@ -1724,6 +1748,222 @@ class PlatformAdapterTests(unittest.TestCase):
                 for event_type in event_types
             ],
         )
+
+    def test_queue_offboarding_is_evidence_bound_durable_and_fail_closed(
+        self,
+    ) -> None:
+        self.paperclip.create_task(self.director, self._task("issue_queue_offboard"))
+        task = self._advance_to_in_progress("issue_queue_offboard")
+        director_queue = self.paperclip.work_queue()
+        strategist_queue = self.strategist_paperclip.work_queue()
+        publisher_queue = self.publisher_paperclip.work_queue()
+
+        completed_item = self._work_item("work_offboard_completed", task)
+        director_queue.enqueue(self.director, completed_item)
+        completed_lease = strategist_queue.lease_next(self.strategist, 10)
+        completed = strategist_queue.complete(
+            self.strategist,
+            "work_offboard_completed",
+            completed_lease["lease"]["lease_token"],
+        )
+        self.assertEqual(completed["state"], "COMPLETED")
+
+        leased_item = self._work_item("work_offboard_leased", task)
+        director_queue.enqueue(self.director, leased_item)
+        leased = strategist_queue.lease_next(self.strategist, 10)
+        with self.assertRaises(ContractError):
+            strategist_queue.fail(
+                self.strategist,
+                "work_offboard_leased",
+                leased["lease"]["lease_token"],
+                error_class="TENANT_OFFBOARDED",
+                retryable=False,
+                external_result="NOT_APPLICABLE",
+            )
+        ready_item = self._work_item("work_offboard_ready", task)
+        director_queue.enqueue(self.director, ready_item)
+
+        external_item = self._work_item(
+            "work_offboard_external",
+            task,
+            work_kind="external_write",
+            worker_role="publishing-operator",
+        )
+        director_queue.enqueue(self.director, external_item)
+        external_lease = publisher_queue.lease_next(self.publisher, 10)
+
+        ember_planned = self._task(
+            "issue_queue_offboard_ember",
+            brand_id=self.foreign_director.brand_id,
+            created_by=self.foreign_director.actor_id,
+        )
+        self.foreign_paperclip.create_task(self.foreign_director, ember_planned)
+        ember_ready = self.foreign_paperclip.set_status(
+            self.foreign_director,
+            "issue_queue_offboard_ember",
+            ember_planned["content_checksum"],
+            "ready",
+        )
+        foreign_queue = self.foreign_paperclip.work_queue()
+        foreign_queue.enqueue(
+            self.foreign_director,
+            self._work_item(
+                "work_offboard_ember",
+                ember_ready,
+                brand_id=self.foreign_director.brand_id,
+                created_by=self.foreign_director.actor_id,
+            ),
+        )
+
+        with self.assertRaises(AuthorizationError):
+            publisher_queue.cancel_tenant(
+                self.publisher,
+                evidence_ref="evidence://offboarding/not-director",
+            )
+        with self.assertRaises(ContractError):
+            director_queue.cancel_tenant(
+                self.director,
+                evidence_ref="evidence://offboarding/approved",
+            )
+        self.assertEqual(
+            director_queue.get(self.director, "work_offboard_leased")["state"],
+            "LEASED",
+        )
+        unknown = publisher_queue.fail(
+            self.publisher,
+            "work_offboard_external",
+            external_lease["lease"]["lease_token"],
+            error_class="EXTERNAL_TIMEOUT",
+            retryable=True,
+            external_result="UNKNOWN",
+        )
+        self.assertEqual(unknown["state"], "RECONCILIATION_REQUIRED")
+        with self.assertRaises(ContractError):
+            director_queue.cancel_tenant(
+                self.director,
+                evidence_ref="evidence://offboarding/approved",
+            )
+        reconciled = director_queue.reconcile(
+            self.director,
+            "work_offboard_external",
+            outcome="CONFIRMED_NO_WRITE",
+            evidence_ref="evidence://destination/no-write",
+            disposition="Destination confirms no write before offboarding.",
+        )
+        self.assertEqual(reconciled["state"], "READY")
+
+        before_task = self.paperclip.get_task(self.director, "issue_queue_offboard")
+        receipt = director_queue.cancel_tenant(
+            self.director,
+            evidence_ref="evidence://offboarding/approved",
+        )
+        receipt_id = receipt["queue_cancellation_receipt_id"]
+        self.assertEqual(receipt["work_item_count"], 4)
+        self.assertEqual(receipt["cancelled_item_count"], 3)
+        self.assertEqual(receipt["terminal_item_count"], 1)
+        receipt_bytes = canonical_bytes(receipt).decode()
+        self.assertNotIn("work_offboard", receipt_bytes)
+        self.assertNotIn("fictional_operation", receipt_bytes)
+        self.assertEqual(
+            director_queue.cancel_tenant(
+                self.director,
+                evidence_ref="evidence://offboarding/approved",
+            ),
+            receipt,
+        )
+        with self.assertRaises(ContractError):
+            director_queue.cancel_tenant(
+                self.director,
+                evidence_ref="evidence://offboarding/replacement",
+            )
+
+        for work_item_id in (
+            "work_offboard_leased",
+            "work_offboard_ready",
+            "work_offboard_external",
+        ):
+            view = director_queue.get(self.director, work_item_id)
+            self.assertEqual(view["state"], "DEAD_LETTER")
+            self.assertIn("TENANT_OFFBOARDED", view["error_classes"])
+            self.assertIsNone(view["lease_owner"])
+            self.assertIsNone(view["lease_expires_at"])
+        external_view = director_queue.get(self.director, "work_offboard_external")
+        self.assertEqual(
+            [entry["outcome"] for entry in external_view["dispositions"]],
+            ["CONFIRMED_NO_WRITE"],
+        )
+        self.assertEqual(
+            director_queue.get(self.director, "work_offboard_completed")["state"],
+            "COMPLETED",
+        )
+        self.assertEqual(len(director_queue.dead_letters(self.director)), 3)
+        with self.assertRaises(AuthorizationError):
+            strategist_queue.get(self.strategist, "work_offboard_leased")
+        with self.assertRaises(AuthorizationError):
+            publisher_queue.cancellation_receipt(self.publisher, receipt_id)
+        with self.assertRaises(ContractError):
+            strategist_queue.heartbeat(
+                self.strategist,
+                "work_offboard_leased",
+                leased["lease"]["lease_token"],
+                10,
+            )
+        with self.assertRaises(ContractError):
+            strategist_queue.lease_next(self.strategist, 10)
+        with self.assertRaises(ContractError):
+            director_queue.enqueue(
+                self.director,
+                self._work_item("work_offboard_new", task),
+            )
+        with self.assertRaises(ContractError):
+            director_queue.reconcile(
+                self.director,
+                "work_offboard_external",
+                outcome="CONFIRMED_COMPLETED",
+                evidence_ref="evidence://destination/late",
+                disposition="Late mutation must fail.",
+            )
+        with self.assertRaises(KeyError):
+            foreign_queue.cancellation_receipt(self.foreign_director, receipt_id)
+        self.assertEqual(
+            foreign_queue.get(self.foreign_director, "work_offboard_ember")["state"],
+            "READY",
+        )
+        self.assertEqual(
+            self.paperclip.get_task(self.director, "issue_queue_offboard"), before_task
+        )
+
+        event_types = [
+            event["event_type"] for event in self.paperclip.audit_events(self.director)
+        ]
+        self.assertEqual(event_types.count("queue.item.offboarding_dead_letter"), 3)
+        self.assertEqual(event_types.count("queue.tenant.cancelled"), 1)
+
+        self.platform_host.close()
+        restarted = _provision_platform_authority_host(
+            self.database_path,
+            deletion_ledger_path=self.deletion_ledger_path,
+            authority_id="fictional_paperclip_approval_authority",
+            approval_signing_key=self.approval_signing_key,
+            initial_time=self.now,
+            principals=self.provisioned_principals,
+        )
+        self.addCleanup(restarted.close)
+        restarted_director_queue = restarted.client(self.director).work_queue()
+        self.assertEqual(
+            restarted_director_queue.cancellation_receipt(self.director, receipt_id),
+            receipt,
+        )
+        self.assertEqual(
+            restarted_director_queue.get(self.director, "work_offboard_leased")[
+                "state"
+            ],
+            "DEAD_LETTER",
+        )
+        with self.assertRaises(ContractError):
+            restarted.client(self.strategist).work_queue().lease_next(
+                self.strategist, 10
+            )
 
     def test_queue_is_tenant_role_immutable_and_task_version_bound(self) -> None:
         self.paperclip.create_task(self.director, self._task("issue_queue_bound"))

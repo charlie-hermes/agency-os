@@ -189,7 +189,14 @@ exact current Paperclip task version. It uses renewable one-use leases, fixed
 attempt bounds, durable dead letters and director-owned destination
 reconciliation. External unknown or expired-lease work cannot retry blindly, and
 queue delivery never mutates authoritative Paperclip task state. Real dispatch,
-credentials, multi-host failover and cancellation remain future work.
+credentials and multi-host failover remain future work.
+
+The fifth bounded slice adds irreversible, evidence-bound local queue
+offboarding. Uncertain external results must be reconciled first. Cancellation
+then clears active internal leases, preserves immutable queue history, blocks all
+future worker access or queue mutation across restart, and produces a
+content-free receipt which artifact deletion must bind. This is not deployed
+cross-host cancellation, retention expiry or full tenant-data offboarding.
 
 **Merged first-slice evidence:** PR #6, reviewed commit
 `5b53ef937bb0b05490e851660967c5ac39334ac4`, merge commit

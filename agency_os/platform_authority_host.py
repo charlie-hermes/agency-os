@@ -434,6 +434,29 @@ class TenantWorkQueueClient:
     def dead_letters(self, principal: Principal) -> list[dict[str, Any]]:
         return self._authority._request("list_dead_letters", principal)
 
+    def cancel_tenant(
+        self,
+        principal: Principal,
+        *,
+        evidence_ref: str,
+    ) -> dict[str, Any]:
+        return self._authority._request(
+            "cancel_tenant_work",
+            principal,
+            evidence_ref=evidence_ref,
+        )
+
+    def cancellation_receipt(
+        self,
+        principal: Principal,
+        receipt_id: str,
+    ) -> dict[str, Any]:
+        return self._authority._request(
+            "queue_cancellation_receipt",
+            principal,
+            receipt_id=receipt_id,
+        )
+
 
 def _raise_remote_error(response: Mapping[str, Any]) -> None:
     message = str(response.get("message", "Platform Authority denied request"))
@@ -829,6 +852,10 @@ def _handle_platform_request(
             result = work_queue.get(principal, **arguments)
         elif operation == "list_dead_letters":
             result = work_queue.dead_letters(principal, **arguments)
+        elif operation == "cancel_tenant_work":
+            result = work_queue.cancel_tenant(principal, **arguments)
+        elif operation == "queue_cancellation_receipt":
+            result = work_queue.cancellation_receipt(principal, **arguments)
         else:
             raise ContractError("Platform Authority operation is not allowed")
         return {"outcome": "ALLOW", "result": result}

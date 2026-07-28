@@ -13,7 +13,8 @@ This fictional reference deliberately does five things:
 4. begins Gate 5 with a protected local Platform Authority host, principal-bound
    worker clients, durable typed tasks, versioned approver policy, host-attested
    approvals, deadline-enforced restartable collaboration decisions, tenant
-   evidence/artifact durability, and a fictional durable lease/retry queue; and
+   evidence/artifact durability, and a fictional durable lease/retry queue with
+   evidence-bound tenant cancellation; and
 5. admits one exact installed Paperclip/Buzz command contract from read-only,
    checksum-pinned target-host evidence while failing closed on drift.
 
@@ -41,7 +42,7 @@ connect real client data, call a real provider, or publish externally.
   a worker-only IPC client, mock credential broker, deny-by-default mock egress
   boundary, a protected fictional Platform Authority host with principal-bound
   worker clients, typed Buzz context, persistent tenant evidence/artifacts and
-  a protected fictional durable work queue.
+  a protected fictional durable work queue with coordinated local offboarding.
 - `config/installed-platforms.json` — non-secret, read-only target-host version,
   executable/unit checksum, service, health, exact API and Buzz command evidence.
 - `scripts/verify-installed-platforms` — explicit read-only live drift check.

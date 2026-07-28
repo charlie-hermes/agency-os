@@ -117,6 +117,7 @@ WORK_ERROR_CLASSES = frozenset(
         "EXTERNAL_REJECTED",
         "LEASE_EXPIRED",
         "TASK_DRIFT",
+        "TENANT_OFFBOARDED",
     }
 )
 WORK_RECONCILIATION_OUTCOMES = frozenset(
@@ -519,6 +520,13 @@ class _SQLitePlatformDatabase:
                     ON platform_work_queue (
                         brand_id, worker_role, state, next_attempt_at, created_at
                     );
+                CREATE TABLE IF NOT EXISTS tenant_queue_cancellations (
+                    brand_id TEXT PRIMARY KEY,
+                    receipt_id TEXT NOT NULL UNIQUE,
+                    evidence_ref TEXT NOT NULL,
+                    receipt_json TEXT NOT NULL,
+                    cancelled_at TEXT NOT NULL
+                );
                 CREATE TABLE IF NOT EXISTS platform_audit (
                     sequence INTEGER PRIMARY KEY AUTOINCREMENT,
                     brand_id TEXT NOT NULL,
@@ -2209,11 +2217,40 @@ class _AuthorityTenantArtifactStore:
                 raise ContractError("tenant has no artifacts to delete")
             if expected_export_checksum != exported["export_checksum"]:
                 raise ContractError("tenant export checksum is stale or incorrect")
+            queue_cancellation = connection.execute(
+                """
+                SELECT receipt_id, receipt_json FROM tenant_queue_cancellations
+                WHERE brand_id = ?
+                """,
+                (principal.brand_id,),
+            ).fetchone()
+            if queue_cancellation is None:
+                raise ContractError(
+                    "tenant work queue must be cancelled before artifact deletion"
+                )
+            try:
+                queue_cancellation_receipt = (
+                    _AuthorityWorkQueue._validated_cancellation_receipt(
+                        json.loads(queue_cancellation[1]), principal.brand_id
+                    )
+                )
+            except WorkQueueError as exc:
+                raise ArtifactStoreError(
+                    "tenant queue cancellation evidence is invalid"
+                ) from exc
+            if (
+                queue_cancellation_receipt["queue_cancellation_receipt_id"]
+                != queue_cancellation[0]
+            ):
+                raise ContractError("tenant queue cancellation evidence is invalid")
             deleted_at = _authority_now(self._clock).isoformat()
             receipt_seed = {
                 "brand_id": principal.brand_id,
                 "export_checksum": expected_export_checksum,
                 "record_count": exported["record_count"],
+                "queue_cancellation_receipt_id": queue_cancellation_receipt[
+                    "queue_cancellation_receipt_id"
+                ],
                 "requested_by": principal.actor_id,
                 "deleted_at": deleted_at,
             }
@@ -2485,6 +2522,7 @@ class _AuthorityWorkQueue:
         connection = self._connect()
         try:
             connection.execute("BEGIN IMMEDIATE")
+            self._require_tenant_active(connection, principal.brand_id)
             existing = connection.execute(
                 """
                 SELECT work_checksum FROM platform_work_queue
@@ -2563,6 +2601,7 @@ class _AuthorityWorkQueue:
         connection = self._connect()
         try:
             connection.execute("BEGIN IMMEDIATE")
+            self._require_tenant_active(connection, principal.brand_id)
             self._expire_leases(connection, principal, now)
             while True:
                 row = connection.execute(
@@ -2664,6 +2703,7 @@ class _AuthorityWorkQueue:
         connection = self._connect()
         try:
             connection.execute("BEGIN IMMEDIATE")
+            self._require_tenant_active(connection, principal.brand_id)
             row = self._required_row(connection, principal.brand_id, work_item_id)
             self._require_active_lease(row, principal, lease_token, now)
             expires_at = now + timedelta(seconds=lease_seconds)
@@ -2710,6 +2750,7 @@ class _AuthorityWorkQueue:
         connection = self._connect()
         try:
             connection.execute("BEGIN IMMEDIATE")
+            self._require_tenant_active(connection, principal.brand_id)
             row = self._required_row(connection, principal.brand_id, work_item_id)
             self._require_active_lease(row, principal, lease_token, now)
             work_item = self._validated_work_item(json.loads(row["work_json"]))
@@ -2790,7 +2831,11 @@ class _AuthorityWorkQueue:
         retryable: bool,
         external_result: str,
     ) -> dict[str, Any]:
-        if error_class not in WORK_ERROR_CLASSES - {"LEASE_EXPIRED", "TASK_DRIFT"}:
+        if error_class not in WORK_ERROR_CLASSES - {
+            "LEASE_EXPIRED",
+            "TASK_DRIFT",
+            "TENANT_OFFBOARDED",
+        }:
             raise ContractError("work queue error class is invalid")
         if not isinstance(retryable, bool):
             raise ContractError("work queue retryable flag is invalid")
@@ -2798,6 +2843,7 @@ class _AuthorityWorkQueue:
         connection = self._connect()
         try:
             connection.execute("BEGIN IMMEDIATE")
+            self._require_tenant_active(connection, principal.brand_id)
             row = self._required_row(connection, principal.brand_id, work_item_id)
             self._require_active_lease(row, principal, lease_token, now)
             if row["work_kind"] == "internal":
@@ -2869,6 +2915,7 @@ class _AuthorityWorkQueue:
         connection = self._connect()
         try:
             connection.execute("BEGIN IMMEDIATE")
+            self._require_tenant_active(connection, principal.brand_id)
             row = self._required_row(connection, principal.brand_id, work_item_id)
             if row["state"] != "RECONCILIATION_REQUIRED":
                 raise ContractError("work item does not require reconciliation")
@@ -2951,6 +2998,7 @@ class _AuthorityWorkQueue:
         connection = self._connect()
         try:
             connection.execute("BEGIN IMMEDIATE")
+            self._require_tenant_active(connection, principal.brand_id)
             row = self._required_row(connection, principal.brand_id, work_item_id)
             if row["state"] != "DEAD_LETTER":
                 raise ContractError("work item is not dead-lettered")
@@ -3006,10 +3054,177 @@ class _AuthorityWorkQueue:
         finally:
             connection.close()
 
+    def cancel_tenant(
+        self,
+        principal: Principal,
+        *,
+        evidence_ref: str,
+    ) -> dict[str, Any]:
+        if principal.role_id != "agency-director":
+            raise AuthorizationError("only the agency director may cancel tenant work")
+        if (
+            not isinstance(evidence_ref, str)
+            or not evidence_ref.startswith("evidence://")
+            or len(evidence_ref) > 512
+        ):
+            raise ContractError("tenant queue cancellation evidence is required")
+        now = _authority_now(self._clock)
+        connection = self._connect()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            existing = connection.execute(
+                """
+                SELECT receipt_json FROM tenant_queue_cancellations
+                WHERE brand_id = ?
+                """,
+                (principal.brand_id,),
+            ).fetchone()
+            if existing is not None:
+                receipt = self._validated_cancellation_receipt(
+                    json.loads(existing["receipt_json"]), principal.brand_id
+                )
+                if receipt["evidence_ref"] != evidence_ref:
+                    raise ContractError("tenant queue cancellation is immutable")
+                connection.commit()
+                return receipt
+
+            rows = connection.execute(
+                """
+                SELECT * FROM platform_work_queue
+                WHERE brand_id = ?
+                ORDER BY work_item_id
+                """,
+                (principal.brand_id,),
+            ).fetchall()
+            if any(
+                row["work_kind"] == "external_write"
+                and row["state"] in {"LEASED", "RECONCILIATION_REQUIRED"}
+                for row in rows
+            ):
+                raise ContractError(
+                    "uncertain external work must be reconciled before offboarding"
+                )
+            cancelled_count = 0
+            for row in rows:
+                if row["state"] in {
+                    "READY",
+                    "LEASED",
+                    "RETRY_WAIT",
+                    "RECONCILIATION_REQUIRED",
+                }:
+                    errors = self._error_classes(row)
+                    errors.append("TENANT_OFFBOARDED")
+                    self._set_nonleased_state(
+                        connection,
+                        row,
+                        state="DEAD_LETTER",
+                        now=now,
+                        errors=errors,
+                        next_attempt_at=None,
+                    )
+                    _AuthorityPaperclipAdapter._insert_audit(
+                        connection,
+                        principal,
+                        "queue.item.offboarding_dead_letter",
+                        row["work_item_id"],
+                    )
+                    cancelled_count += 1
+            receipt_seed = {
+                "brand_id": principal.brand_id,
+                "evidence_ref": evidence_ref,
+                "work_item_count": len(rows),
+                "cancelled_item_count": cancelled_count,
+                "terminal_item_count": len(rows) - cancelled_count,
+                "requested_by": principal.actor_id,
+                "cancelled_at": now.isoformat(),
+            }
+            receipt_id = canonical_checksum(receipt_seed)
+            receipt = finalize_record(
+                {
+                    "schema_version": "1.0",
+                    "artifact_type": "tenant_queue_cancellation_receipt",
+                    "queue_cancellation_receipt_id": receipt_id,
+                    **receipt_seed,
+                }
+            )
+            connection.execute(
+                """
+                INSERT INTO tenant_queue_cancellations (
+                    brand_id, receipt_id, evidence_ref, receipt_json, cancelled_at
+                ) VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    principal.brand_id,
+                    receipt_id,
+                    evidence_ref,
+                    canonical_bytes(receipt).decode("utf-8"),
+                    now.isoformat(),
+                ),
+            )
+            _AuthorityPaperclipAdapter._insert_audit(
+                connection,
+                principal,
+                "queue.tenant.cancelled",
+                receipt_id,
+            )
+            connection.commit()
+            return receipt
+        except (AuthorizationError, ContractError, WorkQueueError):
+            _rollback(connection)
+            raise
+        except (json.JSONDecodeError, sqlite3.Error, TypeError, ValueError) as exc:
+            _rollback(connection)
+            raise WorkQueueError("could not cancel tenant work") from exc
+        finally:
+            connection.close()
+
+    def cancellation_receipt(
+        self,
+        principal: Principal,
+        receipt_id: str,
+    ) -> dict[str, Any]:
+        if principal.role_id not in {
+            "agency-director",
+            "platform-assurance-reviewer",
+        }:
+            raise AuthorizationError("role cannot read queue cancellation evidence")
+        connection = self._connect()
+        try:
+            row = connection.execute(
+                """
+                SELECT receipt_json FROM tenant_queue_cancellations
+                WHERE brand_id = ? AND receipt_id = ?
+                """,
+                (principal.brand_id, receipt_id),
+            ).fetchone()
+            if row is None:
+                raise KeyError(receipt_id)
+            return self._validated_cancellation_receipt(
+                json.loads(row["receipt_json"]), principal.brand_id
+            )
+        except (AuthorizationError, ContractError, WorkQueueError, KeyError):
+            raise
+        except (json.JSONDecodeError, sqlite3.Error, TypeError, ValueError) as exc:
+            raise WorkQueueError("could not read queue cancellation evidence") from exc
+        finally:
+            connection.close()
+
     def get(self, principal: Principal, work_item_id: str) -> dict[str, Any]:
         connection = self._connect()
         try:
             row = self._required_row(connection, principal.brand_id, work_item_id)
+            tenant_cancelled = connection.execute(
+                """
+                SELECT 1 FROM tenant_queue_cancellations
+                WHERE brand_id = ?
+                """,
+                (principal.brand_id,),
+            ).fetchone()
+            if tenant_cancelled is not None and principal.role_id not in {
+                "agency-director",
+                "platform-assurance-reviewer",
+            }:
+                raise AuthorizationError("worker queue access is closed after offboarding")
             if principal.role_id not in {
                 "agency-director",
                 "platform-assurance-reviewer",
@@ -3050,6 +3265,86 @@ class _AuthorityWorkQueue:
         connection = self._database.connect()
         connection.row_factory = sqlite3.Row
         return connection
+
+    @staticmethod
+    def _require_tenant_active(
+        connection: sqlite3.Connection,
+        brand_id: str,
+    ) -> None:
+        cancelled = connection.execute(
+            """
+            SELECT 1 FROM tenant_queue_cancellations
+            WHERE brand_id = ?
+            """,
+            (brand_id,),
+        ).fetchone()
+        if cancelled is not None:
+            raise ContractError("tenant work queue is closed after offboarding")
+
+    @staticmethod
+    def _validated_cancellation_receipt(
+        raw_receipt: Mapping[str, Any],
+        brand_id: str,
+    ) -> dict[str, Any]:
+        receipt = copy.deepcopy(dict(raw_receipt))
+        verify_record(receipt)
+        required = {
+            "queue_cancellation_receipt_id",
+            "brand_id",
+            "evidence_ref",
+            "work_item_count",
+            "cancelled_item_count",
+            "terminal_item_count",
+            "requested_by",
+            "cancelled_at",
+        }
+        if (
+            receipt.get("artifact_type")
+            != "tenant_queue_cancellation_receipt"
+            or receipt.get("brand_id") != brand_id
+            or not required.issubset(receipt)
+        ):
+            raise WorkQueueError("stored queue cancellation receipt is invalid")
+        if not all(
+            isinstance(receipt[field], str) and receipt[field]
+            for field in (
+                "queue_cancellation_receipt_id",
+                "evidence_ref",
+                "requested_by",
+                "cancelled_at",
+            )
+        ):
+            raise WorkQueueError("stored queue cancellation receipt is invalid")
+        if (
+            not receipt["evidence_ref"].startswith("evidence://")
+            or len(receipt["evidence_ref"]) > 512
+        ):
+            raise WorkQueueError("stored queue cancellation receipt is invalid")
+        counts = [
+            receipt["work_item_count"],
+            receipt["cancelled_item_count"],
+            receipt["terminal_item_count"],
+        ]
+        if any(isinstance(value, bool) or not isinstance(value, int) for value in counts):
+            raise WorkQueueError("stored queue cancellation receipt is invalid")
+        if any(value < 0 for value in counts) or counts[1] + counts[2] != counts[0]:
+            raise WorkQueueError("stored queue cancellation receipt is invalid")
+        receipt_seed = {
+            key: receipt[key]
+            for key in (
+                "brand_id",
+                "evidence_ref",
+                "work_item_count",
+                "cancelled_item_count",
+                "terminal_item_count",
+                "requested_by",
+                "cancelled_at",
+            )
+        }
+        if receipt["queue_cancellation_receipt_id"] != canonical_checksum(receipt_seed):
+            raise WorkQueueError("stored queue cancellation receipt is invalid")
+        parse_time(receipt["cancelled_at"])
+        return receipt
 
     def _expire_leases(
         self,
