@@ -86,13 +86,17 @@ class _FictionalRecoveryAuthority:
     """Attest and verify tenant exports inside the protected authority host."""
 
     _ALGORITHM = "HMAC-SHA256"
-    _DOMAIN = b"agency-os.tenant-artifact-export.v1\x00"
+    _DOMAINS = {
+        "artifact": b"agency-os.tenant-artifact-export.v1\x00",
+        "authority": b"agency-os.tenant-authority-export.v1\x00",
+    }
 
     def __init__(
         self,
         *,
         authority_id: str,
         signing_key: bytes,
+        scope: str = "artifact",
         _construction_token: object,
     ) -> None:
         if _construction_token is not _APPROVAL_AUTHORITY_TOKEN:
@@ -101,8 +105,11 @@ class _FictionalRecoveryAuthority:
             raise ValueError("recovery authority_id is required")
         if not isinstance(signing_key, bytes) or len(signing_key) < 32:
             raise ValueError("recovery authority signing key must be at least 32 bytes")
+        if scope not in self._DOMAINS:
+            raise ValueError("recovery authority scope is invalid")
         self._authority_id = authority_id
         self._signing_key = bytes(signing_key)
+        self._domain = self._DOMAINS[scope]
 
     def attest(self, tenant_export: Mapping[str, Any]) -> dict[str, str]:
         """Return an origin attestation bound to an exact tenant export."""
@@ -149,6 +156,6 @@ class _FictionalRecoveryAuthority:
     def _signature(self, body: Mapping[str, Any]) -> str:
         return hmac.new(
             self._signing_key,
-            self._DOMAIN + canonical_bytes(body),
+            self._domain + canonical_bytes(body),
             hashlib.sha256,
         ).hexdigest()

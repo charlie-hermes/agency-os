@@ -37,6 +37,7 @@ from .platform_adapters import (
     _AuthorityPaperclipAdapter,
     _AuthorityTenantArtifactStore,
     _AuthorityTenantOffboarding,
+    _AuthorityTenantRecovery,
     _AuthorityWorkQueue,
     _AuthorityTenantEvidenceStore,
     _SQLiteArtifactDeletionLedger,
@@ -197,6 +198,22 @@ class PlatformAuthorityClient:
 
     def audit_events(self, principal: Principal) -> list[dict[str, Any]]:
         return self._request("audit_events", principal)
+
+    def export_tenant_authority(
+        self, principal: Principal
+    ) -> dict[str, Any]:
+        return self._request("export_tenant_authority", principal)
+
+    def restore_tenant_authority(
+        self,
+        principal: Principal,
+        tenant_export: Mapping[str, Any],
+    ) -> dict[str, int]:
+        return self._request(
+            "restore_tenant_authority",
+            principal,
+            tenant_export=dict(tenant_export),
+        )
 
     def prepare_tenant_offboarding(
         self, principal: Principal
@@ -712,6 +729,12 @@ def _run_platform_authority_host(
             signing_key=approval_signing_key,
             _construction_token=_APPROVAL_AUTHORITY_TOKEN,
         )
+        full_recovery_authority = _FictionalRecoveryAuthority(
+            authority_id=authority_id,
+            signing_key=approval_signing_key,
+            scope="authority",
+            _construction_token=_APPROVAL_AUTHORITY_TOKEN,
+        )
         deletion_ledger = _SQLiteArtifactDeletionLedger(
             deletion_ledger_path,
             authority_id=authority_id,
@@ -753,6 +776,14 @@ def _run_platform_authority_host(
             deletion_ledger=deletion_ledger,
             _construction_token=_AUTHORITY_ADAPTER_TOKEN,
         )
+        tenant_recovery = _AuthorityTenantRecovery(
+            database_path,
+            timeout_seconds=timeout_seconds,
+            clock=authority_clock,
+            recovery_authority=full_recovery_authority,
+            artifacts=artifacts,
+            _construction_token=_AUTHORITY_ADAPTER_TOKEN,
+        )
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as server:
             server.bind(socket_path)
             os.chmod(socket_path, 0o600)
@@ -785,6 +816,7 @@ def _run_platform_authority_host(
                         evidence,
                         artifacts,
                         work_queue,
+                        tenant_recovery,
                         tenant_offboarding,
                         client_principals,
                     )
@@ -824,6 +856,7 @@ def _handle_platform_request(
     evidence: _AuthorityTenantEvidenceStore,
     artifacts: _AuthorityTenantArtifactStore,
     work_queue: _AuthorityWorkQueue,
+    tenant_recovery: _AuthorityTenantRecovery,
     tenant_offboarding: _AuthorityTenantOffboarding,
     client_principals: Mapping[str, Principal],
 ) -> dict[str, Any]:
@@ -912,6 +945,10 @@ def _handle_platform_request(
             result = work_queue.cancel_tenant(principal, **arguments)
         elif operation == "queue_cancellation_receipt":
             result = work_queue.cancellation_receipt(principal, **arguments)
+        elif operation == "export_tenant_authority":
+            result = tenant_recovery.export_tenant(principal, **arguments)
+        elif operation == "restore_tenant_authority":
+            result = tenant_recovery.restore_tenant(principal, **arguments)
         elif operation == "prepare_tenant_offboarding":
             result = tenant_offboarding.prepare(principal, **arguments)
         elif operation == "offboard_tenant":
