@@ -46,6 +46,15 @@
   before artifact cleanup. The tombstone denies old signed backups even through
   a fresh same-authority recovery database. This deletion does not yet cover
   Paperclip, evidence, Buzz or audit tables, ledger replication, or media erasure.
+- A separate director-only full-authority package covers task versions, approver
+  policies, approvals, Buzz context and decisions, evidence, artifacts, work
+  queue, queue cancellation and ordered audit records. Fixed table/column shapes,
+  canonical row checks, table counts, a complete checksum and the protected
+  recovery attestation are verified before one atomic empty-target restore. A
+  wrong key, public checksum forgery, foreign tenant, non-empty target, artifact
+  deletion or authority-offboarding tombstone denies the whole restore. This
+  logical package is not encrypted backup media, streaming transfer, deployed
+  replication, retention enforcement or multi-host disaster recovery.
 - Public fields and internal notes are separate values; only public fields
   cross the publication adapter.
 - Capability grants are immutable, brand-scoped records issued through an
@@ -200,21 +209,23 @@ Offboarding requires a human-approved plan that:
 6. verifies backups expire or are cryptographically erased as promised; and
 7. records deletion evidence without retaining deleted content.
 
-The current fictional authority implements the first two local ordering steps
+The current fictional authority implements the first three local ordering steps
 and one bounded deletion proof. Evidence-bound queue cancellation reconciles
-uncertain external results and permanently stops worker delivery. A director
-then prepares an exact checksum/count manifest and can commit protected artifact
-and authority tombstones before deleting that tenant's local Paperclip-shaped,
-Buzz-context, evidence, artifact, queue and ordinary audit content. Old clients
-fail closed immediately, an interrupted cleanup resumes only with the exact same
-manifest and evidence, and a fresh same-authority recovery database cannot
-reactivate the tenant. Content-free queue, artifact and authority receipts remain.
+uncertain external results and permanently stops worker delivery. Before deletion,
+a director can export one complete authority-attested logical package containing
+the tenant's task, approval, Buzz, evidence, artifact, queue and audit state. A
+director then prepares an exact checksum/count manifest and can commit protected
+artifact and authority tombstones before deleting that tenant's local content.
+Old clients fail closed immediately, an interrupted cleanup resumes only with
+the exact same manifest and evidence, and the tombstone denies the retained full
+package even through a fresh same-authority recovery database. Content-free
+queue, artifact and authority receipts remain.
 
-This manifest is not the required restorable audit/evidence export. The full
-sequence above remains incomplete until real credentials and grants are revoked,
-retention is owner-approved, deployed stores and backups are coordinated across
-hosts, protected-ledger replication is proven, and storage-media erasure is
-drilled.
+This is not a deployed, encrypted or replicated backup system. The full sequence
+above remains incomplete until real credentials and grants are revoked, retention
+is owner-approved, deployed stores and backups are coordinated across hosts,
+protected-ledger replication is proven, recovery objectives are drilled, and
+storage-media erasure is verified.
 
 ## Audit and service objectives
 

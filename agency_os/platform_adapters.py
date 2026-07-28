@@ -2585,6 +2585,472 @@ class _AuthorityTenantArtifactStore:
         return validated_records, validated_provenance
 
 
+class _AuthorityTenantRecovery:
+    """Attested full-tenant export and empty-target recovery inside the authority."""
+
+    _TABLES: dict[str, tuple[tuple[str, ...], str]] = {
+        "paperclip_task_versions": (
+            (
+                "brand_id",
+                "issue_id",
+                "version",
+                "record_json",
+                "checksum",
+                "created_at",
+            ),
+            "issue_id, version",
+        ),
+        "paperclip_approver_policies": (
+            (
+                "brand_id",
+                "policy_id",
+                "revision",
+                "record_json",
+                "checksum",
+                "created_at",
+            ),
+            "policy_id, revision",
+        ),
+        "paperclip_approvals": (
+            (
+                "brand_id",
+                "approval_id",
+                "issue_id",
+                "task_checksum",
+                "record_json",
+                "created_at",
+            ),
+            "approval_id",
+        ),
+        "paperclip_buzz_contexts": (
+            (
+                "brand_id",
+                "context_id",
+                "issue_id",
+                "record_json",
+                "checksum",
+                "state",
+                "created_at",
+            ),
+            "context_id",
+        ),
+        "paperclip_buzz_decisions": (
+            (
+                "brand_id",
+                "decision_id",
+                "issue_id",
+                "context_checksum",
+                "record_json",
+                "created_at",
+            ),
+            "decision_id",
+        ),
+        "tenant_evidence": (
+            (
+                "brand_id",
+                "evidence_id",
+                "issue_id",
+                "record_json",
+                "checksum",
+                "created_at",
+            ),
+            "evidence_id",
+        ),
+        "tenant_artifacts": (
+            (
+                "brand_id",
+                "record_id",
+                "artifact_type",
+                "record_json",
+                "actor_id",
+                "role_id",
+                "stored_at",
+            ),
+            "record_id",
+        ),
+        "platform_work_queue": (
+            (
+                "brand_id",
+                "work_item_id",
+                "work_json",
+                "work_checksum",
+                "work_kind",
+                "worker_role",
+                "state",
+                "attempt_count",
+                "max_attempts",
+                "next_attempt_at",
+                "leased_at",
+                "lease_owner",
+                "lease_token_hash",
+                "lease_expires_at",
+                "heartbeat_at",
+                "error_classes_json",
+                "disposition_json",
+                "completed_at",
+                "created_at",
+                "updated_at",
+            ),
+            "work_item_id",
+        ),
+        "tenant_queue_cancellations": (
+            (
+                "brand_id",
+                "receipt_id",
+                "evidence_ref",
+                "receipt_json",
+                "cancelled_at",
+            ),
+            "brand_id",
+        ),
+        # SQLite's audit sequence is authority-global. Logical recovery preserves
+        # the ordered event records and lets the target allocate safe new values.
+        "platform_audit": (
+            ("brand_id", "event_json", "created_at"),
+            "sequence",
+        ),
+    }
+
+    def __init__(
+        self,
+        database_path: str | os.PathLike[str],
+        *,
+        timeout_seconds: float,
+        clock: Callable[[], datetime],
+        recovery_authority: _FictionalRecoveryAuthority,
+        artifacts: _AuthorityTenantArtifactStore,
+        _construction_token: object,
+    ) -> None:
+        if _construction_token is not _AUTHORITY_ADAPTER_TOKEN:
+            raise PlatformAdapterError("tenant recovery construction is denied")
+        self._clock = clock
+        self._recovery_authority = recovery_authority
+        self._artifacts = artifacts
+        self._database = _SQLitePlatformDatabase(
+            database_path,
+            timeout_seconds=timeout_seconds,
+            error_type=PlatformAdapterError,
+        )
+
+    def export_tenant(self, principal: Principal) -> dict[str, Any]:
+        self._require_director(principal)
+        ledger_connection = self._artifacts._begin_tenant_guard(principal.brand_id)
+        connection: sqlite3.Connection | None = None
+        try:
+            connection = self._database.connect()
+            connection.execute("BEGIN IMMEDIATE")
+            tables = self._snapshot(connection, principal.brand_id)
+            table_row_counts = {
+                table: len(rows) for table, rows in sorted(tables.items())
+            }
+            payload = {
+                "schema_version": "1.0",
+                "artifact_type": "tenant_authority_export",
+                "brand_id": principal.brand_id,
+                "table_row_counts": table_row_counts,
+                "tables": tables,
+            }
+            exported = {
+                **payload,
+                "export_checksum": canonical_checksum(payload),
+                "exported_at": _authority_now(self._clock).isoformat(),
+            }
+            exported["export_attestation"] = self._recovery_authority.attest(
+                exported
+            )
+            _AuthorityPaperclipAdapter._insert_audit(
+                connection,
+                principal,
+                "authority.tenant_exported",
+                exported["export_checksum"],
+            )
+            connection.commit()
+            ledger_connection.commit()
+            return exported
+        except (AuthorizationError, ContractError, PlatformAdapterError):
+            if connection is not None:
+                _rollback(connection)
+            _rollback(ledger_connection)
+            raise
+        except (json.JSONDecodeError, sqlite3.Error, TypeError, ValueError) as exc:
+            if connection is not None:
+                _rollback(connection)
+            _rollback(ledger_connection)
+            raise PlatformAdapterError("could not export tenant authority") from exc
+        finally:
+            if connection is not None:
+                connection.close()
+            ledger_connection.close()
+
+    def restore_tenant(
+        self,
+        principal: Principal,
+        tenant_export: Mapping[str, Any],
+    ) -> dict[str, int]:
+        self._require_director(principal)
+        tables = self._validated_export(principal, tenant_export)
+        ledger_connection = self._artifacts._begin_tenant_guard(principal.brand_id)
+        connection: sqlite3.Connection | None = None
+        try:
+            connection = self._database.connect()
+            connection.execute("BEGIN IMMEDIATE")
+            for table in self._TABLES:
+                existing = connection.execute(
+                    f"SELECT 1 FROM {table} WHERE brand_id = ? LIMIT 1",
+                    (principal.brand_id,),
+                ).fetchone()
+                if existing is not None:
+                    raise ContractError("authority restore target tenant is not empty")
+            for table, (columns, _order_by) in self._TABLES.items():
+                placeholders = ", ".join("?" for _column in columns)
+                column_sql = ", ".join(columns)
+                for row in tables[table]:
+                    connection.execute(
+                        f"INSERT INTO {table} ({column_sql}) VALUES ({placeholders})",
+                        tuple(row[column] for column in columns),
+                    )
+            _AuthorityPaperclipAdapter._insert_audit(
+                connection,
+                principal,
+                "authority.tenant_restored",
+                str(tenant_export["export_checksum"]),
+            )
+            connection.commit()
+            ledger_connection.commit()
+            return {table: len(rows) for table, rows in sorted(tables.items())}
+        except (AuthorizationError, ContractError, PlatformAdapterError):
+            if connection is not None:
+                _rollback(connection)
+            _rollback(ledger_connection)
+            raise
+        except (json.JSONDecodeError, sqlite3.Error, TypeError, ValueError) as exc:
+            if connection is not None:
+                _rollback(connection)
+            _rollback(ledger_connection)
+            raise PlatformAdapterError("could not restore tenant authority") from exc
+        finally:
+            if connection is not None:
+                connection.close()
+            ledger_connection.close()
+
+    def _snapshot(
+        self,
+        connection: sqlite3.Connection,
+        brand_id: str,
+    ) -> dict[str, list[dict[str, Any]]]:
+        tables: dict[str, list[dict[str, Any]]] = {}
+        for table, (columns, order_by) in self._TABLES.items():
+            rows = connection.execute(
+                f"SELECT {', '.join(columns)} FROM {table} "
+                f"WHERE brand_id = ? ORDER BY {order_by}",
+                (brand_id,),
+            ).fetchall()
+            exported_rows = [dict(zip(columns, row, strict=True)) for row in rows]
+            for row in exported_rows:
+                self._validate_row(table, row, brand_id)
+            tables[table] = exported_rows
+        return tables
+
+    def _validated_export(
+        self,
+        principal: Principal,
+        tenant_export: Mapping[str, Any],
+    ) -> dict[str, list[dict[str, Any]]]:
+        exported = copy.deepcopy(dict(tenant_export))
+        if set(exported) != {
+            "schema_version",
+            "artifact_type",
+            "brand_id",
+            "table_row_counts",
+            "tables",
+            "export_checksum",
+            "exported_at",
+            "export_attestation",
+        }:
+            raise ContractError("tenant authority export shape is invalid")
+        if (
+            exported["schema_version"] != "1.0"
+            or exported["artifact_type"] != "tenant_authority_export"
+        ):
+            raise ContractError("tenant authority export version is unsupported")
+        if exported["brand_id"] != principal.brand_id:
+            raise AuthorizationError("cross-tenant authority restore denied")
+        if (
+            not isinstance(exported["exported_at"], str)
+            or not exported["exported_at"]
+        ):
+            raise ContractError("tenant authority export time is invalid")
+        parse_time(exported["exported_at"])
+        tables = exported["tables"]
+        table_row_counts = exported["table_row_counts"]
+        if (
+            not isinstance(tables, dict)
+            or set(tables) != set(self._TABLES)
+            or not isinstance(table_row_counts, dict)
+            or set(table_row_counts) != set(self._TABLES)
+        ):
+            raise ContractError("tenant authority export tables are invalid")
+        validated_tables: dict[str, list[dict[str, Any]]] = {}
+        for table, (columns, _order_by) in self._TABLES.items():
+            rows = tables[table]
+            count = table_row_counts[table]
+            if (
+                not isinstance(rows, list)
+                or isinstance(count, bool)
+                or not isinstance(count, int)
+                or count != len(rows)
+            ):
+                raise ContractError("tenant authority export count is invalid")
+            validated_rows: list[dict[str, Any]] = []
+            for raw_row in rows:
+                if not isinstance(raw_row, dict) or set(raw_row) != set(columns):
+                    raise ContractError("tenant authority export row is invalid")
+                self._validate_row(table, raw_row, principal.brand_id)
+                validated_rows.append(copy.deepcopy(raw_row))
+            validated_tables[table] = validated_rows
+        payload = {
+            key: exported[key]
+            for key in (
+                "schema_version",
+                "artifact_type",
+                "brand_id",
+                "table_row_counts",
+                "tables",
+            )
+        }
+        if exported["export_checksum"] != canonical_checksum(payload):
+            raise ContractError("tenant authority export checksum is invalid")
+        self._recovery_authority.verify(
+            exported,
+            exported["export_attestation"],
+        )
+        return validated_tables
+
+    @staticmethod
+    def _validate_row(
+        table: str,
+        row: Mapping[str, Any],
+        brand_id: str,
+    ) -> None:
+        if row.get("brand_id") != brand_id:
+            raise ContractError("tenant authority export row tenant is invalid")
+        decoded: dict[str, Any] = {}
+        for column, value in row.items():
+            if not column.endswith("_json") or value is None:
+                continue
+            if not isinstance(value, str):
+                raise ContractError("tenant authority export JSON is invalid")
+            parsed = json.loads(value)
+            if canonical_bytes(parsed).decode("utf-8") != value:
+                raise ContractError("tenant authority export JSON is not canonical")
+            decoded[column] = parsed
+            if isinstance(parsed, dict):
+                verify_record(parsed)
+                if parsed.get("brand_id") != brand_id:
+                    raise ContractError(
+                        "tenant authority export record tenant is invalid"
+                    )
+            elif (
+                column not in {"error_classes_json", "disposition_json"}
+                or not isinstance(parsed, list)
+            ):
+                raise ContractError("tenant authority export JSON shape is invalid")
+
+        record = decoded.get("record_json")
+        work = decoded.get("work_json")
+        receipt = decoded.get("receipt_json")
+        event = decoded.get("event_json")
+        required_mapping = {
+            "paperclip_task_versions": record,
+            "paperclip_approver_policies": record,
+            "paperclip_approvals": record,
+            "paperclip_buzz_contexts": record,
+            "paperclip_buzz_decisions": record,
+            "tenant_evidence": record,
+            "tenant_artifacts": record,
+            "platform_work_queue": work,
+            "tenant_queue_cancellations": receipt,
+            "platform_audit": event,
+        }[table]
+        if not isinstance(required_mapping, dict):
+            raise ContractError("tenant authority export record shape is invalid")
+        if table == "paperclip_task_versions" and (
+            record.get("paperclip_issue_id") != row.get("issue_id")
+            or record.get("version") != row.get("version")
+            or record.get("content_checksum") != row.get("checksum")
+        ):
+            raise ContractError("tenant authority task row is invalid")
+        if table == "paperclip_approver_policies" and (
+            record.get("policy_id") != row.get("policy_id")
+            or record.get("revision") != row.get("revision")
+            or record.get("content_checksum") != row.get("checksum")
+        ):
+            raise ContractError("tenant authority policy row is invalid")
+        if table == "paperclip_approvals" and (
+            record.get("approval_id") != row.get("approval_id")
+            or record.get("paperclip_issue_id") != row.get("issue_id")
+            or record.get("task_checksum") != row.get("task_checksum")
+        ):
+            raise ContractError("tenant authority approval row is invalid")
+        if table == "paperclip_buzz_contexts" and (
+            record.get("context_id") != row.get("context_id")
+            or record.get("paperclip_issue_id") != row.get("issue_id")
+            or record.get("content_checksum") != row.get("checksum")
+            or row.get("state") not in {"open", "archived"}
+        ):
+            raise ContractError("tenant authority Buzz context row is invalid")
+        if table == "paperclip_buzz_decisions" and (
+            record.get("decision_id") != row.get("decision_id")
+            or record.get("paperclip_issue_id") != row.get("issue_id")
+            or record.get("context_checksum") != row.get("context_checksum")
+        ):
+            raise ContractError("tenant authority Buzz decision row is invalid")
+        if table == "tenant_evidence" and (
+            record.get("evidence_id") != row.get("evidence_id")
+            or record.get("paperclip_issue_id") != row.get("issue_id")
+            or record.get("content_checksum") != row.get("checksum")
+        ):
+            raise ContractError("tenant authority evidence row is invalid")
+        if table == "tenant_artifacts" and (
+            _AuthorityTenantArtifactStore._record_id(record) != row.get("record_id")
+            or record.get("artifact_type") != row.get("artifact_type")
+        ):
+            raise ContractError("tenant authority artifact row is invalid")
+        if table == "platform_work_queue" and (
+            work.get("work_item_id") != row.get("work_item_id")
+            or work.get("content_checksum") != row.get("work_checksum")
+            or work.get("work_kind") != row.get("work_kind")
+            or work.get("worker_role") != row.get("worker_role")
+            or work.get("max_attempts") != row.get("max_attempts")
+            or row.get("state") not in WORK_QUEUE_STATES
+        ):
+            raise ContractError("tenant authority queue row is invalid")
+        if table == "tenant_queue_cancellations":
+            validated_receipt = _AuthorityWorkQueue._validated_cancellation_receipt(
+                receipt, brand_id
+            )
+            if (
+                validated_receipt["queue_cancellation_receipt_id"]
+                != row.get("receipt_id")
+                or validated_receipt["evidence_ref"] != row.get("evidence_ref")
+                or validated_receipt["cancelled_at"] != row.get("cancelled_at")
+            ):
+                raise ContractError(
+                    "tenant authority queue cancellation row is invalid"
+                )
+        if table == "platform_audit" and event.get("created_at") != row.get(
+            "created_at"
+        ):
+            raise ContractError("tenant authority audit row is invalid")
+
+    @staticmethod
+    def _require_director(principal: Principal) -> None:
+        if principal.role_id != "agency-director":
+            raise AuthorizationError(
+                "only the agency director may export or restore a tenant authority"
+            )
+
+
 class _AuthorityTenantOffboarding:
     """Irreversible local tenant cleanup coordinated by the protected authority."""
 

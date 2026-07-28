@@ -2,7 +2,7 @@
 
 ## Scope of this slice
 
-This slice adds a standard-library-only, fictional local reference for four
+These slices add a standard-library-only, fictional local reference for five
 Gate 5 boundaries:
 
 1. An independently started protected Platform Authority host owns the SQLite
@@ -23,6 +23,10 @@ Gate 5 boundaries:
    Paperclip task version and one tenant/worker role. Renewable one-use leases,
    bounded retry, dead letters and director-owned reconciliation remain inside
    the protected authority database and cannot mutate Paperclip task state.
+5. A director-only, authority-attested tenant package exports the complete logical
+   Paperclip, approval, Buzz, evidence, artifact, queue and audit state. Restore
+   is atomic and same-tenant into an empty target under the same authority and
+   deletion ledger; protected tombstones permanently block resurrection.
 
 These boundaries use fictional data, a local Unix socket and local SQLite only.
 They make no network call and hold no service credential. The fictional
@@ -197,9 +201,36 @@ commit can be resumed only by repeating the exact manifest checksum and evidence
 reference; a different request is denied as an immutable conflict.
 
 This is coordinated deletion in one fictional, single-host authority. It is not
-a complete export or recovery package, cross-host transaction, production
-credential revocation, retention expiry, backup/media erasure or full deployed
-platform offboarding.
+a cross-host transaction, production credential revocation, retention expiry,
+backup/media erasure or full deployed platform offboarding.
+
+## Complete logical authority export and recovery
+
+The protected host can now produce one director-only logical package containing
+all tenant rows from task versions, approver policies, approvals, Buzz contexts
+and decisions, evidence, artifacts, work queue, queue cancellation and ordinary
+audit. Table names and columns are fixed by code. Every stored canonical record
+is revalidated before export, per-table counts and the full content are bound to
+one canonical SHA-256, and the protected recovery authority attests the tenant,
+authority ID, checksum and export time. Another tenant is never included.
+
+Restore verifies the exact package shape, every row binding, the checksum and the
+non-public authority attestation before writing anything. It holds the protected
+deletion-ledger guard and one immediate database transaction, requires every
+target table to be empty for that tenant, and inserts the complete package or
+nothing. Authority-global SQLite audit sequence numbers are deliberately not
+portable; ordered immutable audit records are preserved and the target assigns
+safe local sequence values. Existing data for another tenant remains untouched.
+The recovered task, approval, Buzz, evidence, artifact and queue boundaries stay
+usable after restart under the same authority key.
+
+An artifact-deletion or full-authority tombstone in the shared protected ledger
+denies restore, including into a fresh database. Public checksum recomputation,
+a wrong recovery key, a foreign tenant, a non-director and a non-empty target all
+fail closed. The 4 MiB IPC limit still applies. This is a content-bearing logical
+package for a fictional single-host authority, not encrypted backup storage,
+streaming transfer, deployed replication, recovery-key rotation, measured RPO or
+RTO, retention expiry, media erasure or multi-host recovery.
 
 ## Tenant and storage controls
 
@@ -268,16 +299,20 @@ platform offboarding.
   durable receipts, stored-ID tamper denial, immediate old-client denial,
   fail-closed cleanup resumption, prior-ledger migration, fresh-recovery-host
   denial and preservation of another tenant;
+- complete authority export and atomic empty-target restore across task, approval,
+  Buzz, evidence, artifact, queue, queue-cancellation and audit state, including
+  recomputed-checksum forgery, wrong-key, wrong-role, foreign-tenant, non-empty
+  target, restart and post-offboarding resurrection denial;
 - tenant-scoped persistent audit; and
 - replacement of the running authority database across every authority view,
   including the work queue.
 
 ## Recovery and remaining Gate 5 work
 
-These slices prove artifact/learning restart, logical export/restore and
-coordinated destructive cleanup inside one fictional local authority, not a
-complete deployed platform recovery or offboarding plan. Before Gate 5 can
-complete, the project still needs:
+These slices prove complete logical tenant export/restore and coordinated
+destructive cleanup inside one fictional local authority, not an encrypted,
+replicated or complete deployed platform recovery and offboarding plan. Before
+Gate 5 can complete, the project still needs:
 
 - authenticated task, dependency, approval, budget, closure, Buzz-context and
   decision write-back tests against the admitted installed services; version,

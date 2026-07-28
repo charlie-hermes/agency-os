@@ -208,6 +208,17 @@ same manifest and evidence, restart cannot reactivate the tenant, and another
 tenant remains isolated. This is not a restorable full-authority export,
 production backup/media erasure, credential revocation or multi-host deletion.
 
+The seventh bounded slice adds one complete content-bearing logical export for a
+fictional tenant's task, approver-policy, approval, Buzz, evidence, artifact,
+queue, queue-cancellation and audit state. The protected authority binds fixed
+row shapes and table counts to one checksum and non-public attestation. Restore
+is director-only, atomic, same-tenant and empty-target under the same authority
+key and protected deletion ledger. Another tenant remains intact, and any
+artifact-deletion or full-authority tombstone permanently denies resurrection.
+This is not encrypted backup storage, streaming transfer, deployed replication,
+key rotation, retention expiry, measured recovery objectives or multi-host
+disaster recovery.
+
 **Merged first-slice evidence:** PR #6, reviewed commit
 `5b53ef937bb0b05490e851660967c5ac39334ac4`, merge commit
 `4efc84fc36c4cd14d8226700162a4e8a4fbb3b57`, and Ubuntu repository gate
@@ -232,6 +243,11 @@ gate `30335486258` with 111 tests and no real external write.
 `46c4d48a9025e430a122291b8e577000880c7815`, merge commit
 `85c7c7f1c9b5e4042e80d4d615d33014bef9a4a3`, and post-merge Ubuntu repository
 gate `30339639182` with 112 tests and no real external write.
+
+**Merged sixth-slice evidence:** PR #11, reviewed commit
+`8243b5b9f6f39fd7c744d8df34e3e0dc4d26e516`, merge commit
+`503930c8e3e95f45455dc4ce4f58e292c7c2c7da`, and post-merge Ubuntu repository
+gate `30346643950` with 115 tests and no real external write.
 
 Implement:
 
@@ -384,10 +400,10 @@ governed DecisionPacket workshop.
 
 ## Current checkpoint
 
-- Approved base: `main` after the merged first Gate 5 fictional Platform
+- Approved base: `main` after the merged sixth Gate 5 fictional Platform
   Authority slice.
 - Active gate: Gate 5, authoritative platform adapters and tenant data
-  foundation; installed contract admission is the current bounded slice.
+  foundation; complete logical tenant export/recovery is the current slice.
 - Next dependent work: finish Gate 5, then Gate 6 governed product decisions
   and Gate 7 full fictional Core workflow.
 - Explicit guardrail: finish the bounded safety gate, then advance the agency

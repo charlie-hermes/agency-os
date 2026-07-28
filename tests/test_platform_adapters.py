@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import hmac
+import json
 import os
 import sqlite3
 import tempfile
@@ -1108,6 +1109,7 @@ class PlatformAdapterTests(unittest.TestCase):
             "SQLiteTenantArtifactStore",
             "SQLiteArtifactDeletionLedger",
             "AuthorityWorkQueue",
+            "AuthorityTenantRecovery",
             "provision_platform_authority_host",
         ):
             self.assertFalse(hasattr(agency_os, forbidden_export))
@@ -1968,6 +1970,315 @@ class PlatformAdapterTests(unittest.TestCase):
             restarted.client(self.strategist).work_queue().lease_next(
                 self.strategist, 10
             )
+
+    def test_full_authority_export_restore_is_attested_complete_and_final(self) -> None:
+        self.paperclip.create_task(
+            self.director,
+            self._task("issue_authority_recovery", approval_required=True),
+        )
+        policy = self.paperclip.register_approver_policy(
+            self.director, self._policy()
+        )
+        task = self._advance_to_in_progress("issue_authority_recovery")
+        evidence = self._evidence(
+            "evidence_authority_recovery",
+            issue_id="issue_authority_recovery",
+        )
+        self.evidence.put(self.strategist, evidence)
+        approval = self.approval_client.record_approval(
+            self.approver,
+            approval_id="approval_authority_recovery",
+            issue_id="issue_authority_recovery",
+            expected_task_checksum=task["content_checksum"],
+            policy_id=policy["policy_id"],
+            policy_revision=policy["revision"],
+            policy_checksum=policy["content_checksum"],
+            decision="APPROVED",
+            decided_at=self.now.isoformat(),
+            expires_at=(self.now + timedelta(minutes=10)).isoformat(),
+        )
+        learning = self._learning("learning_authority_recovery")
+        self.artifacts.put(self.director, learning)
+        context = make_buzz_context_packet(
+            context_id="context_authority_recovery",
+            brand_id=self.director.brand_id,
+            campaign_id="campaign_launch",
+            paperclip_issue_id="issue_authority_recovery",
+            purpose="Prove complete fictional authority recovery.",
+            decision_needed="Confirm the recovery boundary.",
+            participants=(self.director.actor_id, self.strategist.actor_id),
+            source_artifact_ids=("evidence_authority_recovery",),
+            constraints=("No production activation.",),
+            deadline=(self.now + timedelta(hours=1)).isoformat(),
+            exit_condition="The full authority package restores safely.",
+            created_by=self.director.actor_id,
+            created_at=self.now.isoformat(),
+        )
+        buzz = FictionalBuzzAdapter(self.paperclip, clock=lambda: self.now)
+        buzz.post_context(self.director, context)
+        decision = buzz.collect_decision(
+            self.director,
+            context_id="context_authority_recovery",
+            decision_id="decision_authority_recovery",
+            summary="Use the exact attested fictional recovery package.",
+            source_event_ids=("buzz_event_recovery",),
+        )
+        self.paperclip.archive_buzz_context(
+            self.director, "context_authority_recovery"
+        )
+        queue = self.paperclip.work_queue()
+        queue.enqueue(
+            self.director,
+            self._work_item(
+                "work_authority_recovery", task, max_attempts=1
+            ),
+        )
+        strategist_queue = self.strategist_paperclip.work_queue()
+        leased = strategist_queue.lease_next(self.strategist, 10)
+        strategist_queue.fail(
+            self.strategist,
+            "work_authority_recovery",
+            leased["lease"]["lease_token"],
+            error_class="INTERNAL_PERMANENT",
+            retryable=False,
+            external_result="NOT_APPLICABLE",
+        )
+        queue.record_dead_letter_disposition(
+            self.director,
+            "work_authority_recovery",
+            evidence_ref="evidence://recovery/dead-letter-reviewed",
+            disposition="Preserve this reviewed terminal state in recovery.",
+        )
+        queue_receipt = queue.cancel_tenant(
+            self.director,
+            evidence_ref="evidence://recovery/queue-closed",
+        )
+        foreign_task = self._task(
+            "issue_recovery_ember",
+            brand_id=self.foreign_director.brand_id,
+            created_by=self.foreign_director.actor_id,
+        )
+        self.foreign_paperclip.create_task(self.foreign_director, foreign_task)
+
+        authority_export = self.paperclip.export_tenant_authority(self.director)
+        self.assertEqual(
+            authority_export["artifact_type"], "tenant_authority_export"
+        )
+        self.assertEqual(authority_export["exported_at"], self.now.isoformat())
+        self.assertEqual(
+            authority_export["export_attestation"]["authority_id"],
+            "fictional_paperclip_approval_authority",
+        )
+        self.assertTrue(
+            all(
+                count > 0
+                for count in authority_export["table_row_counts"].values()
+            )
+        )
+        self.assertNotIn(
+            "issue_recovery_ember", canonical_bytes(authority_export).decode()
+        )
+        with self.assertRaises(AuthorizationError):
+            self.publisher_paperclip.export_tenant_authority(self.publisher)
+
+        recovery_path = self.database_path.with_name("authority-recovery.sqlite3")
+        recovery_host = _provision_platform_authority_host(
+            recovery_path,
+            deletion_ledger_path=self.deletion_ledger_path,
+            authority_id="fictional_paperclip_approval_authority",
+            approval_signing_key=self.approval_signing_key,
+            initial_time=self.now,
+            principals=self.provisioned_principals,
+        )
+        self.addCleanup(recovery_host.close)
+        recovery_director = recovery_host.client(self.director)
+        recovery_foreign = recovery_host.client(self.foreign_director)
+        target_foreign_task = self._task(
+            "issue_target_ember",
+            brand_id=self.foreign_director.brand_id,
+            created_by=self.foreign_director.actor_id,
+        )
+        recovery_foreign.create_task(self.foreign_director, target_foreign_task)
+
+        forged = copy.deepcopy(authority_export)
+        evidence_row = forged["tables"]["tenant_evidence"][0]
+        forged_evidence = json.loads(evidence_row["record_json"])
+        forged_evidence["claim"] = "A recomputed public checksum is not authority proof."
+        forged_evidence = finalize_record(forged_evidence)
+        evidence_row["record_json"] = canonical_bytes(forged_evidence).decode()
+        evidence_row["checksum"] = forged_evidence["content_checksum"]
+        payload = {
+            key: forged[key]
+            for key in (
+                "schema_version",
+                "artifact_type",
+                "brand_id",
+                "table_row_counts",
+                "tables",
+            )
+        }
+        forged["export_checksum"] = canonical_checksum(payload)
+        forged["export_attestation"]["export_checksum"] = forged[
+            "export_checksum"
+        ]
+        with self.assertRaises(ContractError):
+            recovery_director.restore_tenant_authority(self.director, forged)
+        with self.assertRaises(AuthorizationError):
+            recovery_foreign.restore_tenant_authority(
+                self.foreign_director, authority_export
+            )
+        self.assertEqual(
+            recovery_foreign.get_task(
+                self.foreign_director, "issue_target_ember"
+            ),
+            target_foreign_task,
+        )
+
+        wrong_key_path = self.database_path.with_name(
+            "authority-recovery-wrong-key.sqlite3"
+        )
+        wrong_key_host = _provision_platform_authority_host(
+            wrong_key_path,
+            deletion_ledger_path=self.deletion_ledger_path,
+            authority_id="fictional_paperclip_approval_authority",
+            approval_signing_key=os.urandom(32),
+            initial_time=self.now,
+            principals=self.provisioned_principals,
+        )
+        self.addCleanup(wrong_key_host.close)
+        with self.assertRaises(ContractError):
+            wrong_key_host.client(self.director).restore_tenant_authority(
+                self.director, authority_export
+            )
+
+        restored_counts = recovery_director.restore_tenant_authority(
+            self.director, authority_export
+        )
+        self.assertEqual(restored_counts, authority_export["table_row_counts"])
+        self.assertEqual(
+            recovery_director.get_task(self.director, "issue_authority_recovery"),
+            task,
+        )
+        self.assertEqual(
+            recovery_director.evidence().get(
+                self.director, "evidence_authority_recovery"
+            ),
+            evidence,
+        )
+        self.assertEqual(
+            recovery_director.artifacts().get(
+                self.director, "learning_authority_recovery"
+            ),
+            learning,
+        )
+        self.assertEqual(
+            recovery_director.get_buzz_context(
+                self.director, "context_authority_recovery"
+            ),
+            context,
+        )
+        self.assertEqual(
+            recovery_director.get_buzz_context_state(
+                self.director, "context_authority_recovery"
+            ),
+            "archived",
+        )
+        self.assertEqual(
+            recovery_director.get_buzz_decision(
+                self.director, "decision_authority_recovery"
+            ),
+            decision,
+        )
+        restored_queue = recovery_director.work_queue()
+        restored_work = restored_queue.get(
+            self.director, "work_authority_recovery"
+        )
+        self.assertEqual(restored_work["state"], "DEAD_LETTER")
+        self.assertEqual(
+            restored_work["dispositions"][-1]["evidence_ref"],
+            "evidence://recovery/dead-letter-reviewed",
+        )
+        self.assertEqual(
+            restored_queue.cancellation_receipt(
+                self.director, queue_receipt["queue_cancellation_receipt_id"]
+            ),
+            queue_receipt,
+        )
+        audit_types = {
+            event["event_type"]
+            for event in recovery_director.audit_events(self.director)
+        }
+        self.assertIn("paperclip.approval.recorded", audit_types)
+        self.assertIn("paperclip.buzz_decision.recorded", audit_types)
+        self.assertIn("authority.tenant_restored", audit_types)
+        with self.assertRaises(ContractError):
+            recovery_director.restore_tenant_authority(
+                self.director, authority_export
+            )
+
+        closed = recovery_director.close_task(
+            self.director,
+            "issue_authority_recovery",
+            task["content_checksum"],
+            evidence_refs=("evidence_authority_recovery",),
+            approval_id=approval["approval_id"],
+        )
+        self.assertEqual(closed["status"], "done")
+        recovery_host.close()
+        restarted_recovery = _provision_platform_authority_host(
+            recovery_path,
+            deletion_ledger_path=self.deletion_ledger_path,
+            authority_id="fictional_paperclip_approval_authority",
+            approval_signing_key=self.approval_signing_key,
+            initial_time=self.now,
+            principals=self.provisioned_principals,
+        )
+        self.addCleanup(restarted_recovery.close)
+        restarted_director = restarted_recovery.client(self.director)
+        self.assertEqual(
+            restarted_director.get_task(
+                self.director, "issue_authority_recovery"
+            ),
+            closed,
+        )
+        self.assertEqual(
+            restarted_recovery.client(self.foreign_director).get_task(
+                self.foreign_director, "issue_target_ember"
+            ),
+            target_foreign_task,
+        )
+        restarted_recovery.close()
+
+        manifest = self.paperclip.prepare_tenant_offboarding(self.director)
+        self.paperclip.offboard_tenant(
+            self.director,
+            expected_authority_manifest_checksum=manifest[
+                "authority_manifest_checksum"
+            ],
+            evidence_ref="evidence://recovery/final-offboarding",
+        )
+        blocked_path = self.database_path.with_name(
+            "authority-recovery-after-offboarding.sqlite3"
+        )
+        blocked_host = _provision_platform_authority_host(
+            blocked_path,
+            deletion_ledger_path=self.deletion_ledger_path,
+            authority_id="fictional_paperclip_approval_authority",
+            approval_signing_key=self.approval_signing_key,
+            initial_time=self.now,
+            principals=self.provisioned_principals,
+        )
+        self.addCleanup(blocked_host.close)
+        with self.assertRaises(AuthorizationError):
+            blocked_host.client(self.director).restore_tenant_authority(
+                self.director, authority_export
+            )
+        self.assertEqual(
+            self.foreign_paperclip.get_task(
+                self.foreign_director, "issue_recovery_ember"
+            ),
+            foreign_task,
+        )
 
     def test_full_local_tenant_offboarding_is_coordinated_and_durable(self) -> None:
         self.paperclip.create_task(
