@@ -150,13 +150,15 @@ class PaperclipHTTPTransport:
     ) -> Any:
         if method not in {"GET", "POST", "PATCH"} or not path.startswith("/api/"):
             raise IntegrationError("Paperclip operation is not admitted")
-        parts = path.removeprefix("/api/").split("/")
+        parsed_path = urllib.parse.urlsplit(path)
         if (
-            method == "POST"
-            and len(parts) == 3
-            and parts[0] == "approvals"
-            and parts[2] in {"approve", "reject"}
+            parsed_path.query
+            or parsed_path.fragment
+            or parsed_path.path != path
+            or "%" in path
         ):
+            raise IntegrationError("Paperclip query routes are not admitted")
+        if method == "POST" and parsed_path.path.startswith("/api/approvals/"):
             raise IntegrationError("Paperclip board operation requires board transport")
         return self._request_json(method, path, payload)
 
@@ -546,7 +548,7 @@ def _validate_buzz_arguments(arguments: Sequence[str]) -> list[str]:
     ):
         raise IntegrationError("Buzz command flags are invalid")
     if any(
-        not isinstance(value, str) or value.startswith("--") for value in values
+        not isinstance(value, str) or value.startswith("-") for value in values
     ):
         raise IntegrationError("Buzz command values are invalid")
     if len(flags) != len(set(flags)):

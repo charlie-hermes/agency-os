@@ -16,6 +16,15 @@ from .contracts import (
     make_publication_manifest,
 )
 from .gateway import GatewayDenied, MockPublisher
+from .fictional_platforms import (
+    InMemoryPaperclipBoardTransport,
+    InMemoryPaperclipTransport,
+)
+from .integrations import (
+    PaperclipBoardApprovalAdapter,
+    PaperclipBrandBinding,
+    PaperclipLifecycleAdapter,
+)
 from .gateway_host import (
     _authority_enrollment_for_process,
     _provision_authority_gateway_host,
@@ -90,6 +99,9 @@ def prepare_fictional_article(
         "qa": Principal("agent_qa", "editorial-integrity-qa", brand_id),
         "director": Principal("agent_director", "agency-director", brand_id),
         "approver": Principal("human_owner", "human-approver", brand_id),
+        "paperclip": Principal(
+            "paperclip_board_observer", "paperclip-board-observer", brand_id
+        ),
         "publisher": Principal(
             "agent_publisher", "publishing-operator", brand_id
         ),
@@ -452,19 +464,49 @@ def run_fictional_article() -> VerticalSliceResult:
     prepared = prepare_fictional_article()
     now = prepared.prepared_at
     manifest = prepared.records["manifest"]
+    binding = PaperclipBrandBinding(
+        "00000000-0000-4000-8000-000000000001", manifest["brand_id"]
+    )
+    transport = InMemoryPaperclipTransport(
+        company_id=binding.company_id, brand_id=binding.brand_id
+    )
+    lifecycle = PaperclipLifecycleAdapter(transport, binding)
+    board = PaperclipBoardApprovalAdapter(
+        InMemoryPaperclipBoardTransport(transport), binding
+    )
+    task = lifecycle.create_task(
+        title="Approve fictional article manifest",
+        campaign_id=manifest["campaign_id"],
+        stage="publication",
+        acceptance_criteria=["exact manifest is board-approved"],
+        idempotency_key="legacy-fictional-approval",
+    )
+    requested = lifecycle.request_approval(
+        issue_ids=[task["id"]], manifest=manifest
+    )
+    board.decide_approval(
+        requested["id"],
+        decision="approve",
+        decision_note="Fictional board approved exact sandbox manifest",
+    )
+    observed = lifecycle.get_approval(requested["id"])
+    approval_issues = lifecycle.get_approval_issues(observed["id"])
     paperclip_evidence = finalize_record(
         {
             "schema_version": "1.0",
             "artifact_type": "paperclip_approval_evidence",
             "brand_id": manifest["brand_id"],
-            "company_id": "00000000-0000-4000-8000-000000000001",
-            "paperclip_approval_id": "00000000-0000-4000-8000-000000000901",
-            "status": "approved",
-            "issue_ids": ["00000000-0000-4000-8000-000000000107"],
-            "manifest_checksum": manifest["content_checksum"],
+            "company_id": binding.company_id,
+            "paperclip_approval_id": observed["id"],
+            "status": observed["status"],
+            "issue_ids": [item["id"] for item in approval_issues],
+            "manifest_checksum": observed["payload"]["content_checksum"],
+            "decision_note": observed.get("decisionNote"),
+            "observed_by": prepared.principals["paperclip"].actor_id,
             "observed_at": now.isoformat(),
         }
     )
+    prepared.store.put(prepared.principals["paperclip"], paperclip_evidence)
     prepared.records["paperclip_approval_evidence"] = paperclip_evidence
 
     approval = make_approval_record(

@@ -11,6 +11,7 @@ import hashlib
 import json
 from datetime import datetime, timezone
 from typing import Any, Iterable, Mapping
+from uuid import UUID
 
 
 class ContractError(ValueError):
@@ -215,6 +216,18 @@ def make_approval_record(
     )
     if not all(isinstance(value, str) and value for value in paperclip_evidence):
         raise ContractError("Paperclip approval evidence is required")
+    try:
+        UUID(paperclip_approval_id)
+        if (
+            not paperclip_approval_evidence_checksum.startswith("sha256:")
+            or len(paperclip_approval_evidence_checksum) != 71
+        ):
+            raise ValueError("invalid evidence checksum")
+        bytes.fromhex(
+            paperclip_approval_evidence_checksum.removeprefix("sha256:")
+        )
+    except (TypeError, ValueError) as exc:
+        raise ContractError("Paperclip approval evidence is invalid") from exc
     record["paperclip_approval_id"] = paperclip_approval_id
     record["paperclip_approval_evidence_checksum"] = (
         paperclip_approval_evidence_checksum

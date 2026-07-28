@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 from datetime import datetime, timezone
 from typing import Any, Callable, Mapping
+from uuid import UUID
 
 from .capabilities import (
     CapabilityDispatchError,
@@ -141,11 +142,50 @@ class _AuthorityActionGateway:
                 {"brand_id": principal.brand_id},
                 cause=exc,
             )
+        paperclip_approval_id = approval.get("paperclip_approval_id")
+        evidence_checksum = approval.get("paperclip_approval_evidence_checksum")
+        if not (
+            isinstance(paperclip_approval_id, str)
+            and paperclip_approval_id
+            and isinstance(evidence_checksum, str)
+            and evidence_checksum
+        ):
+            self._deny(
+                "PAPERCLIP_APPROVAL_EVIDENCE_INCOMPLETE", dict(manifest)
+            )
+        try:
+            UUID(paperclip_approval_id)
+            if (
+                not evidence_checksum.startswith("sha256:")
+                or len(evidence_checksum) != 71
+            ):
+                raise ValueError("invalid evidence checksum")
+            bytes.fromhex(evidence_checksum.removeprefix("sha256:"))
+        except (TypeError, ValueError) as exc:
+            self._deny(
+                "PAPERCLIP_APPROVAL_EVIDENCE_INVALID",
+                dict(manifest),
+                cause=exc,
+            )
+        try:
+            paperclip_evidence, paperclip_evidence_provenance = (
+                self._approval_store.resolve_paperclip_approval_evidence(
+                    principal.brand_id, paperclip_approval_id
+                )
+            )
+        except (KeyError, ContractError) as exc:
+            self._deny(
+                "PAPERCLIP_APPROVAL_EVIDENCE_NOT_AUTHORITATIVE",
+                dict(manifest),
+                cause=exc,
+            )
         self._preflight(
             principal,
             manifest,
             approval,
             approval_provenance,
+            paperclip_evidence,
+            paperclip_evidence_provenance,
             capability,
             capability_status,
             current_time,
@@ -312,6 +352,8 @@ class _AuthorityActionGateway:
         manifest: Mapping[str, Any],
         approval: Mapping[str, Any],
         approval_provenance: Mapping[str, str],
+        paperclip_evidence: Mapping[str, Any],
+        paperclip_evidence_provenance: Mapping[str, str],
         capability: Mapping[str, Any],
         capability_status: str,
         now: datetime,
@@ -319,6 +361,7 @@ class _AuthorityActionGateway:
         try:
             verify_record(manifest)
             verify_record(approval)
+            verify_record(paperclip_evidence)
             verify_record(capability)
         except ContractError as exc:
             self._deny("INVALID_CHECKSUM", {"brand_id": principal.brand_id}, cause=exc)
@@ -338,14 +381,48 @@ class _AuthorityActionGateway:
             self._deny("APPROVAL_AUTHORITY_DENIED", dict(manifest))
         if approval.get("decision") != "APPROVED":
             self._deny("NOT_APPROVED", dict(manifest))
-        paperclip_evidence = (
-            approval.get("paperclip_approval_id"),
-            approval.get("paperclip_approval_evidence_checksum"),
-        )
-        if not all(
-            isinstance(value, str) and value for value in paperclip_evidence
+        if (
+            paperclip_evidence_provenance.get("role_id")
+            != "paperclip-board-observer"
+            or paperclip_evidence_provenance.get("actor_id")
+            != paperclip_evidence.get("observed_by")
         ):
-            self._deny("PAPERCLIP_APPROVAL_EVIDENCE_INCOMPLETE", dict(manifest))
+            self._deny(
+                "PAPERCLIP_APPROVAL_EVIDENCE_PROVENANCE_INVALID",
+                dict(manifest),
+            )
+        evidence_bindings = (
+            ("artifact_type", "paperclip_approval_evidence"),
+            ("brand_id", principal.brand_id),
+            ("paperclip_approval_id", approval["paperclip_approval_id"]),
+            (
+                "content_checksum",
+                approval["paperclip_approval_evidence_checksum"],
+            ),
+            ("status", "approved"),
+            ("manifest_checksum", manifest["content_checksum"]),
+        )
+        if any(
+            paperclip_evidence.get(field) != expected
+            for field, expected in evidence_bindings
+        ):
+            self._deny(
+                "PAPERCLIP_APPROVAL_EVIDENCE_MISMATCH", dict(manifest)
+            )
+        issue_ids = paperclip_evidence.get("issue_ids")
+        try:
+            UUID(str(paperclip_evidence.get("company_id")))
+            parse_time(paperclip_evidence["observed_at"])
+            if not isinstance(issue_ids, list) or not issue_ids:
+                raise ValueError("Paperclip issue evidence is empty")
+            for issue_id in issue_ids:
+                UUID(str(issue_id))
+        except (KeyError, TypeError, ValueError, ContractError) as exc:
+            self._deny(
+                "PAPERCLIP_APPROVAL_EVIDENCE_INVALID",
+                dict(manifest),
+                cause=exc,
+            )
         conditions = approval.get("conditions")
         if not isinstance(conditions, list):
             self._deny("APPROVAL_CONDITIONS_INVALID", dict(manifest))

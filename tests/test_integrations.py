@@ -64,11 +64,15 @@ class IntegrationTests(unittest.TestCase):
         with self.assertRaises(IntegrationError):
             transport.request("DELETE", "/api/issues/one")
         approval_id = "00000000-0000-4000-8000-000000000901"
-        with self.assertRaises(IntegrationError):
-            transport.request(
-                "POST", f"/api/approvals/{approval_id}/approve",
-                {"decisionNote": "must use board identity"},
-            )
+        for path in (
+            f"/api/approvals/{approval_id}/approve",
+            f"/api/approvals/{approval_id}/approve?bypass=1",
+        ):
+            with self.assertRaises(IntegrationError):
+                transport.request(
+                    "POST", path,
+                    {"decisionNote": "must use board identity"},
+                )
 
         board_captured = {}
 
@@ -200,6 +204,7 @@ class IntegrationTests(unittest.TestCase):
             ["messages", "get", "--channel", "c1", "--channel", "c2"],
             ["messages", "send", "--broadcast"],
             ["messages", "send", "--channel", "c1", "--content", "--broadcast"],
+            ["messages", "send", "--channel", "c1", "--content", "-b"],
         )
         for arguments in denied:
             with self.assertRaises(IntegrationError):

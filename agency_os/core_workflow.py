@@ -217,9 +217,11 @@ def run_core_workflow(
             "issue_ids": [item["id"] for item in approval_issues],
             "manifest_checksum": manifest["content_checksum"],
             "decision_note": approval.get("decisionNote"),
+            "observed_by": prepared.principals["paperclip"].actor_id,
             "observed_at": decided_at.isoformat(),
         }
     )
+    prepared.store.put(prepared.principals["paperclip"], approval_evidence)
     records["paperclip_approval_evidence"] = approval_evidence
     gateway_approval = make_approval_record(
         approval_id="approval_guide_v1",

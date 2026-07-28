@@ -7,6 +7,7 @@ from agency_os.contracts import (
     ContractError,
     canonical_checksum,
     finalize_record,
+    make_approval_record,
     make_publication_manifest,
     verify_record,
 )
@@ -24,6 +25,21 @@ class ContractTests(unittest.TestCase):
         record["brand_id"] = "brand_b"
         with self.assertRaises(ContractError):
             verify_record(record)
+
+    def test_approval_rejects_malformed_paperclip_evidence_binding(self) -> None:
+        result = run_fictional_article()
+        manifest = result.records["manifest"]
+        with self.assertRaises(ContractError):
+            make_approval_record(
+                approval_id="approval_invalid_evidence",
+                manifest=manifest,
+                approver_id="human_owner",
+                authority_role="brand_owner",
+                decided_at=result.records["approval"]["decided_at"],
+                expires_at=result.records["approval"]["expires_at"],
+                paperclip_approval_id="not-a-uuid",
+                paperclip_approval_evidence_checksum="not-a-checksum",
+            )
 
     def test_manifest_excludes_internal_notes(self) -> None:
         result = run_fictional_article()
