@@ -91,6 +91,8 @@
         "conditions",
         "decided_at",
         "expires_at",
+        "paperclip_approval_id",
+        "paperclip_approval_evidence_checksum",
         "content_checksum"
       ],
       "properties": {
@@ -112,6 +114,8 @@
         "conditions": {"type": "array"},
         "decided_at": {"type": "string", "format": "date-time"},
         "expires_at": {"type": "string", "format": "date-time"},
+        "paperclip_approval_id": {"type": "string", "format": "uuid"},
+        "paperclip_approval_evidence_checksum": {"$ref": "#/$defs/Checksum"},
         "content_checksum": {"$ref": "#/$defs/Checksum"}
       }
     },
@@ -128,6 +132,8 @@
         "approval_id",
         "approval_checksum",
         "artifact_id",
+        "paperclip_approval_id",
+        "paperclip_approval_evidence_checksum",
         "artifact_checksum",
         "destination_ref",
         "environment",
@@ -152,6 +158,8 @@
         "manifest_checksum": {"$ref": "#/$defs/Checksum"},
         "approval_id": {"type": "string"},
         "approval_checksum": {"$ref": "#/$defs/Checksum"},
+        "paperclip_approval_id": {"type": "string", "format": "uuid"},
+        "paperclip_approval_evidence_checksum": {"$ref": "#/$defs/Checksum"},
         "artifact_id": {"type": "string"},
         "artifact_checksum": {"$ref": "#/$defs/Checksum"},
         "destination_ref": {"type": "string"},

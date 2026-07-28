@@ -18,6 +18,7 @@ class WorkflowTests(unittest.TestCase):
             "qa_verdict",
             "qa_package",
             "manifest",
+            "paperclip_approval_evidence",
             "approval",
             "receipt",
             "performance",
@@ -31,6 +32,15 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(result.records["receipt"]["state"], "PUBLISHED")
         self.assertEqual(result.publisher.calls, 1)
         self.assertTrue(result.records["receipt"]["validation"]["matches_manifest"])
+        evidence = result.records["paperclip_approval_evidence"]
+        approval = result.records["approval"]
+        receipt = result.records["receipt"]
+        self.assertEqual(approval["paperclip_approval_id"], evidence["paperclip_approval_id"])
+        self.assertEqual(
+            approval["paperclip_approval_evidence_checksum"],
+            evidence["content_checksum"],
+        )
+        self.assertEqual(receipt["paperclip_approval_id"], approval["paperclip_approval_id"])
         self.assertEqual(
             result.records["performance"]["conclusion_class"],
             "insufficient_evidence",

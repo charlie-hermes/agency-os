@@ -43,6 +43,7 @@ ROLE_WRITES: dict[str, frozenset[str]] = {
         {"performance_snapshot", "candidate_learning", "failure_observation"}
     ),
     "human-approver": frozenset({"approval_record"}),
+    "paperclip-board-observer": frozenset({"paperclip_approval_evidence"}),
 }
 
 ROLE_READS: dict[str, frozenset[str]] = {
@@ -80,11 +81,13 @@ ROLE_READS: dict[str, frozenset[str]] = {
         }
     ),
     "human-approver": frozenset({"publication_manifest", "approval_record"}),
+    "paperclip-board-observer": frozenset({"paperclip_approval_evidence"}),
 }
 
 RECORD_ID_FIELDS: dict[str, str] = {
     "publication_manifest": "manifest_id",
     "approval_record": "approval_id",
+    "paperclip_approval_evidence": "paperclip_approval_id",
     "publication_receipt": "receipt_id",
     "learning_record": "learning_record_id",
     "learning_context_manifest": "context_manifest_id",
@@ -133,6 +136,14 @@ class TenantStore:
         ):
             self._audit(principal, "write", "DENY_APPROVER_IDENTITY")
             raise AuthorizationError("approval signer does not match authenticated actor")
+        if (
+            record_type == "paperclip_approval_evidence"
+            and record.get("observed_by") != principal.actor_id
+        ):
+            self._audit(principal, "write", "DENY_OBSERVER_IDENTITY")
+            raise AuthorizationError(
+                "Paperclip observer does not match authenticated actor"
+            )
         record_id = self._record_id(record)
         new_record = copy.deepcopy(dict(record))
         with self._lock:
@@ -187,6 +198,30 @@ class TenantStore:
         verify_record(record)
         if self._record_id(record) != approval_id:
             raise ContractError("stored approval key does not match approval id")
+        return record, provenance
+
+    def resolve_paperclip_approval_evidence(
+        self, brand_id: str, paperclip_approval_id: str
+    ) -> tuple[dict[str, Any], dict[str, str]]:
+        """Resolve immutable Paperclip evidence plus observer provenance."""
+        with self._lock:
+            record = copy.deepcopy(
+                self._records.get(brand_id, {}).get(paperclip_approval_id)
+            )
+            provenance = copy.deepcopy(
+                self._provenance.get(brand_id, {}).get(paperclip_approval_id)
+            )
+        if (
+            record is None
+            or provenance is None
+            or record.get("artifact_type") != "paperclip_approval_evidence"
+        ):
+            raise KeyError(paperclip_approval_id)
+        verify_record(record)
+        if self._record_id(record) != paperclip_approval_id:
+            raise ContractError(
+                "stored Paperclip evidence key does not match approval id"
+            )
         return record, provenance
 
     def snapshot(self, principal: Principal) -> bytes:

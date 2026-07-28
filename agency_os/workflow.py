@@ -16,6 +16,15 @@ from .contracts import (
     make_publication_manifest,
 )
 from .gateway import GatewayDenied, MockPublisher
+from .fictional_platforms import (
+    InMemoryPaperclipBoardTransport,
+    InMemoryPaperclipTransport,
+)
+from .integrations import (
+    PaperclipBoardApprovalAdapter,
+    PaperclipBrandBinding,
+    PaperclipLifecycleAdapter,
+)
 from .gateway_host import (
     _authority_enrollment_for_process,
     _provision_authority_gateway_host,
@@ -31,6 +40,19 @@ class VerticalSliceResult:
     store: TenantStore
     publisher: MockPublisher
     records: dict[str, dict[str, Any]]
+
+
+@dataclass
+class PreparedVerticalSlice:
+    """Publication-ready artifacts that have not crossed the gateway."""
+
+    store: TenantStore
+    publisher: MockPublisher
+    records: dict[str, dict[str, Any]]
+    principals: dict[str, Principal]
+    capability_registry: CapabilityRegistry
+    capability: dict[str, Any]
+    prepared_at: datetime
 
 
 def _fictional_publish_worker(control: Any) -> None:
@@ -51,13 +73,19 @@ def _fictional_publish_worker(control: Any) -> None:
         control.close()
 
 
-def run_fictional_article() -> VerticalSliceResult:
+def prepare_fictional_article(
+    *,
+    issue_id: str = "00000000-0000-4000-8000-000000000107",
+    publisher: MockPublisher | None = None,
+) -> PreparedVerticalSlice:
+    """Build the exact publication candidate without performing a write."""
+
     brand_id = "brand_lantern"
     campaign_id = "camp_summer"
     asset_id = "asset_guide"
-    issue_id = "pc_100"
     store = TenantStore()
     records: dict[str, dict[str, Any]] = {}
+    publisher = publisher or MockPublisher()
 
     principals = {
         "steward": Principal("agent_steward", "brand-brief-steward", brand_id),
@@ -71,6 +99,9 @@ def run_fictional_article() -> VerticalSliceResult:
         "qa": Principal("agent_qa", "editorial-integrity-qa", brand_id),
         "director": Principal("agent_director", "agency-director", brand_id),
         "approver": Principal("human_owner", "human-approver", brand_id),
+        "paperclip": Principal(
+            "paperclip_board_observer", "paperclip-board-observer", brand_id
+        ),
         "publisher": Principal(
             "agent_publisher", "publishing-operator", brand_id
         ),
@@ -249,17 +280,6 @@ def run_fictional_article() -> VerticalSliceResult:
     store.put(principals["director"], manifest)
     records["manifest"] = manifest
 
-    approval = make_approval_record(
-        approval_id="approval_guide_v1",
-        manifest=manifest,
-        approver_id="human_owner",
-        authority_role="brand_owner",
-        decided_at=now.isoformat(),
-        expires_at=(now + timedelta(minutes=30)).isoformat(),
-    )
-    store.put(principals["approver"], approval)
-    records["approval"] = approval
-
     capability_registry = CapabilityRegistry()
     capability = make_capability_record(
         capability_id="cap_mock_publish",
@@ -277,8 +297,44 @@ def run_fictional_article() -> VerticalSliceResult:
         expires_at=(now + timedelta(minutes=30)).isoformat(),
     )
     capability_registry.register(principals["director"], capability)
-    publisher = MockPublisher()
+    return PreparedVerticalSlice(
+        store=store,
+        publisher=publisher,
+        records=records,
+        principals=principals,
+        capability_registry=capability_registry,
+        capability=capability,
+        prepared_at=now,
+    )
+
+
+def dispatch_prepared_article(
+    prepared: PreparedVerticalSlice,
+    *,
+    approval: dict[str, Any],
+    idempotency_key: str = "idem_guide_v1",
+) -> VerticalSliceResult:
+    """Dispatch only an externally supplied, exact-manifest approval."""
+
+    store = prepared.store
+    publisher = prepared.publisher
+    records = prepared.records
+    principals = prepared.principals
+    capability_registry = prepared.capability_registry
+    capability = prepared.capability
+    now = prepared.prepared_at
+    manifest = records["manifest"]
+    if approval.get("decision") != "APPROVED":
+        raise GatewayDenied("APPROVAL_DECISION_INVALID")
+    if approval.get("manifest_checksum") != manifest["content_checksum"]:
+        raise GatewayDenied("APPROVAL_MANIFEST_DRIFT")
+    store.put(principals["approver"], approval)
+    records["approval"] = approval
+
     context = multiprocessing.get_context("spawn")
+    brand_id = manifest["brand_id"]
+    campaign_id = manifest["campaign_id"]
+    asset_id = manifest["asset_id"]
     authority_control, worker_control = context.Pipe(duplex=True)
     worker = context.Process(
         target=_fictional_publish_worker, args=(worker_control,), daemon=True
@@ -307,7 +363,7 @@ def run_fictional_article() -> VerticalSliceResult:
                 "socket_path": host.socket_path,
                 "manifest": manifest,
                 "approval_id": approval["approval_id"],
-                "idempotency_key": "idem_guide_v1",
+                "idempotency_key": idempotency_key,
             }
         )
         if not authority_control.poll(5):
@@ -400,3 +456,69 @@ def run_fictional_article() -> VerticalSliceResult:
     store.put(principals["director"], learning_record)
     records["learning_record"] = learning_record
     return VerticalSliceResult(store=store, publisher=publisher, records=records)
+
+
+def run_fictional_article() -> VerticalSliceResult:
+    """Run the legacy fixture through the same explicit dispatch boundary."""
+
+    prepared = prepare_fictional_article()
+    now = prepared.prepared_at
+    manifest = prepared.records["manifest"]
+    binding = PaperclipBrandBinding(
+        "00000000-0000-4000-8000-000000000001", manifest["brand_id"]
+    )
+    transport = InMemoryPaperclipTransport(
+        company_id=binding.company_id, brand_id=binding.brand_id
+    )
+    lifecycle = PaperclipLifecycleAdapter(transport, binding)
+    board = PaperclipBoardApprovalAdapter(
+        InMemoryPaperclipBoardTransport(transport), binding
+    )
+    task = lifecycle.create_task(
+        title="Approve fictional article manifest",
+        campaign_id=manifest["campaign_id"],
+        stage="publication",
+        acceptance_criteria=["exact manifest is board-approved"],
+        idempotency_key="legacy-fictional-approval",
+    )
+    requested = lifecycle.request_approval(
+        issue_ids=[task["id"]], manifest=manifest
+    )
+    board.decide_approval(
+        requested["id"],
+        decision="approve",
+        decision_note="Fictional board approved exact sandbox manifest",
+    )
+    observed = lifecycle.get_approval(requested["id"])
+    approval_issues = lifecycle.get_approval_issues(observed["id"])
+    paperclip_evidence = finalize_record(
+        {
+            "schema_version": "1.0",
+            "artifact_type": "paperclip_approval_evidence",
+            "brand_id": manifest["brand_id"],
+            "company_id": binding.company_id,
+            "paperclip_approval_id": observed["id"],
+            "status": observed["status"],
+            "issue_ids": [item["id"] for item in approval_issues],
+            "manifest_checksum": observed["payload"]["content_checksum"],
+            "decision_note": observed.get("decisionNote"),
+            "observed_by": prepared.principals["paperclip"].actor_id,
+            "observed_at": now.isoformat(),
+        }
+    )
+    prepared.store.put(prepared.principals["paperclip"], paperclip_evidence)
+    prepared.records["paperclip_approval_evidence"] = paperclip_evidence
+
+    approval = make_approval_record(
+        approval_id="approval_guide_v1",
+        manifest=manifest,
+        approver_id="human_owner",
+        authority_role="brand_owner",
+        decided_at=now.isoformat(),
+        expires_at=(now + timedelta(minutes=30)).isoformat(),
+        paperclip_approval_id=paperclip_evidence["paperclip_approval_id"],
+        paperclip_approval_evidence_checksum=paperclip_evidence[
+            "content_checksum"
+        ],
+    )
+    return dispatch_prepared_article(prepared, approval=approval)

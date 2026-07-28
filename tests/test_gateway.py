@@ -11,6 +11,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from uuid import NAMESPACE_URL, uuid5
 
 import agency_os
 from agency_os.capabilities import CapabilityRegistry, SQLiteCapabilityRegistry
@@ -271,6 +272,7 @@ class GatewayTests(unittest.TestCase):
         flow = run_fictional_article()
         self.manifest = flow.records["manifest"]
         self.approval = flow.records["approval"]
+        self.paperclip_evidence = flow.records["paperclip_approval_evidence"]
         self.store = flow.store
         self.principal = Principal(
             "agent_publisher", "publishing-operator", "brand_lantern"
@@ -368,6 +370,23 @@ class GatewayTests(unittest.TestCase):
             approval["approver_id"], "human-approver", approval["brand_id"]
         )
         self.store.put(approver, approval)
+
+    def _bind_paperclip_evidence(
+        self, manifest: dict, fixture_id: str
+    ) -> tuple[str, str]:
+        evidence = copy.deepcopy(self.paperclip_evidence)
+        evidence["paperclip_approval_id"] = str(
+            uuid5(NAMESPACE_URL, fixture_id)
+        )
+        evidence["manifest_checksum"] = manifest["content_checksum"]
+        evidence = finalize_record(evidence)
+        observer = Principal(
+            evidence["observed_by"],
+            "paperclip-board-observer",
+            evidence["brand_id"],
+        )
+        self.store.put(observer, evidence)
+        return evidence["paperclip_approval_id"], evidence["content_checksum"]
 
     def _runtime_observation(self, **changes) -> RuntimeObservation:
         values = {
@@ -922,9 +941,14 @@ class GatewayTests(unittest.TestCase):
         }
         manifest = finalize_record(manifest)
         approval = copy.deepcopy(self.approval)
+        paperclip_id, evidence_checksum = self._bind_paperclip_evidence(
+            manifest, "approval_short_schedule"
+        )
         approval.update(
             {
                 "approval_id": "approval_short_schedule",
+                "paperclip_approval_id": paperclip_id,
+                "paperclip_approval_evidence_checksum": evidence_checksum,
                 "manifest_checksum": manifest["content_checksum"],
                 "schedule_window": copy.deepcopy(manifest["schedule_window"]),
                 "decided_at": (self.now - timedelta(minutes=1)).isoformat(),
@@ -978,9 +1002,18 @@ class GatewayTests(unittest.TestCase):
                         "ends_at": (self.now + timedelta(seconds=1)).isoformat(),
                     }
                     manifest = finalize_record(manifest)
+                    paperclip_id, evidence_checksum = (
+                        self._bind_paperclip_evidence(
+                            manifest, "approval_final_schedule"
+                        )
+                    )
                     approval.update(
                         {
                             "approval_id": "approval_final_schedule",
+                            "paperclip_approval_id": paperclip_id,
+                            "paperclip_approval_evidence_checksum": (
+                                evidence_checksum
+                            ),
                             "manifest_checksum": manifest["content_checksum"],
                             "schedule_window": copy.deepcopy(
                                 manifest["schedule_window"]
@@ -1188,6 +1221,50 @@ class GatewayTests(unittest.TestCase):
                     approval_id=approval_id,
                     idempotency_key=approval_id,
                 )
+        self.assertEqual(self.publisher.calls, 0)
+
+    def test_forged_paperclip_evidence_is_denied_without_dispatch(self) -> None:
+        approval = copy.deepcopy(self.approval)
+        approval["approval_id"] = "approval_forged_paperclip_evidence"
+        approval["paperclip_approval_id"] = (
+            "00000000-0000-4000-8000-000000009999"
+        )
+        approval["paperclip_approval_evidence_checksum"] = f"sha256:{'f' * 64}"
+        approval = finalize_record(approval)
+        self._persist_approval(approval)
+
+        with self.assertRaises(GatewayDenied) as denied:
+            self.gateway.publish(
+                manifest=self.manifest,
+                approval_id=approval["approval_id"],
+                idempotency_key="forged-paperclip-evidence",
+            )
+
+        self.assertEqual(
+            str(denied.exception),
+            "PAPERCLIP_APPROVAL_EVIDENCE_NOT_AUTHORITATIVE",
+        )
+        self.assertEqual(self.publisher.calls, 0)
+
+    def test_missing_paperclip_evidence_is_denied_without_dispatch(self) -> None:
+        approval = copy.deepcopy(self.approval)
+        approval["approval_id"] = "approval_missing_paperclip_evidence"
+        approval.pop("paperclip_approval_id")
+        approval.pop("paperclip_approval_evidence_checksum")
+        approval = finalize_record(approval)
+        self._persist_approval(approval)
+
+        with self.assertRaises(GatewayDenied) as denied:
+            self.gateway.publish(
+                manifest=self.manifest,
+                approval_id=approval["approval_id"],
+                idempotency_key="missing-paperclip-evidence",
+            )
+
+        self.assertEqual(
+            str(denied.exception),
+            "PAPERCLIP_APPROVAL_EVIDENCE_INCOMPLETE",
+        )
         self.assertEqual(self.publisher.calls, 0)
 
     def test_cross_brand_approval_reference_is_denied(self) -> None:

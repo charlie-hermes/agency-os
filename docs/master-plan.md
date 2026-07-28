@@ -152,7 +152,7 @@ real role and tenant.
 
 ### Gate 5 — authoritative platform adapters and tenant data foundation
 
-**Status:** in progress.
+**Status:** candidate complete; retention merged, integration slice pending merge.
 
 The first fictional local slice adds an independently started Platform Authority
 host that alone owns Paperclip-shaped SQLite state, the approval signer and
@@ -267,27 +267,36 @@ gate `30346643950` with 115 tests and no real external write.
 `830b402195f963341c1dbe1e07cc671abb350d75`, and post-merge Ubuntu repository
 gate `30348732163` with 116 tests and no real external write.
 
-Implement:
+**Merged eighth-slice evidence:** PR #13, reviewed commit
+`c20e29055095947b08f1c05fe77cc08a66e0ee98`, merge commit
+`d6e0b27462125ac7208b6c867e09611afa67b0cc`, and Ubuntu repository gate
+`30355458531` with 118 tests and no real external write.
 
-- a Paperclip adapter for typed tasks, dependencies, approvals, budgets and
-  closure;
-- a typed Buzz context/decision adapter that writes decisions back to
-  Paperclip;
-- production deployment and isolation of the protected evidence, artifact and
-  learning stores;
-- audit events, traces and actionable failure records;
-- deployed multi-host queue storage, cancellation, failover and authenticated
-  destination reconciliation beyond the fictional local queue;
-- backup, restore, retention, export and destructive offboarding drills; and
-- verified runtime bundles for each role, including fresh-session load and
-  denial evidence.
+The rebaselined Gate 5 exit is intentionally bounded to:
+
+- exact typed lifecycle adapters for the installed Paperclip issue, approval and
+  cost routes;
+- a separate board decision transport, UUID-valid native records and an immutable
+  one-company-per-brand binding;
+- Paperclip-authoritative Buzz decision write-back, a strict command/flag
+  allowlist, credential-minimising transports and actionable failures;
+- the already-proven single-host tenant, evidence, artifact, learning, queue,
+  audit, recovery and offboarding controls; and
+- checksum-bound bundle candidates and fresh-process checksum verification for
+  all eight Core roles, without claiming target runtime loading.
+
+Authenticated target-service mutations and Hermes fresh-session loads remain
+activation evidence, not claims made by the repository. Production store
+deployment, multi-host failover, production retention scheduling, backup
+expiry, media erasure and recovery-objective drills move to Gate 12. This
+rebaseline is recorded in `docs/delivery-rebaseline.md`.
 
 Host versions, paths and installed services must be recorded from the actual
 target VM before activation claims are made.
 
 ### Gate 6 — governed product-decision workshop
 
-**Status:** pending Gate 5; design recommendation received.
+**Status:** time-boxed owner decision packet; parallel and non-blocking for Gate 7.
 
 Use OpenAI Responses API and Agents SDK for structured, evidence-backed
 research behind a self-owned, read-only Agency OS Decision MCP broker.
@@ -329,9 +338,13 @@ The independent recommendation was checked against primary documentation:
 - [LangGraph persistence](https://docs.langchain.com/oss/javascript/langgraph/persistence)
 - [MCP authorization specification](https://modelcontextprotocol.io/specification/2025-06-18/basic/authorization)
 
+Do not build additional Decision MCP control-plane depth now. Capture only the
+owner choices needed before Gate 11 in a checksum-bound Paperclip decision
+packet, using cited research when a choice is actually due.
+
 ### Gate 7 — complete fictional Search Authority Core slice
 
-**Status:** pending Gates 5 and 6.
+**Status:** candidate complete; pending merge and target-runtime activation evidence.
 
 Run one article or landing page through live Paperclip work:
 
@@ -347,6 +360,16 @@ Run one article or landing page through live Paperclip work:
 10. a validated, freshness-limited learning record.
 
 The existing reference flow is test scaffolding, not completion of this gate.
+
+The Lantern candidate now proves all ten stages on the installed Paperclip/Buzz
+adapter contracts, including a checksum-bound `REVISE` then `PASS`, exact human
+board approval before one protected mock publication, and a receipt that binds
+the Paperclip approval ID and evidence checksum. Rejected, pending and altered
+approvals all leave the publisher call count at zero. Measurement, optimisation,
+learning and closure cover eight role-owned Paperclip tasks through a
+transport-opaque engine and campaign-scoped operator projection. The remaining
+activation evidence is authenticated target-service execution and fresh-session
+loading by an installed Hermes runtime; neither is claimed by local tests.
 
 ### Gate 8 — optional fictional Social Amplifier
 
@@ -397,6 +420,11 @@ acceptance evidence, rollback instructions, independent approval and owner
 activation. Validate the complete workflow in the operator interface, API,
 Paperclip, storage, external destination and measured response.
 
+This gate now also owns production multi-host authority/queue failover,
+retention scheduling and expiry, backup expiry, media erasure, deployed
+deletion-ledger replication and measured recovery objectives deferred from the
+rebaselined Gate 5.
+
 ## Product decisions reserved for the owner
 
 The system can progress through fictional gates before these are required.
@@ -418,13 +446,12 @@ governed DecisionPacket workshop.
 
 ## Current checkpoint
 
-- Approved base: `main` after the merged seventh Gate 5 fictional Platform
-  Authority slice.
-- Active gate: Gate 5, authoritative platform adapters and tenant data
-  foundation; local audit-retention policy and tenant-scoped telemetry are the
-  current slice after complete logical tenant export/recovery.
-- Next dependent work: finish Gate 5, then Gate 6 governed product decisions
-  and Gate 7 full fictional Core workflow.
-- Explicit guardrail: finish the bounded safety gate, then advance the agency
-  workflow. Do not keep polishing the mock publication gateway in place of
-  proving the product.
+- Approved base: `main` after merged PR #13, the eighth bounded Gate 5 slice.
+- Active candidate: exact Paperclip/Buzz bindings, complete fictional Lantern
+  Core proof, eight checksum-bound role bundles and a thin read-only operator
+  projection.
+- Next dependent work after merge: load the exact bundles into an installed
+  target Hermes runtime and run the Core proof against authorised fictional
+  Paperclip/Buzz target workspaces; complete owner decisions in parallel.
+- Explicit guardrail: do not proceed with speculative control-plane depth,
+  Social Amplifier, live provider integrations or the full operator portal.

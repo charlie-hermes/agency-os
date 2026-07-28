@@ -61,13 +61,25 @@ class RepositoryContractTests(unittest.TestCase):
             "FailureObservation",
             "CandidateLearning",
             "LearningRecord",
+            "BrandProfile",
+            "CampaignBrief",
+            "SourceObservation",
+            "ResearchPack",
+            "ContentPlan",
+            "ContentBrief",
+            "QAVerdict",
+            "ValidationReport",
+            "PerformanceSnapshot",
+            "OptimisationProposal",
+            "RuntimeBundle",
+            "OperatorProjection",
         }
         self.assertTrue(expected.issubset(definitions))
 
     def test_acceptance_matrix_commands_are_release_blocking(self) -> None:
         matrix = json.loads((ROOT / "acceptance/matrix.json").read_text())
         self.assertEqual(
-            matrix["candidate_phase"], "gate-5-foundation-fictional"
+            matrix["candidate_phase"], "gate-7-core-fictional"
         )
         self.assertGreaterEqual(len(matrix["criteria"]), 10)
         for criterion in matrix["criteria"]:

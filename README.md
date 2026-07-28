@@ -3,7 +3,7 @@
 Agency OS is a contract-first, tenant-isolated reference implementation of the
 Hermes + Paperclip digital marketing agency design.
 
-This fictional reference deliberately does five things:
+This fictional reference deliberately does six things:
 
 1. preserves the verified 12-role source library and implementation blueprint;
 2. reconciles the role, artifact, approval, learning, security, and operations
@@ -17,11 +17,16 @@ This fictional reference deliberately does five things:
    exact-manifest coordinated local tenant offboarding, and complete attested
    logical tenant export/restore, plus crash-recoverable versioned local
    audit-retention policy and content-free tenant telemetry; and
-5. admits one exact installed Paperclip/Buzz command contract from read-only,
-   checksum-pinned target-host evidence while failing closed on drift.
+5. implements injectable Paperclip lifecycle and separate board-decision
+   transports plus a strict Buzz command allowlist, all pinned to the reviewed
+   target-host contract and fail-closed on drift; and
+6. proves the complete Lantern Search Authority Core workflow, including a real
+   reject/revise path and exact Paperclip board approval before sandbox
+   publication; the receipt binds that approval's ID and evidence checksum before
+   measurement, learning and closure across eight checksum-bound Core roles.
 
-It does **not** install agents on a VM, make authenticated platform mutations,
-connect real client data, call a real provider, or publish externally.
+It does **not** claim Hermes target activation, make authenticated target-service
+mutations, connect real client data, call a real provider, or publish externally.
 
 ## Repository map
 
@@ -50,6 +55,14 @@ connect real client data, call a real provider, or publish externally.
 - `config/installed-platforms.json` — non-secret, read-only target-host version,
   executable/unit checksum, service, health, exact API and Buzz command evidence.
 - `scripts/verify-installed-platforms` — explicit read-only live drift check.
+- `config/runtime-bundles.json` — exact `AGENTS.md`/`SOUL.md` checksums for the
+  eight Core runtime bundle candidates; fresh-process checksum verification is
+  distinct from still-pending Hermes activation.
+- `agency_os/integrations.py` — private Paperclip HTTP and installed Buzz CLI
+  transports behind tenant-scoped lifecycle, board and collaboration adapters.
+- `agency_os/core_workflow.py` — injectable, transport-opaque Core orchestration
+  and campaign-ID-scoped Paperclip operator projection.
+- `docs/delivery-rebaseline.md` — product-first Gate 5–7 scope decision.
 - `fixtures/` — fictional tenant input.
 - `acceptance/matrix.json` — release criteria mapped to executable evidence.
 - `tests/` — allowed-path, denied-path, recovery, and vertical-slice tests.
@@ -73,6 +86,13 @@ python3 -m agency_os.demo
 ```
 
 The demonstration writes only to in-memory stores and a local mock destination.
+
+Run the complete Core proof and verify all eight role bundles:
+
+```bash
+python3 -m agency_os.core_demo
+python3 -m agency_os.runtime_bundles
+```
 
 On the recorded target VM only, re-run the installed-platform admission check:
 
