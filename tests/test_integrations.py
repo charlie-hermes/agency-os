@@ -120,6 +120,15 @@ class IntegrationTests(unittest.TestCase):
         self.assertFalse(hasattr(board_transport, "_http"))
         self.assertFalse(hasattr(board_transport, "_request_json"))
 
+    def test_brand_binding_normalizes_accepted_company_uuid(self) -> None:
+        binding = PaperclipBrandBinding(
+            "00000000-0000-4000-8000-0000000000AB", "brand_lantern"
+        )
+        self.assertEqual(
+            binding.company_id,
+            "00000000-0000-4000-8000-0000000000ab",
+        )
+
     def test_lifecycle_adapter_uses_exact_routes_and_separate_board_authority(self) -> None:
         transport = InMemoryPaperclipTransport(company_id=COMPANY_ID, brand_id="brand_lantern")
         binding = PaperclipBrandBinding(COMPANY_ID, "brand_lantern")

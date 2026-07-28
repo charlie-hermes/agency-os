@@ -105,7 +105,10 @@ class PaperclipBrandBinding:
     brand_id: str
 
     def __post_init__(self) -> None:
-        _require_uuid(self.company_id, "Paperclip company_id")
+        canonical_company_id = _require_uuid(
+            self.company_id, "Paperclip company_id"
+        )
+        object.__setattr__(self, "company_id", canonical_company_id)
         if not self.brand_id.startswith("brand_"):
             raise ValueError("Paperclip brand_id is invalid")
 
