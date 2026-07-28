@@ -172,8 +172,18 @@ records destination evidence. A confirmed completion becomes terminal; a
 confirmed absence may retry only within the original attempt bound. This queue
 is not connected to a real provider, credential or gateway dispatcher in this
 slice, so the external cases are fictional control-path tests and
-`real_external_writes` remains false. Artifact deletion does not delete queue
-records; coordinated queue cancellation, retention and offboarding remain future
+`real_external_writes` remains false.
+
+Tenant queue cancellation is an irreversible director-only offboarding step.
+Leased or unresolved external work blocks it until destination evidence resolves
+the uncertain result. Once clear, all remaining non-terminal work becomes a
+lease-free `TENANT_OFFBOARDED` dead letter, terminal items and reconciliation
+history remain unchanged, and a content-free evidence-linked receipt closes all
+future queue mutation. Workers also lose queue read access; directors and
+reviewers retain the immutable records and receipt. Artifact deletion requires
+that exact queue-cancellation receipt first and links it into the artifact
+deletion receipt. The records are retained in this local slice; retention timing,
+full tenant-data deletion and production multi-host offboarding remain future
 work.
 
 ## Tenant and storage controls
@@ -236,6 +246,9 @@ work.
 - queue tenant/role isolation, immutable identity and exact task-version drift
   handling both before lease and at completion, including external reconciliation
   when post-lease drift makes the destination result uncertain;
+- evidence-bound tenant queue cancellation, denial while external results are
+  uncertain, permanent lease/retry closure across restart, retained terminal
+  history and queue-cancellation binding before artifact deletion;
 - tenant-scoped persistent audit; and
 - replacement of the running authority database across every authority view,
   including the work queue.
@@ -252,8 +265,9 @@ project still needs:
 - production Paperclip approval and recovery signing, protected key custody,
   rotation and recovery under an authority service account unavailable to
   workers;
-- deployed multi-host queue storage, cancellation, contention/failover drills
-  and integration with the authenticated gateway/destination reconcilers;
+- deployed multi-host queue storage, cross-host cancellation,
+  contention/failover drills and integration with the authenticated
+  gateway/destination reconcilers;
 - production backup, replication and disaster recovery for the protected
   deletion ledger;
 - full Platform Authority backup/restore, task/evidence/Buzz/audit export and

@@ -162,11 +162,21 @@ retry. Exhausted work moves to a durable dead letter with the original work,
 attempts and allowlisted error classes. Its evidence-bound human disposition is
 append-only and cannot reopen the item.
 
+Queue offboarding is director-only, immutable and evidence-bound. It refuses to
+close while any leased or unresolved external action could have produced an
+unknown destination result. After reconciliation, it clears active internal
+leases, dead-letters every non-terminal item with `TENANT_OFFBOARDED`, preserves
+terminal and reconciliation history, blocks all later queue mutation and removes
+worker read access. Directors and reviewers retain the content-free cancellation
+receipt and original queue evidence across restart. Artifact deletion requires
+and records the exact queue-cancellation receipt before deleting artifacts.
+
 This is a single-host, fictional control path. It has no real dispatcher,
-provider credential or destination query. Artifact deletion does not delete
-queued work. Production still requires deployed multi-host queue storage,
-cancellation, coordinated queue offboarding, contention/failover tests and
-integration with the authenticated gateway and destination-specific reconcilers.
+provider credential or destination query. Queue records are retained rather
+than deleted. Production still requires deployed multi-host queue storage,
+cross-host cancellation, coordinated full-data offboarding, contention/failover
+tests and integration with the authenticated gateway and destination-specific
+reconcilers.
 
 ## Credential lifecycle
 
@@ -190,13 +200,16 @@ Offboarding requires a human-approved plan that:
 6. verifies backups expire or are cryptographically erased as promised; and
 7. records deletion evidence without retaining deleted content.
 
-The current fictional authority implements an authority-attested export and
-deletion receipt for artifact/learning rows only. It records the tombstone in a
-separate protected authority ledger which every recovery host must share, so an
-old signed export cannot recreate that tenant in a fresh artifact database. It
-does not claim the full sequence above until Paperclip task/approval, evidence,
-Buzz, audit, credential and backup expiry, protected-ledger replication and
-storage-media erasure are coordinated and tested together.
+The current fictional authority implements the first two local ordering steps:
+an evidence-bound queue cancellation reconciles uncertain external results and
+permanently stops worker delivery before artifact deletion may begin. The
+authority-attested artifact/learning export and deletion receipt links that
+queue-cancellation receipt and records its tombstone in a separate protected
+authority ledger which every recovery host must share, so an old signed export
+cannot recreate that tenant in a fresh artifact database. It does not claim the
+full sequence above until Paperclip task/approval, evidence, Buzz, audit,
+credential and backup expiry, protected-ledger replication and storage-media
+erasure are coordinated and tested together.
 
 ## Audit and service objectives
 
@@ -230,8 +243,9 @@ real persistent deployment meets them.
 - credential broker and deny-by-default egress;
 - persistent capability admission, runtime identity binding, and drift
   suspension across deployed workers;
-- deployed multi-host queue storage, cancellation and integration with real
-  gateway/destination reconciliation (the current queue is fictional/local);
+- deployed multi-host queue storage, cross-host cancellation and integration
+  with real gateway/destination reconciliation (the current queue is
+  fictional/local);
 - immutable audit retention and tenant-scoped telemetry;
 - backup, restore, and destructive offboarding exercises;
 - current provider/account eligibility and data-handling review;

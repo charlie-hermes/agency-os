@@ -454,6 +454,15 @@
       "expected_evidence": "foreign and wrong-role access deny, immutable conflict denies, and task-version drift dead-letters before lease"
     },
     {
+      "id": "QUEUE-OFFBOARD-001",
+      "phase": 5,
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "fixture": "fictional tenant with ready, leased, completed and uncertain external work plus an artifact deletion request",
+      "command": "python3 -m unittest tests.test_platform_adapters.PlatformAdapterTests.test_queue_offboarding_is_evidence_bound_durable_and_fail_closed tests.test_platform_adapters.PlatformAdapterTests.test_artifact_offboarding_requires_current_export_and_is_durable",
+      "expected_evidence": "uncertain external work blocks offboarding; director evidence closes the queue across restart, preserves immutable history, denies every later worker mutation, and artifact deletion requires the exact content-free cancellation receipt"
+    },
+    {
       "id": "INSTALLED-PLATFORM-CONTRACT-001",
       "phase": 5,
       "owner": "platform-assurance-reviewer",
