@@ -219,6 +219,17 @@ This is not encrypted backup storage, streaming transfer, deployed replication,
 key rotation, retention expiry, measured recovery objectives or multi-host
 disaster recovery.
 
+The eighth bounded slice adds fictional single-host audit governance without
+selecting a production value. A director records an immutable, versioned and
+evidence-bound minimum which can only be strengthened. Director/reviewer
+telemetry exposes tenant-scoped content-free counts and timestamps. Expiration
+requires an exact current manifest after the window, preserves an immutable
+content-free receipt, survives restart and logical recovery, and retains the
+expiration audit event. Offboarding removes policy content but preserves the
+receipt. This is not owner approval of the proposed 400-day target, production
+monitoring, a deployed scheduler, multi-host expiry, backup expiry or media
+erasure.
+
 **Merged first-slice evidence:** PR #6, reviewed commit
 `5b53ef937bb0b05490e851660967c5ac39334ac4`, merge commit
 `4efc84fc36c4cd14d8226700162a4e8a4fbb3b57`, and Ubuntu repository gate
@@ -248,6 +259,11 @@ gate `30339639182` with 112 tests and no real external write.
 `8243b5b9f6f39fd7c744d8df34e3e0dc4d26e516`, merge commit
 `503930c8e3e95f45455dc4ce4f58e292c7c2c7da`, and post-merge Ubuntu repository
 gate `30346643950` with 115 tests and no real external write.
+
+**Merged seventh-slice evidence:** PR #12, reviewed commit
+`539fdbea2577f3271942fdc7686310ca4b5ea43f`, merge commit
+`830b402195f963341c1dbe1e07cc671abb350d75`, and post-merge Ubuntu repository
+gate `30348732163` with 116 tests and no real external write.
 
 Implement:
 
@@ -400,10 +416,11 @@ governed DecisionPacket workshop.
 
 ## Current checkpoint
 
-- Approved base: `main` after the merged sixth Gate 5 fictional Platform
+- Approved base: `main` after the merged seventh Gate 5 fictional Platform
   Authority slice.
 - Active gate: Gate 5, authoritative platform adapters and tenant data
-  foundation; complete logical tenant export/recovery is the current slice.
+  foundation; local audit-retention policy and tenant-scoped telemetry are the
+  current slice after complete logical tenant export/recovery.
 - Next dependent work: finish Gate 5, then Gate 6 governed product decisions
   and Gate 7 full fictional Core workflow.
 - Explicit guardrail: finish the bounded safety gate, then advance the agency

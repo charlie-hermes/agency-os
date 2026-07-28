@@ -245,6 +245,15 @@ These are proposed defaults, not claims about the current implementation.
 Production remains blocked until the human owner approves the targets and a
 real persistent deployment meets them.
 
+The fictional single-host Platform Authority does not activate those values. It
+requires a director to record an explicit evidence-bound value, retains every
+policy revision, refuses to shorten the current minimum, and expires audit rows
+only from an exact current manifest after the configured window. Its telemetry
+is local, tenant-scoped and content-free. This proves the control shape and
+failure semantics only; it is not production monitoring, a legal-records
+schedule, an external telemetry pipeline, multi-host expiration, backup expiry
+or media erasure.
+
 ## Production promotion blockers
 
 - deploy the durable action ledger on storage suited to the worker topology and
@@ -262,7 +271,8 @@ real persistent deployment meets them.
 - deployed multi-host queue storage, cross-host cancellation and integration
   with real gateway/destination reconciliation (the current queue is
   fictional/local);
-- immutable audit retention and tenant-scoped telemetry;
+- owner-approved production audit retention, external tenant-scoped telemetry
+  and deployed expiry scheduling beyond the fictional single-host reference;
 - backup, restore, and destructive offboarding exercises;
 - current provider/account eligibility and data-handling review;
 - full acceptance matrix against the deployed candidate; and

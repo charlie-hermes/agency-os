@@ -199,6 +199,54 @@ class PlatformAuthorityClient:
     def audit_events(self, principal: Principal) -> list[dict[str, Any]]:
         return self._request("audit_events", principal)
 
+    def set_audit_retention_policy(
+        self,
+        principal: Principal,
+        *,
+        minimum_retention_days: int,
+        evidence_ref: str,
+    ) -> dict[str, Any]:
+        return self._request(
+            "set_audit_retention_policy",
+            principal,
+            minimum_retention_days=minimum_retention_days,
+            evidence_ref=evidence_ref,
+        )
+
+    def audit_retention_policy(self, principal: Principal) -> dict[str, Any]:
+        return self._request("audit_retention_policy", principal)
+
+    def audit_telemetry(self, principal: Principal) -> dict[str, Any]:
+        return self._request("audit_telemetry", principal)
+
+    def prepare_audit_expiration(self, principal: Principal) -> dict[str, Any]:
+        return self._request("prepare_audit_expiration", principal)
+
+    def expire_audit_events(
+        self,
+        principal: Principal,
+        *,
+        manifest: Mapping[str, Any],
+        evidence_ref: str,
+    ) -> dict[str, Any]:
+        return self._request(
+            "expire_audit_events",
+            principal,
+            manifest=dict(manifest),
+            evidence_ref=evidence_ref,
+        )
+
+    def audit_expiration_receipt(
+        self,
+        principal: Principal,
+        receipt_id: str,
+    ) -> dict[str, Any]:
+        return self._request(
+            "audit_expiration_receipt",
+            principal,
+            receipt_id=receipt_id,
+        )
+
     def export_tenant_authority(
         self, principal: Principal
     ) -> dict[str, Any]:
@@ -846,6 +894,12 @@ _PAPERCLIP_OPERATIONS = frozenset(
         "record_buzz_decision",
         "get_buzz_decision",
         "audit_events",
+        "set_audit_retention_policy",
+        "audit_retention_policy",
+        "audit_telemetry",
+        "prepare_audit_expiration",
+        "expire_audit_events",
+        "audit_expiration_receipt",
     }
 )
 
@@ -891,6 +945,7 @@ def _handle_platform_request(
             "tenant_offboarding_receipt",
             "artifact_deletion_receipt",
             "queue_cancellation_receipt",
+            "audit_expiration_receipt",
         }
         if (
             operation not in post_offboarding_operations

@@ -208,11 +208,12 @@ backup/media erasure or full deployed platform offboarding.
 
 The protected host can now produce one director-only logical package containing
 all tenant rows from task versions, approver policies, approvals, Buzz contexts
-and decisions, evidence, artifacts, work queue, queue cancellation and ordinary
-audit. Table names and columns are fixed by code. Every stored canonical record
-is revalidated before export, per-table counts and the full content are bound to
-one canonical SHA-256, and the protected recovery authority attests the tenant,
-authority ID, checksum and export time. Another tenant is never included.
+and decisions, evidence, artifacts, work queue, queue cancellation, audit
+retention policies, audit-expiration receipts and ordinary audit. Table names
+and columns are fixed by code. Every stored canonical record is revalidated
+before export, per-table counts and the full content are bound to one canonical
+SHA-256, and the protected recovery authority attests the tenant, authority ID,
+checksum and export time. Another tenant is never included.
 
 Restore verifies the exact package shape, every row binding, the checksum and the
 non-public authority attestation before writing anything. It holds the protected
@@ -231,6 +232,34 @@ fail closed. The 4 MiB IPC limit still applies. This is a content-bearing logica
 package for a fictional single-host authority, not encrypted backup storage,
 streaming transfer, deployed replication, recovery-key rotation, measured RPO or
 RTO, retention expiry, media erasure or multi-host recovery.
+
+## Local audit retention and operational telemetry
+
+The protected host now requires an explicit director-controlled retention policy
+before it exposes audit telemetry or permits expiration. Policies are immutable,
+versioned, checksum-chained and evidence-referenced. This reference permits only
+monotonic strengthening from 1 to 3,650 days; it does not select a default and it
+does not treat the proposed 400-day production target as approved.
+
+Telemetry contains tenant-scoped counts, event-type counts and oldest/newest
+timestamps only. It contains no audit subjects, actor IDs, task IDs, evidence
+IDs or message content, is readable only by the director or assurance reviewer,
+and never leaves the local authority.
+
+Audit expiration is director-only and uses an exact checksum-bound manifest of
+the currently eligible events. A policy revision, changed eligible row set,
+forged count/checksum, future preparation time, non-elapsed window or empty
+selection fails before deletion. Successful expiration and its content-free,
+immutable receipt commit in one immediate transaction; retry is idempotent only
+for the exact original evidence. The expiration itself creates a new retained
+audit event. Policies and receipts survive restart and logical recovery.
+Offboarding deletes policy content but preserves content-free expiration
+receipts for director/reviewer inspection while denying workers and all other
+tenant access.
+
+This is fictional single-host governance, not production monitoring, external
+telemetry, an approved retention schedule, legal-records policy, deployed job
+scheduler, multi-host expiration, backup expiry or storage-media erasure.
 
 ## Tenant and storage controls
 
@@ -303,6 +332,10 @@ RTO, retention expiry, media erasure or multi-host recovery.
   Buzz, evidence, artifact, queue, queue-cancellation and audit state, including
   recomputed-checksum forgery, wrong-key, wrong-role, foreign-tenant, non-empty
   target, restart and post-offboarding resurrection denial;
+- director-controlled monotonic audit-retention policy, content-free
+  tenant-scoped telemetry, exact-manifest expiration, stale/forged/too-early
+  denial, immutable receipts, restart/recovery continuity and offboarding
+  behavior;
 - tenant-scoped persistent audit; and
 - replacement of the running authority database across every authority view,
   including the work queue.
@@ -326,9 +359,11 @@ Gate 5 can complete, the project still needs:
 - production backup, replication and disaster recovery for the protected
   deletion ledger;
 - full deployed Platform Authority backup/restore, restorable task/evidence/
-  Buzz/audit export, cross-store offboarding, retention timing and storage-media
-  erasure drills beyond the local checksum-manifest cleanup;
-- immutable audit-retention and tenant-scoped telemetry policy; and
+  Buzz/audit export, cross-store offboarding, production retention scheduling,
+  backup expiry and storage-media erasure drills beyond the local
+  checksum-manifest cleanup;
+- owner approval of production retention and telemetry values, external
+  monitoring design and deployed enforcement; and
 - verified runtime bundles and fresh-session load evidence for all roles.
 
 Production activation remains prohibited until those controls, independent

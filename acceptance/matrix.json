@@ -472,6 +472,15 @@
       "expected_evidence": "stale manifests deny; exact offboarding removes tenant content, preserves content-free receipts, closes old and recovery clients, leaves another tenant intact, resumes fail-closed cleanup only for the immutable original request, and upgrades the protected prior ledger in place"
     },
     {
+      "id": "AUDIT-RETENTION-TELEMETRY-001",
+      "phase": 5,
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "fixture": "two fictional tenants, a director-controlled versioned retention policy, content-free telemetry, expired and current audit rows, restart, logical recovery and offboarding",
+      "command": "python3 -m unittest tests.test_platform_adapters.PlatformAdapterTests.test_audit_retention_and_telemetry_are_governed_and_tenant_scoped",
+      "expected_evidence": "unconfigured, wrong-role, too-early, stale-policy and forged-manifest paths deny atomically; exact expiry preserves a content-free immutable receipt and new audit event, survives restart/recovery, remains tenant-isolated, and keeps only the receipt after offboarding"
+    },
+    {
       "id": "INSTALLED-PLATFORM-CONTRACT-001",
       "phase": 5,
       "owner": "platform-assurance-reviewer",
