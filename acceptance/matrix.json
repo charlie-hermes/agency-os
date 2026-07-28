@@ -1,6 +1,6 @@
 {
   "schema_version": "1.0",
-  "candidate_phase": "gate-5-foundation-fictional",
+  "candidate_phase": "gate-7-core-fictional",
   "release_command": "./scripts/verify",
   "criteria": [
     {
@@ -497,6 +497,60 @@
       "fixture": "changed Paperclip version, executable, primary unit or drop-in graph bytes, service, reviewed route surface, and Buzz binary or command authority",
       "command": "python3 -m unittest tests.test_platform_compatibility.PlatformCompatibilityTests.test_paperclip_version_identity_service_and_route_drift_fail_closed tests.test_platform_compatibility.PlatformCompatibilityTests.test_only_reviewed_budget_route_can_use_source_fallback tests.test_platform_compatibility.PlatformCompatibilityTests.test_executable_and_service_unit_bytes_are_pinned tests.test_platform_compatibility.PlatformCompatibilityTests.test_effective_service_drop_in_graph_fails_closed_before_probes tests.test_platform_compatibility.PlatformCompatibilityTests.test_buzz_binary_command_or_authority_drift_fails_closed",
       "expected_evidence": "extra and undocumented routes plus reviewed platform byte, exact drop-in set/order, identity and authority drift fail closed before health, Buzz or authenticated adapter use"
+    },
+    {
+      "id": "INSTALLED-LIFECYCLE-ADAPTER-001",
+      "phase": 7,
+      "owner": "technical-implementation-specialist",
+      "release_blocker": true,
+      "fixture": "private Paperclip HTTP transport and exact installed lifecycle routes",
+      "command": "python3 -m unittest tests.test_integrations.IntegrationTests.test_paperclip_http_transport_is_private_authenticated_and_secret_safe tests.test_integrations.IntegrationTests.test_lifecycle_adapter_uses_exact_installed_routes_and_human_authority",
+      "expected_evidence": "private authenticated transport and admitted issue/approval routes work without leaking credentials or inventing approval types"
+    },
+    {
+      "id": "BUZZ-TYPED-ADAPTER-001",
+      "phase": 7,
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "fixture": "installed Buzz CLI binding, private bounded channel and decision summary",
+      "command": "python3 -m unittest tests.test_integrations.IntegrationTests.test_buzz_adapter_is_private_bounded_and_non_authoritative tests.test_integrations.IntegrationTests.test_buzz_cli_keeps_identity_out_of_arguments_and_errors",
+      "expected_evidence": "identity stays outside arguments, broadcast is denied and Buzz decision authority remains pending Paperclip write-back"
+    },
+    {
+      "id": "CORE-WORKFLOW-001",
+      "phase": 7,
+      "owner": "agency-director",
+      "release_blocker": true,
+      "fixture": "Lantern Core campaign from onboarding through learning and closure",
+      "command": "python3 -m unittest tests.test_core_workflow.CoreWorkflowTests.test_complete_core_flow_has_real_revision_and_authoritative_closure",
+      "expected_evidence": "eight authoritative tasks close after exact approval, one mock publication, validation, measurement, proposal and learning with no real external write"
+    },
+    {
+      "id": "CORE-REVISION-001",
+      "phase": 7,
+      "owner": "editorial-integrity-qa",
+      "release_blocker": true,
+      "fixture": "unsupported guarantee rejected by QA and resolved in bounded Buzz context",
+      "command": "python3 -m unittest tests.test_core_workflow.CoreWorkflowTests.test_buzz_decision_is_written_back_and_never_becomes_task_authority",
+      "expected_evidence": "REVISE binds the rejected checksum, Buzz remains non-authoritative and the resolution is written to Paperclip before closure"
+    },
+    {
+      "id": "RUNTIME-BUNDLE-001",
+      "phase": 7,
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "fixture": "eight checksum-bound Core AGENTS/SOUL profile pairs",
+      "command": "python3 -m unittest tests.test_core_workflow.CoreWorkflowTests.test_all_eight_role_bundles_load_in_a_fresh_process",
+      "expected_evidence": "all eight exact profiles load in a fresh reference process and absent Hermes target evidence remains explicitly pending"
+    },
+    {
+      "id": "OPERATOR-PROJECTION-001",
+      "phase": 7,
+      "owner": "agency-director",
+      "release_blocker": true,
+      "fixture": "read-only campaign projection over authoritative Paperclip tasks and approval",
+      "command": "python3 -m unittest tests.test_core_workflow.CoreWorkflowTests.test_operator_projection_is_read_only_and_paperclip_derived",
+      "expected_evidence": "projection reports eight closed tasks and exact approval while declaring Paperclip authority and exposing no mutation path"
     }
   ]
 }

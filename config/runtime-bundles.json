@@ -1,0 +1,16 @@
+{
+  "schema_version": "1.0",
+  "target_runtime": "hermes",
+  "target_runtime_evidence": "pending_runtime_installation",
+  "reference_loader_status": "fresh_process_verified_candidate",
+  "roles": [
+    {"role_id":"agency-director","agents_path":"roles/agency-director/AGENTS.md","agents_sha256":"2201a746868c673cc3da27c62e080cd3168d8f96201d8f24bc9261b8203dca5e","soul_path":"roles/agency-director/SOUL.md","soul_sha256":"c1409a8701f56b7ef957558ec18d6bd49f9999218dafffa4baaa2e1814bfb395"},
+    {"role_id":"brand-brief-steward","agents_path":"roles/brand-brief-steward/AGENTS.md","agents_sha256":"fb4d7dd52e1c92db9c59e27399a24814c4deb2e97e8def43046a298fc940f20c","soul_path":"roles/brand-brief-steward/SOUL.md","soul_sha256":"06423c9cdc59d05ba550bafed4f201e5e1e3cf012e447c29de982970e1b71af5"},
+    {"role_id":"search-content-strategist","agents_path":"roles/search-content-strategist/AGENTS.md","agents_sha256":"58926d438f7de7fa1a934bba7f821cca1c7ed2c7f06af932798aeab529b2bd1b","soul_path":"roles/search-content-strategist/SOUL.md","soul_sha256":"04b64eb420e36899d561902ebd4b10b6202bfffd9c7905fd28058056ec835476"},
+    {"role_id":"content-producer","agents_path":"roles/content-producer/AGENTS.md","agents_sha256":"131a0dc06c6d19add5748a0781a0d3a58e7531db0a76bf7b0e12d84422b25308","soul_path":"roles/content-producer/SOUL.md","soul_sha256":"6578dd47f2493de98008e6f18bde6b7783adb75f80a1b581be7145556d11440b"},
+    {"role_id":"search-answer-optimiser","agents_path":"roles/search-answer-optimiser/AGENTS.md","agents_sha256":"399f93c40641f7a5ff004038866a33dad2a90e032afa8ab03e1246a08b09af91","soul_path":"roles/search-answer-optimiser/SOUL.md","soul_sha256":"4ec1b41827191982a21a980e735028e4cd93de486b925b847c4a050f5565339e"},
+    {"role_id":"editorial-integrity-qa","agents_path":"roles/editorial-integrity-qa/AGENTS.md","agents_sha256":"27d3510c089f6d1760aa31c115dcd64508f437c09e64870de186a84eef1dfa6a","soul_path":"roles/editorial-integrity-qa/SOUL.md","soul_sha256":"fe5e688aeb8d6bd1535b26e738600a67a5bf25c349f77bc108dbb02473b40fd5"},
+    {"role_id":"publishing-operator","agents_path":"roles/publishing-operator/AGENTS.md","agents_sha256":"1b372b6f043b02d6b830bc139a7a0812f24254d4f269da2d3953c9ae53abd75c","soul_path":"roles/publishing-operator/SOUL.md","soul_sha256":"9c0370a22f70ea3816962cb15a31b6337c59495b7263fa9e389b1b2636e53649"},
+    {"role_id":"growth-intelligence-analyst","agents_path":"roles/growth-intelligence-analyst/AGENTS.md","agents_sha256":"3948beda9790d6cafe6be0233c7a093e5437c8c8ca4cb36dc29a52cd7a565725","soul_path":"roles/growth-intelligence-analyst/SOUL.md","soul_sha256":"9a4f3b5588eb35902b82b3db8c75bf1fb77d55aa5df943a7fb7dc3eae40c28f4"}
+  ]
+}

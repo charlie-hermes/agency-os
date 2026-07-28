@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agency-os.invalid/schemas/core-workflow.schema.json",
+  "title": "Search Authority Core workflow records",
+  "$defs": {
+    "Checksum": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "CoreEnvelope": {
+      "type": "object",
+      "required": ["schema_version", "artifact_type", "artifact_id", "brand_id", "campaign_id", "paperclip_issue_id", "payload", "content_checksum"],
+      "properties": {
+        "schema_version": {"const": "1.0"},
+        "artifact_type": {"type": "string"},
+        "artifact_id": {"type": "string", "minLength": 1},
+        "brand_id": {"type": "string", "pattern": "^brand_"},
+        "campaign_id": {"type": "string", "minLength": 1},
+        "paperclip_issue_id": {"type": "string", "minLength": 1},
+        "payload": {"type": "object"},
+        "content_checksum": {"$ref": "#/$defs/Checksum"}
+      }
+    },
+    "BrandProfile": {"allOf": [{"$ref": "#/$defs/CoreEnvelope"}, {"properties": {"artifact_type": {"const": "brand_profile"}}}]},
+    "CampaignBrief": {"allOf": [{"$ref": "#/$defs/CoreEnvelope"}, {"properties": {"artifact_type": {"const": "campaign_brief"}}}]},
+    "SourceObservation": {"allOf": [{"$ref": "#/$defs/CoreEnvelope"}, {"properties": {"artifact_type": {"const": "source_observation"}}}]},
+    "ResearchPack": {"allOf": [{"$ref": "#/$defs/CoreEnvelope"}, {"properties": {"artifact_type": {"const": "research_pack"}}}]},
+    "ContentPlan": {"allOf": [{"$ref": "#/$defs/CoreEnvelope"}, {"properties": {"artifact_type": {"const": "content_plan"}}}]},
+    "ContentBrief": {"allOf": [{"$ref": "#/$defs/CoreEnvelope"}, {"properties": {"artifact_type": {"const": "content_brief"}}}]},
+    "QAVerdict": {"allOf": [{"$ref": "#/$defs/CoreEnvelope"}, {"properties": {"artifact_type": {"const": "qa_verdict"}, "payload": {"type": "object", "required": ["verdict", "reviewed_checksum", "findings"]}}}]},
+    "ValidationReport": {"allOf": [{"$ref": "#/$defs/CoreEnvelope"}, {"properties": {"artifact_type": {"const": "validation_report"}}}]},
+    "PerformanceSnapshot": {"type": "object", "required": ["artifact_type", "brand_id", "content_checksum"], "properties": {"artifact_type": {"const": "performance_snapshot"}, "brand_id": {"type": "string", "pattern": "^brand_"}, "content_checksum": {"$ref": "#/$defs/Checksum"}}},
+    "OptimisationProposal": {"allOf": [{"$ref": "#/$defs/CoreEnvelope"}, {"properties": {"artifact_type": {"const": "optimisation_proposal"}}}]},
+    "RuntimeBundle": {
+      "type": "object",
+      "required": ["role_id", "agents_path", "agents_sha256", "soul_path", "soul_sha256"],
+      "properties": {
+        "role_id": {"type": "string"},
+        "agents_path": {"type": "string"},
+        "agents_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "soul_path": {"type": "string"},
+        "soul_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    "OperatorProjection": {
+      "type": "object",
+      "required": ["projection", "authority", "brand_id", "tasks", "approvals"],
+      "properties": {"projection": {"const": "read_only"}, "authority": {"const": "paperclip"}, "brand_id": {"type": "string", "pattern": "^brand_"}, "tasks": {"type": "array"}, "approvals": {"type": "array"}}
+    }
+  }
+}
