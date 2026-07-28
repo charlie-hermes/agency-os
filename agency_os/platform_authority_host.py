@@ -31,10 +31,12 @@ from .platform_adapters import (
     ArtifactStoreError,
     EvidenceStoreError,
     PlatformAdapterError,
+    WorkQueueError,
     _AUTHORITY_ADAPTER_TOKEN,
     _DELETION_LEDGER_TOKEN,
     _AuthorityPaperclipAdapter,
     _AuthorityTenantArtifactStore,
+    _AuthorityWorkQueue,
     _AuthorityTenantEvidenceStore,
     _SQLiteArtifactDeletionLedger,
 )
@@ -201,6 +203,9 @@ class PlatformAuthorityClient:
     def artifacts(self) -> "TenantArtifactClient":
         return TenantArtifactClient(self)
 
+    def work_queue(self) -> "TenantWorkQueueClient":
+        return TenantWorkQueueClient(self)
+
     def _request(
         self, operation: str, principal: Principal, **arguments: Any
     ) -> Any:
@@ -322,6 +327,114 @@ class TenantArtifactClient:
         )
 
 
+class TenantWorkQueueClient:
+    """Worker-side durable queue view backed by the protected authority host."""
+
+    __slots__ = ("_authority",)
+
+    def __init__(self, authority: PlatformAuthorityClient) -> None:
+        self._authority = authority
+
+    def enqueue(self, principal: Principal, work_item: Mapping[str, Any]) -> str:
+        return self._authority._request(
+            "enqueue_work", principal, work_item=dict(work_item)
+        )
+
+    def lease_next(
+        self, principal: Principal, lease_seconds: int
+    ) -> dict[str, Any] | None:
+        return self._authority._request(
+            "lease_work", principal, lease_seconds=lease_seconds
+        )
+
+    def heartbeat(
+        self,
+        principal: Principal,
+        work_item_id: str,
+        lease_token: str,
+        lease_seconds: int,
+    ) -> dict[str, Any]:
+        return self._authority._request(
+            "heartbeat_work",
+            principal,
+            work_item_id=work_item_id,
+            lease_token=lease_token,
+            lease_seconds=lease_seconds,
+        )
+
+    def complete(
+        self, principal: Principal, work_item_id: str, lease_token: str
+    ) -> dict[str, Any]:
+        return self._authority._request(
+            "complete_work",
+            principal,
+            work_item_id=work_item_id,
+            lease_token=lease_token,
+        )
+
+    def fail(
+        self,
+        principal: Principal,
+        work_item_id: str,
+        lease_token: str,
+        *,
+        error_class: str,
+        retryable: bool,
+        external_result: str,
+    ) -> dict[str, Any]:
+        return self._authority._request(
+            "fail_work",
+            principal,
+            work_item_id=work_item_id,
+            lease_token=lease_token,
+            error_class=error_class,
+            retryable=retryable,
+            external_result=external_result,
+        )
+
+    def reconcile(
+        self,
+        principal: Principal,
+        work_item_id: str,
+        *,
+        outcome: str,
+        evidence_ref: str,
+        disposition: str,
+    ) -> dict[str, Any]:
+        return self._authority._request(
+            "reconcile_work",
+            principal,
+            work_item_id=work_item_id,
+            outcome=outcome,
+            evidence_ref=evidence_ref,
+            disposition=disposition,
+        )
+
+    def record_dead_letter_disposition(
+        self,
+        principal: Principal,
+        work_item_id: str,
+        *,
+        evidence_ref: str,
+        disposition: str,
+    ) -> dict[str, Any]:
+        return self._authority._request(
+            "disposition_dead_letter",
+            principal,
+            work_item_id=work_item_id,
+            evidence_ref=evidence_ref,
+            disposition=disposition,
+        )
+
+    def get(self, principal: Principal, work_item_id: str) -> dict[str, Any]:
+        return self._authority._request(
+            "get_work", principal, work_item_id=work_item_id
+        )
+
+    def dead_letters(self, principal: Principal) -> list[dict[str, Any]]:
+        return self._authority._request("list_dead_letters", principal)
+
+
 def _raise_remote_error(response: Mapping[str, Any]) -> None:
     message = str(response.get("message", "Platform Authority denied request"))
     error_type = response.get("error_type")
@@ -333,6 +446,8 @@ def _raise_remote_error(response: Mapping[str, Any]) -> None:
         raise EvidenceStoreError(message)
     if error_type == "ArtifactStoreError":
         raise ArtifactStoreError(message)
+    if error_type == "WorkQueueError":
+        raise WorkQueueError(message)
     if error_type == "KeyError":
         subject = response.get("subject")
         raise KeyError(subject if isinstance(subject, str) else message)
@@ -568,6 +683,12 @@ def _run_platform_authority_host(
             deletion_ledger=deletion_ledger,
             _construction_token=_AUTHORITY_ADAPTER_TOKEN,
         )
+        work_queue = _AuthorityWorkQueue(
+            database_path,
+            timeout_seconds=timeout_seconds,
+            clock=authority_clock,
+            _construction_token=_AUTHORITY_ADAPTER_TOKEN,
+        )
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as server:
             server.bind(socket_path)
             os.chmod(socket_path, 0o600)
@@ -599,6 +720,7 @@ def _run_platform_authority_host(
                         paperclip,
                         evidence,
                         artifacts,
+                        work_queue,
                         client_principals,
                     )
                     connection.sendall(canonical_bytes(response) + b"\n")
@@ -636,6 +758,7 @@ def _handle_platform_request(
     paperclip: _AuthorityPaperclipAdapter,
     evidence: _AuthorityTenantEvidenceStore,
     artifacts: _AuthorityTenantArtifactStore,
+    work_queue: _AuthorityWorkQueue,
     client_principals: Mapping[str, Principal],
 ) -> dict[str, Any]:
     try:
@@ -686,6 +809,26 @@ def _handle_platform_request(
             result = artifacts.delete_tenant(principal, **arguments)
         elif operation == "artifact_deletion_receipt":
             result = artifacts.deletion_receipt(principal, **arguments)
+        elif operation == "enqueue_work":
+            result = work_queue.enqueue(principal, **arguments)
+        elif operation == "lease_work":
+            result = work_queue.lease_next(principal, **arguments)
+        elif operation == "heartbeat_work":
+            result = work_queue.heartbeat(principal, **arguments)
+        elif operation == "complete_work":
+            result = work_queue.complete(principal, **arguments)
+        elif operation == "fail_work":
+            result = work_queue.fail(principal, **arguments)
+        elif operation == "reconcile_work":
+            result = work_queue.reconcile(principal, **arguments)
+        elif operation == "disposition_dead_letter":
+            result = work_queue.record_dead_letter_disposition(
+                principal, **arguments
+            )
+        elif operation == "get_work":
+            result = work_queue.get(principal, **arguments)
+        elif operation == "list_dead_letters":
+            result = work_queue.dead_letters(principal, **arguments)
         else:
             raise ContractError("Platform Authority operation is not allowed")
         return {"outcome": "ALLOW", "result": result}
@@ -719,6 +862,12 @@ def _handle_platform_request(
         return {
             "outcome": "DENY",
             "error_type": "ArtifactStoreError",
+            "message": str(exc),
+        }
+    except WorkQueueError as exc:
+        return {
+            "outcome": "DENY",
+            "error_type": "WorkQueueError",
             "message": str(exc),
         }
     except PlatformAdapterError as exc:

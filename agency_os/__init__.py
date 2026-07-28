@@ -15,16 +15,19 @@ from .platform_authority_host import (
     PlatformAuthorityUnavailable,
     TenantArtifactClient,
     TenantEvidenceClient,
+    TenantWorkQueueClient,
 )
 from .platform_adapters import (
     ArtifactStoreError,
     EvidenceStoreError,
     FictionalBuzzAdapter,
     PlatformAdapterError,
+    WorkQueueError,
     make_approver_policy,
     make_buzz_context_packet,
     make_evidence_record,
     make_paperclip_task,
+    make_work_queue_item,
 )
 from .runtime_security import (
     CredentialBrokerError,
@@ -56,6 +59,8 @@ __all__ = [
     "RuntimeIdentityError",
     "TenantArtifactClient",
     "TenantEvidenceClient",
+    "TenantWorkQueueClient",
+    "WorkQueueError",
     "fictional_credential_broker",
     "fictional_credential_grant",
     "fictional_runtime",
@@ -68,5 +73,6 @@ __all__ = [
     "make_buzz_context_packet",
     "make_evidence_record",
     "make_paperclip_task",
+    "make_work_queue_item",
     "verify_record",
 ]

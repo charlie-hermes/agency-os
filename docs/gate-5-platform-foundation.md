@@ -2,7 +2,7 @@
 
 ## Scope of this slice
 
-This slice adds a standard-library-only, fictional local reference for three
+This slice adds a standard-library-only, fictional local reference for four
 Gate 5 boundaries:
 
 1. An independently started protected Platform Authority host owns the SQLite
@@ -19,6 +19,10 @@ Gate 5 boundaries:
    opaque random client token. Requests carry the token, never a caller-selected
    actor, role or tenant. A director client therefore cannot claim the named
    human approver even through Python’s base setter.
+4. A durable local work queue binds immutable delivery work to one exact current
+   Paperclip task version and one tenant/worker role. Renewable one-use leases,
+   bounded retry, dead letters and director-owned reconciliation remain inside
+   the protected authority database and cannot mutate Paperclip task state.
 
 These boundaries use fictional data, a local Unix socket and local SQLite only.
 They make no network call and hold no service credential. The fictional
@@ -68,6 +72,7 @@ integration, service-account separation, key custody or production readiness.
 | Buzz discussion context | persisted, deadline-bound fictional Buzz context; non-authoritative |
 | Buzz decision | immutable summary written through the host into Paperclip-shaped state |
 | evidence and provenance | protected host with a constrained evidence client |
+| fictional work delivery | protected durable queue bound to exact Paperclip task version; never task authority |
 | platform audit | append-only tenant-scoped events owned by the host |
 
 Task changes use immutable versions and optimistic checksum matching. A stale
@@ -142,6 +147,32 @@ remain separate Gate 5 work. Local IPC requests and responses are capped at 4
 MiB; production bulk export requires a separately designed streaming or
 protected object-transfer path.
 
+## Durable work-delivery controls
+
+`TenantWorkQueueClient` is another constrained view of the protected host. Only
+the director can enqueue immutable work, and each item binds its tenant, assigned
+worker role and the exact checksum of a current `ready` or `in_progress`
+Paperclip task. A changed task version moves undelivered work to dead letter
+before lease; the queue never changes task status or represents task completion.
+
+Lease tokens are random, returned only to the assigned actor, stored only as a
+SHA-256 hash, renewable for at most 60 seconds and removed on every terminal or
+waiting transition. Attempt counts and heartbeats survive host restart. Expired
+internal work retries only within the item’s fixed maximum; exhaustion produces
+a durable dead letter containing the immutable work, attempts and allowlisted
+error classes. A director’s evidence-bound dead-letter disposition is append-only
+and cannot reopen the item.
+
+An external write that reports `UNKNOWN`, or whose lease expires without a known
+result, enters `RECONCILIATION_REQUIRED`. It cannot lease again until the director
+records destination evidence. A confirmed completion becomes terminal; a
+confirmed absence may retry only within the original attempt bound. This queue
+is not connected to a real provider, credential or gateway dispatcher in this
+slice, so the external cases are fictional control-path tests and
+`real_external_writes` remains false. Artifact deletion does not delete queue
+records; coordinated queue cancellation, retention and offboarding remain future
+work.
+
 ## Tenant and storage controls
 
 - Every query includes `brand_id`; a foreign read is indistinguishable from a
@@ -155,8 +186,9 @@ protected object-transfer path.
   provenance is additionally authenticated by signing material held only in the
   host process; record checksums alone are not treated as proof of origin.
 - Worker clients contain only a socket path, exact bound principal and opaque
-  token. They receive no SQLite path, deletion-ledger handle, signer, verifier,
-  policy catalogue or host bootstrap handle.
+  authority token. They receive no SQLite path, deletion-ledger handle, queue
+  storage or token hash, signer, verifier, policy catalogue or host bootstrap
+  handle.
 - Both SQLite files are owner-only, their parent cannot be group/other writable,
   and each parent and database filesystem identity is pinned. Replacement or
   symlink storage fails closed.
@@ -194,8 +226,15 @@ protected object-transfer path.
   preservation of a second tenant, and denial of a retained signed export on a
   fresh same-ID/same-key recovery database;
 - missing deletion-ledger provisioning and same-path ledger replacement denial;
+- internal lease renewal, restart expiry, bounded retry, durable dead letter and
+  immutable evidence-bound human disposition;
+- external unknown/expired-lease reconciliation before retry, with no Paperclip
+  task mutation;
+- queue tenant/role isolation, immutable identity and exact task-version drift
+  dead-lettering before delivery;
 - tenant-scoped persistent audit; and
-- replacement of the running authority database across every authority view.
+- replacement of the running authority database across every authority view,
+  including the work queue.
 
 ## Recovery and remaining Gate 5 work
 
@@ -209,7 +248,8 @@ project still needs:
 - production Paperclip approval and recovery signing, protected key custody,
   rotation and recovery under an authority service account unavailable to
   workers;
-- queue leases, retries, dead-letter handling and reconciliation;
+- deployed multi-host queue storage, cancellation, contention/failover drills
+  and integration with the authenticated gateway/destination reconcilers;
 - production backup, replication and disaster recovery for the protected
   deletion ledger;
 - full Platform Authority backup/restore, task/evidence/Buzz/audit export and

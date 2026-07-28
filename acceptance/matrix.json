@@ -388,7 +388,7 @@
       "release_blocker": true,
       "fixture": "a running authority whose SQLite path is replaced",
       "command": "python3 -m unittest tests.test_platform_adapters.PlatformAdapterTests.test_replaced_storage_identity_is_rejected_by_all_authorities",
-      "expected_evidence": "Paperclip, evidence and artifact/learning operations all fail closed after replacement"
+      "expected_evidence": "Paperclip, evidence, artifact/learning and work-queue operations all fail closed after replacement"
     },
     {
       "id": "ARTIFACT-DURABILITY-001",
@@ -425,6 +425,33 @@
       "fixture": "recovery hosts with a missing or wrong-authority deletion ledger plus a running host whose ledger path is replaced",
       "command": "python3 -m unittest tests.test_platform_adapters.PlatformAdapterTests.test_recovery_host_requires_preprovisioned_deletion_ledger tests.test_platform_adapters.PlatformAdapterTests.test_replaced_deletion_ledger_identity_is_rejected",
       "expected_evidence": "recovery refuses startup without the exact authority ledger and same-path ledger replacement makes artifact access fail closed"
+    },
+    {
+      "id": "QUEUE-LEASE-RETRY-001",
+      "phase": 5,
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "fixture": "fictional internal work with a renewable lease, authority restart, expiry, bounded retry and dead-letter disposition",
+      "command": "python3 -m unittest tests.test_platform_adapters.PlatformAdapterTests.test_internal_queue_lease_retry_dead_letter_survives_restart",
+      "expected_evidence": "lease state survives restart; expiry is recorded, the fixed attempt bound is enforced, and the dead letter cannot silently reopen or change disposition"
+    },
+    {
+      "id": "QUEUE-RECONCILIATION-001",
+      "phase": 5,
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "fixture": "fictional external work reporting UNKNOWN plus an expired external lease",
+      "command": "python3 -m unittest tests.test_platform_adapters.PlatformAdapterTests.test_external_unknown_requires_reconciliation_before_retry",
+      "expected_evidence": "unknown or expired external delivery cannot retry until director-owned destination evidence confirms no write; queue handling never changes the Paperclip task"
+    },
+    {
+      "id": "QUEUE-BOUNDARY-001",
+      "phase": 5,
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "fixture": "two tenants, wrong-role worker, immutable work ID and changed current Paperclip task version",
+      "command": "python3 -m unittest tests.test_platform_adapters.PlatformAdapterTests.test_queue_is_tenant_role_immutable_and_task_version_bound",
+      "expected_evidence": "foreign and wrong-role access deny, immutable conflict denies, and task-version drift dead-letters before lease"
     },
     {
       "id": "INSTALLED-PLATFORM-CONTRACT-001",

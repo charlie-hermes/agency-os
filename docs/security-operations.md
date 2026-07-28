@@ -148,13 +148,22 @@
 
 ## Queue and retry semantics
 
-A production queue must use renewable leases with `leased_at`, `lease_owner`,
-`lease_expires_at`, attempt count, and heartbeat. Expired leases become visible
-as stale; they do not imply that an external write is absent. Internal
-deterministic work may retry within a bounded policy. External writes in
-`UNKNOWN` state require destination reconciliation before retry. Exhausted work
-moves to a dead-letter queue with the original task, attempts, error classes,
-and human disposition. No dead-letter item may silently reopen itself.
+The fictional local Platform Authority queue now records renewable `leased_at`,
+`lease_owner`, `lease_expires_at`, attempt count and heartbeat state in protected
+SQLite. Work is immutable, tenant/role-scoped and bound to the exact current
+Paperclip task checksum; delivery never mutates Paperclip task state. Lease
+expiry is recorded and does not imply that an external write is absent. Internal
+deterministic work retries only within a fixed item policy. External work in
+`UNKNOWN` state, including an expired lease, requires director-owned destination
+reconciliation before retry. Exhausted work moves to a durable dead letter with
+the original work, attempts and allowlisted error classes. Its evidence-bound
+human disposition is append-only and cannot reopen the item.
+
+This is a single-host, fictional control path. It has no real dispatcher,
+provider credential or destination query. Artifact deletion does not delete
+queued work. Production still requires deployed multi-host queue storage,
+cancellation, coordinated queue offboarding, contention/failover tests and
+integration with the authenticated gateway and destination-specific reconcilers.
 
 ## Credential lifecycle
 
@@ -218,7 +227,8 @@ real persistent deployment meets them.
 - credential broker and deny-by-default egress;
 - persistent capability admission, runtime identity binding, and drift
   suspension across deployed workers;
-- queue lease, dead-letter, cancellation, and reconciliation implementation;
+- deployed multi-host queue storage, cancellation and integration with real
+  gateway/destination reconciliation (the current queue is fictional/local);
 - immutable audit retention and tenant-scoped telemetry;
 - backup, restore, and destructive offboarding exercises;
 - current provider/account eligibility and data-handling review;
