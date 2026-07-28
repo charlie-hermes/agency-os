@@ -702,6 +702,23 @@ class _PlatformAuthorityHost:
                 "Platform Authority rejected its control request"
             )
 
+    def inject_audit_retention_failure(self, point: str) -> None:
+        if self._closed or not self._process.is_alive():
+            raise PlatformAuthorityUnavailable(
+                "Platform Authority is unavailable"
+            )
+        self._control_parent.send(
+            {"operation": "inject_audit_retention_failure", "point": point}
+        )
+        if not self._control_parent.poll(3):
+            raise PlatformAuthorityUnavailable(
+                "Platform Authority is unavailable"
+            )
+        if self._control_parent.recv() != "AUDIT_RETENTION_FAILURE_SET":
+            raise PlatformAuthorityUnavailable(
+                "Platform Authority rejected its control request"
+            )
+
     def close(self) -> None:
         if self._closed:
             return
@@ -805,6 +822,7 @@ def _run_platform_authority_host(
             deletion_ledger=deletion_ledger,
             _construction_token=_AUTHORITY_ADAPTER_TOKEN,
         )
+        paperclip.reconcile_audit_retention_intents()
         evidence = _AuthorityTenantEvidenceStore(
             database_path,
             timeout_seconds=timeout_seconds,
@@ -861,6 +879,14 @@ def _run_platform_authority_host(
                     ):
                         authority_clock.set(parse_time(command["value"]))
                         control.send("TIME_SET")
+                    elif (
+                        isinstance(command, dict)
+                        and command.get("operation")
+                        == "inject_audit_retention_failure"
+                        and isinstance(command.get("point"), str)
+                    ):
+                        paperclip._inject_audit_retention_failure(command["point"])
+                        control.send("AUDIT_RETENTION_FAILURE_SET")
                     else:
                         control.send("AUTHORITY_CONTROL_INVALID")
                 try:

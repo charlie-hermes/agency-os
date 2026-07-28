@@ -15,8 +15,8 @@ This fictional reference deliberately does five things:
    approvals, deadline-enforced restartable collaboration decisions, tenant
    evidence/artifact durability, a fictional durable lease/retry queue,
    exact-manifest coordinated local tenant offboarding, and complete attested
-   logical tenant export/restore, plus versioned local audit-retention policy
-   and content-free tenant telemetry; and
+   logical tenant export/restore, plus crash-recoverable versioned local
+   audit-retention policy and content-free tenant telemetry; and
 5. admits one exact installed Paperclip/Buzz command contract from read-only,
    checksum-pinned target-host evidence while failing closed on drift.
 

@@ -685,6 +685,15 @@ class _SQLiteArtifactDeletionLedger:
                     PRIMARY KEY (authority_id, brand_id, revision),
                     UNIQUE (authority_id, brand_id, policy_checksum)
                 );
+                CREATE TABLE tenant_audit_retention_intents (
+                    authority_id TEXT NOT NULL,
+                    brand_id TEXT NOT NULL,
+                    revision INTEGER NOT NULL,
+                    policy_checksum TEXT NOT NULL,
+                    policy_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    PRIMARY KEY (authority_id, brand_id)
+                );
                 """
             )
             connection.execute(
@@ -806,6 +815,36 @@ class _SQLiteArtifactDeletionLedger:
             }:
                 raise ArtifactStoreError(
                     "audit retention anchor ledger schema is invalid"
+                )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS tenant_audit_retention_intents (
+                    authority_id TEXT NOT NULL,
+                    brand_id TEXT NOT NULL,
+                    revision INTEGER NOT NULL,
+                    policy_checksum TEXT NOT NULL,
+                    policy_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    PRIMARY KEY (authority_id, brand_id)
+                )
+                """
+            )
+            intent_columns = {
+                str(row[1])
+                for row in connection.execute(
+                    "PRAGMA table_info(tenant_audit_retention_intents)"
+                ).fetchall()
+            }
+            if intent_columns != {
+                "authority_id",
+                "brand_id",
+                "revision",
+                "policy_checksum",
+                "policy_json",
+                "created_at",
+            }:
+                raise ArtifactStoreError(
+                    "audit retention intent ledger schema is invalid"
                 )
             connection.commit()
         except ArtifactStoreError:
@@ -952,6 +991,126 @@ class _SQLiteArtifactDeletionLedger:
             ),
         )
 
+    def audit_retention_intents(
+        self,
+        connection: sqlite3.Connection,
+        brand_id: str | None = None,
+    ) -> list[tuple[str, int, str, str, str]]:
+        if brand_id is None:
+            rows = connection.execute(
+                """
+                SELECT brand_id, revision, policy_checksum, policy_json, created_at
+                FROM tenant_audit_retention_intents
+                WHERE authority_id = ? ORDER BY brand_id
+                """,
+                (self.authority_id,),
+            ).fetchall()
+        else:
+            rows = connection.execute(
+                """
+                SELECT brand_id, revision, policy_checksum, policy_json, created_at
+                FROM tenant_audit_retention_intents
+                WHERE authority_id = ? AND brand_id = ?
+                """,
+                (self.authority_id, brand_id),
+            ).fetchall()
+        validated: list[tuple[str, int, str, str, str]] = []
+        for row in rows:
+            intent_brand_id, revision, checksum, policy_json, created_at = row
+            if (
+                not isinstance(intent_brand_id, str)
+                or not intent_brand_id
+                or isinstance(revision, bool)
+                or not isinstance(revision, int)
+                or revision < 1
+                or not isinstance(checksum, str)
+                or not checksum.startswith("sha256:")
+                or not isinstance(policy_json, str)
+                or not isinstance(created_at, str)
+            ):
+                raise ArtifactStoreError("audit retention intent is invalid")
+            parse_time(created_at)
+            validated.append(
+                (intent_brand_id, revision, checksum, policy_json, created_at)
+            )
+        return validated
+
+    def insert_audit_retention_intent(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        brand_id: str,
+        policy: Mapping[str, Any],
+    ) -> None:
+        policy_json = canonical_bytes(policy).decode("utf-8")
+        expected = (
+            brand_id,
+            policy["revision"],
+            policy["content_checksum"],
+            policy_json,
+            policy["effective_at"],
+        )
+        existing = self.audit_retention_intents(connection, brand_id)
+        if existing:
+            if existing != [expected]:
+                raise ArtifactStoreError("audit retention intent conflicts")
+            return
+        connection.execute(
+            """
+            INSERT INTO tenant_audit_retention_intents (
+                authority_id, brand_id, revision, policy_checksum,
+                policy_json, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                self.authority_id,
+                brand_id,
+                policy["revision"],
+                policy["content_checksum"],
+                policy_json,
+                policy["effective_at"],
+            ),
+        )
+
+    def complete_audit_retention_intent(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        brand_id: str,
+        policy: Mapping[str, Any],
+    ) -> None:
+        policy_json = canonical_bytes(policy).decode("utf-8")
+        expected = (
+            brand_id,
+            policy["revision"],
+            policy["content_checksum"],
+            policy_json,
+            policy["effective_at"],
+        )
+        if self.audit_retention_intents(connection, brand_id) != [expected]:
+            raise ArtifactStoreError("audit retention intent is invalid")
+        self.insert_audit_retention_anchor(
+            connection,
+            brand_id=brand_id,
+            policy=policy,
+        )
+        cursor = connection.execute(
+            """
+            DELETE FROM tenant_audit_retention_intents
+            WHERE authority_id = ? AND brand_id = ?
+              AND revision = ? AND policy_checksum = ? AND policy_json = ?
+            """,
+            (
+                self.authority_id,
+                brand_id,
+                policy["revision"],
+                policy["content_checksum"],
+                policy_json,
+            ),
+        )
+        if cursor.rowcount != 1:
+            raise ArtifactStoreError("audit retention intent is invalid")
+
     def authority_offboarding_receipt(
         self,
         connection: sqlite3.Connection,
@@ -1030,6 +1189,23 @@ class _AuthorityPaperclipAdapter:
         self._approval_authority = approval_authority
         self._audit_retention_authority = audit_retention_authority
         self._deletion_ledger = deletion_ledger
+        self._audit_retention_failure_point: str | None = None
+
+    def _inject_audit_retention_failure(self, point: str) -> None:
+        if point not in {
+            "after_intent_commit",
+            "after_policy_commit",
+            "after_anchor_commit",
+        }:
+            raise ValueError("audit retention failure point is invalid")
+        self._audit_retention_failure_point = point
+
+    def _maybe_fail_audit_retention(self, point: str) -> None:
+        if self._audit_retention_failure_point == point:
+            self._audit_retention_failure_point = None
+            raise PlatformAdapterError(
+                f"injected audit retention failure after {point.removeprefix('after_')}"
+            )
 
     def create_task(self, principal: Principal, task: Mapping[str, Any]) -> str:
         self._require_director(principal)
@@ -1681,11 +1857,29 @@ class _AuthorityPaperclipAdapter:
             or len(evidence_ref) > 512
         ):
             raise ContractError("audit retention policy evidence is required")
+        pending = self._pending_audit_retention_policy(principal.brand_id)
+        if pending is not None:
+            if (
+                pending["minimum_retention_days"] != minimum_retention_days
+                or pending["evidence_ref"] != evidence_ref
+                or pending["approved_by"] != principal.actor_id
+            ):
+                raise ContractError(
+                    "conflicting audit retention policy recovery denied"
+                )
+            self.reconcile_audit_retention_intents(principal.brand_id)
+            return pending
+
         connection: sqlite3.Connection | None = None
-        anchor_connection: sqlite3.Connection | None = None
+        intent_connection: sqlite3.Connection | None = None
+        policy: dict[str, Any] | None = None
         try:
-            anchor_connection = self._deletion_ledger.connect()
-            anchor_connection.execute("BEGIN IMMEDIATE")
+            intent_connection = self._deletion_ledger.connect()
+            intent_connection.execute("BEGIN IMMEDIATE")
+            if self._deletion_ledger.audit_retention_intents(
+                intent_connection, principal.brand_id
+            ):
+                raise PlatformAdapterError("audit retention recovery is pending")
             connection = self._database.connect()
             connection.execute("BEGIN IMMEDIATE")
             row = connection.execute(
@@ -1700,7 +1894,7 @@ class _AuthorityPaperclipAdapter:
                 current = self._current_audit_retention_policy(
                     connection,
                     principal.brand_id,
-                    anchor_connection=anchor_connection,
+                    anchor_connection=intent_connection,
                 )
                 if minimum_retention_days < current["minimum_retention_days"]:
                     raise ContractError("audit retention cannot be shortened")
@@ -1708,11 +1902,11 @@ class _AuthorityPaperclipAdapter:
                     minimum_retention_days == current["minimum_retention_days"]
                     and evidence_ref == current["evidence_ref"]
                 ):
-                    anchor_connection.commit()
+                    intent_connection.commit()
                     connection.commit()
                     return current
             elif self._deletion_ledger.audit_retention_anchors(
-                anchor_connection, principal.brand_id
+                intent_connection, principal.brand_id
             ):
                 raise PlatformAdapterError("audit retention policy is invalid")
             effective_at = _authority_now(self._clock).isoformat()
@@ -1731,39 +1925,19 @@ class _AuthorityPaperclipAdapter:
                     "effective_at": effective_at,
                 }
             )
-            connection.execute(
-                """
-                INSERT INTO tenant_audit_retention_policies (
-                    brand_id, revision, record_json, checksum, effective_at
-                ) VALUES (?, ?, ?, ?, ?)
-                """,
-                (
-                    principal.brand_id,
-                    policy["revision"],
-                    canonical_bytes(policy).decode("utf-8"),
-                    policy["content_checksum"],
-                    effective_at,
-                ),
-            )
-            self._deletion_ledger.insert_audit_retention_anchor(
-                anchor_connection,
+            self._deletion_ledger.insert_audit_retention_intent(
+                intent_connection,
                 brand_id=principal.brand_id,
                 policy=policy,
             )
-            self._insert_audit(
-                connection,
-                principal,
-                "authority.audit_retention_policy.recorded",
-                policy["content_checksum"],
-            )
-            anchor_connection.commit()
+            intent_connection.commit()
             connection.commit()
-            return policy
+            self._maybe_fail_audit_retention("after_intent_commit")
         except (AuthorizationError, ContractError, PlatformAdapterError):
             if connection is not None:
                 _rollback(connection)
-            if anchor_connection is not None:
-                _rollback(anchor_connection)
+            if intent_connection is not None:
+                _rollback(intent_connection)
             raise
         except (
             ArtifactStoreError,
@@ -1774,16 +1948,215 @@ class _AuthorityPaperclipAdapter:
         ) as exc:
             if connection is not None:
                 _rollback(connection)
-            if anchor_connection is not None:
-                _rollback(anchor_connection)
+            if intent_connection is not None:
+                _rollback(intent_connection)
             raise PlatformAdapterError(
                 "could not record audit retention policy"
             ) from exc
         finally:
             if connection is not None:
                 connection.close()
-            if anchor_connection is not None:
-                anchor_connection.close()
+            if intent_connection is not None:
+                intent_connection.close()
+        if policy is None:  # pragma: no cover - guarded by successful intent creation
+            raise PlatformAdapterError("audit retention policy was not recorded")
+        self.reconcile_audit_retention_intents(principal.brand_id)
+        return policy
+
+    def reconcile_audit_retention_intents(
+        self, brand_id: str | None = None
+    ) -> None:
+        intent_connection = self._deletion_ledger.connect()
+        try:
+            brands = [
+                row[0]
+                for row in self._deletion_ledger.audit_retention_intents(
+                    intent_connection, brand_id
+                )
+            ]
+        except ArtifactStoreError as exc:
+            raise PlatformAdapterError(
+                "audit retention recovery is invalid"
+            ) from exc
+        finally:
+            intent_connection.close()
+        for pending_brand_id in brands:
+            self._reconcile_audit_retention_intent(pending_brand_id)
+
+    def _pending_audit_retention_policy(
+        self, brand_id: str
+    ) -> dict[str, Any] | None:
+        connection = self._deletion_ledger.connect()
+        try:
+            intents = self._deletion_ledger.audit_retention_intents(
+                connection, brand_id
+            )
+            if not intents:
+                return None
+            intent_brand_id, revision, checksum, policy_json, created_at = intents[0]
+            policy = self._validated_audit_retention_policy(
+                json.loads(policy_json),
+                brand_id,
+                self._audit_retention_authority,
+            )
+            if (
+                intent_brand_id != brand_id
+                or revision != policy["revision"]
+                or checksum != policy["content_checksum"]
+                or created_at != policy["effective_at"]
+            ):
+                raise PlatformAdapterError("audit retention recovery is invalid")
+            return policy
+        except (ContractError, PlatformAdapterError):
+            raise
+        except (ArtifactStoreError, json.JSONDecodeError, TypeError, ValueError) as exc:
+            raise PlatformAdapterError("audit retention recovery is invalid") from exc
+        finally:
+            connection.close()
+
+    def _reconcile_audit_retention_intent(self, brand_id: str) -> None:
+        connection: sqlite3.Connection | None = None
+        intent_connection: sqlite3.Connection | None = None
+        try:
+            intent_connection = self._deletion_ledger.connect()
+            intent_connection.execute("BEGIN IMMEDIATE")
+            intents = self._deletion_ledger.audit_retention_intents(
+                intent_connection, brand_id
+            )
+            if not intents:
+                intent_connection.commit()
+                return
+            intent_brand_id, revision, checksum, policy_json, created_at = intents[0]
+            policy = self._validated_audit_retention_policy(
+                json.loads(policy_json),
+                brand_id,
+                self._audit_retention_authority,
+            )
+            if (
+                intent_brand_id != brand_id
+                or revision != policy["revision"]
+                or checksum != policy["content_checksum"]
+                or created_at != policy["effective_at"]
+            ):
+                raise PlatformAdapterError("audit retention recovery is invalid")
+            anchors = self._deletion_ledger.audit_retention_anchors(
+                intent_connection, brand_id
+            )
+            if (
+                policy["revision"] != len(anchors) + 1
+                or policy["previous_checksum"]
+                != (None if not anchors else anchors[-1][1])
+                or (
+                    anchors
+                    and policy["minimum_retention_days"] < anchors[-1][2]
+                )
+            ):
+                raise PlatformAdapterError("audit retention recovery is invalid")
+
+            connection = self._database.connect()
+            connection.execute("BEGIN IMMEDIATE")
+            policies = self._audit_retention_policy_rows(connection, brand_id)
+            if len(policies) not in {len(anchors), len(anchors) + 1}:
+                raise PlatformAdapterError("audit retention recovery is invalid")
+            for stored_policy, anchor in zip(
+                policies[: len(anchors)], anchors, strict=True
+            ):
+                if anchor != (
+                    stored_policy["revision"],
+                    stored_policy["content_checksum"],
+                    stored_policy["minimum_retention_days"],
+                    stored_policy["effective_at"],
+                ):
+                    raise PlatformAdapterError("audit retention recovery is invalid")
+            if len(policies) == len(anchors):
+                connection.execute(
+                    """
+                    INSERT INTO tenant_audit_retention_policies (
+                        brand_id, revision, record_json, checksum, effective_at
+                    ) VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (
+                        brand_id,
+                        policy["revision"],
+                        canonical_bytes(policy).decode("utf-8"),
+                        policy["content_checksum"],
+                        policy["effective_at"],
+                    ),
+                )
+                self._insert_audit(
+                    connection,
+                    Principal(
+                        policy["approved_by"], "agency-director", brand_id
+                    ),
+                    "authority.audit_retention_policy.recorded",
+                    policy["content_checksum"],
+                )
+            elif policies[-1] != policy:
+                raise PlatformAdapterError("audit retention recovery is invalid")
+            connection.commit()
+            self._maybe_fail_audit_retention("after_policy_commit")
+            self._deletion_ledger.complete_audit_retention_intent(
+                intent_connection,
+                brand_id=brand_id,
+                policy=policy,
+            )
+            intent_connection.commit()
+            self._maybe_fail_audit_retention("after_anchor_commit")
+        except PlatformAdapterError:
+            if connection is not None:
+                _rollback(connection)
+            if intent_connection is not None:
+                _rollback(intent_connection)
+            raise
+        except (
+            ArtifactStoreError,
+            json.JSONDecodeError,
+            sqlite3.Error,
+            TypeError,
+            ValueError,
+        ) as exc:
+            if connection is not None:
+                _rollback(connection)
+            if intent_connection is not None:
+                _rollback(intent_connection)
+            raise PlatformAdapterError("audit retention recovery is invalid") from exc
+        finally:
+            if connection is not None:
+                connection.close()
+            if intent_connection is not None:
+                intent_connection.close()
+
+    def _audit_retention_policy_rows(
+        self, connection: sqlite3.Connection, brand_id: str
+    ) -> list[dict[str, Any]]:
+        rows = connection.execute(
+            """
+            SELECT revision, record_json, checksum, effective_at
+            FROM tenant_audit_retention_policies
+            WHERE brand_id = ? ORDER BY revision
+            """,
+            (brand_id,),
+        ).fetchall()
+        policies: list[dict[str, Any]] = []
+        previous_checksum: str | None = None
+        previous_days = 0
+        for expected_revision, row in enumerate(rows, start=1):
+            policy = self._validated_audit_retention_policy(
+                json.loads(row[1]), brand_id, self._audit_retention_authority
+            )
+            if (
+                row[0] != expected_revision
+                or policy["revision"] != row[0]
+                or policy["previous_checksum"] != previous_checksum
+                or policy["content_checksum"] != row[2]
+                or policy["effective_at"] != row[3]
+                or policy["minimum_retention_days"] < previous_days
+            ):
+                raise PlatformAdapterError("audit retention policy is invalid")
+            policies.append(policy)
+            previous_checksum = policy["content_checksum"]
+            previous_days = policy["minimum_retention_days"]
+        return policies
 
     def audit_retention_policy(self, principal: Principal) -> dict[str, Any]:
         self._require_audit_reader(principal)
@@ -2147,6 +2520,10 @@ class _AuthorityPaperclipAdapter:
             anchors = self._deletion_ledger.audit_retention_anchors(
                 anchor_connection, brand_id
             )
+            if self._deletion_ledger.audit_retention_intents(
+                anchor_connection, brand_id
+            ):
+                raise ArtifactStoreError("audit retention recovery is pending")
         except ArtifactStoreError as exc:
             raise PlatformAdapterError(
                 "audit retention policy is invalid"

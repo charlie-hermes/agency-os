@@ -476,9 +476,9 @@
       "phase": 5,
       "owner": "platform-assurance-reviewer",
       "release_blocker": true,
-      "fixture": "two fictional tenants, a director-controlled versioned retention policy, content-free telemetry, expired and current audit rows, restart, logical recovery and offboarding",
-      "command": "python3 -m unittest tests.test_platform_adapters.PlatformAdapterTests.test_audit_retention_and_telemetry_are_governed_and_tenant_scoped",
-      "expected_evidence": "unconfigured, wrong-role, too-early, stale-policy, recomputed whole-policy-chain, authentic-prefix rollback and forged-manifest paths deny atomically; exact expiry preserves an immutable receipt with no caller evidence text or actor ID plus a new audit event, survives restart/recovery, remains tenant-isolated, and keeps only the content-free receipt after offboarding"
+      "fixture": "two fictional tenants, a director-controlled versioned retention policy, deterministic failures after each cross-store durable commit, content-free telemetry, expired and current audit rows, restart, logical recovery and offboarding",
+      "command": "python3 -m unittest tests.test_platform_adapters.PlatformAdapterTests.test_audit_retention_policy_commit_failures_reconcile_exactly tests.test_platform_adapters.PlatformAdapterTests.test_audit_retention_and_telemetry_are_governed_and_tenant_scoped",
+      "expected_evidence": "protected signed policy intent makes every cross-store commit boundary exactly restartable, conflicting recovery denies and another tenant remains unchanged; unconfigured, wrong-role, too-early, stale-policy, recomputed whole-policy-chain, authentic-prefix rollback and forged-manifest paths deny atomically; exact expiry preserves an immutable receipt with no caller evidence text or actor ID plus a new audit event, survives restart/recovery, remains tenant-isolated, and keeps only the content-free receipt after offboarding"
     },
     {
       "id": "INSTALLED-PLATFORM-CONTRACT-001",

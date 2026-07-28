@@ -2850,6 +2850,22 @@ class PlatformAdapterTests(unittest.TestCase):
                 },
             )
             self.assertEqual(
+                {
+                    row[1]
+                    for row in connection.execute(
+                        "PRAGMA table_info(tenant_audit_retention_intents)"
+                    )
+                },
+                {
+                    "authority_id",
+                    "brand_id",
+                    "revision",
+                    "policy_checksum",
+                    "policy_json",
+                    "created_at",
+                },
+            )
+            self.assertEqual(
                 connection.execute(
                     """
                     SELECT revision, minimum_retention_days
@@ -2862,6 +2878,12 @@ class PlatformAdapterTests(unittest.TestCase):
                     ),
                 ).fetchone(),
                 (1, 30),
+            )
+            self.assertEqual(
+                connection.execute(
+                    "SELECT COUNT(*) FROM tenant_audit_retention_intents"
+                ).fetchone()[0],
+                0,
             )
 
     def test_recovery_host_requires_preprovisioned_deletion_ledger(self) -> None:
@@ -2944,6 +2966,218 @@ class PlatformAdapterTests(unittest.TestCase):
             self.artifacts.get(self.director, "learning_storage")
         with self.assertRaises(WorkQueueError):
             self.paperclip.work_queue().get(self.director, "work_storage")
+
+    def test_audit_retention_policy_commit_failures_reconcile_exactly(
+        self,
+    ) -> None:
+        original = self.paperclip.set_audit_retention_policy(
+            self.director,
+            minimum_retention_days=30,
+            evidence_ref="evidence://audit/crash-base",
+        )
+        foreign_policy = self.foreign_paperclip.set_audit_retention_policy(
+            self.foreign_director,
+            minimum_retention_days=45,
+            evidence_ref="evidence://audit/crash-foreign",
+        )
+
+        self.platform_host.inject_audit_retention_failure("after_intent_commit")
+        with self.assertRaises(PlatformAdapterError):
+            self.paperclip.set_audit_retention_policy(
+                self.director,
+                minimum_retention_days=60,
+                evidence_ref="evidence://audit/crash-after-intent",
+            )
+        with self.assertRaises(PlatformAdapterError):
+            self.paperclip.audit_retention_policy(self.director)
+        with self.assertRaises(ContractError):
+            self.paperclip.set_audit_retention_policy(
+                self.director,
+                minimum_retention_days=60,
+                evidence_ref="evidence://audit/conflicting-pending-retry",
+            )
+        with sqlite3.connect(self.database_path) as connection:
+            self.assertEqual(
+                connection.execute(
+                    """
+                    SELECT COUNT(*) FROM tenant_audit_retention_policies
+                    WHERE brand_id = ?
+                    """,
+                    (self.director.brand_id,),
+                ).fetchone()[0],
+                1,
+            )
+        with sqlite3.connect(self.deletion_ledger_path) as connection:
+            self.assertEqual(
+                connection.execute(
+                    """
+                    SELECT revision FROM tenant_audit_retention_intents
+                    WHERE authority_id = ? AND brand_id = ?
+                    """,
+                    (
+                        "fictional_paperclip_approval_authority",
+                        self.director.brand_id,
+                    ),
+                ).fetchone(),
+                (2,),
+            )
+
+        self.platform_host.close()
+        restarted = _provision_platform_authority_host(
+            self.database_path,
+            deletion_ledger_path=self.deletion_ledger_path,
+            authority_id="fictional_paperclip_approval_authority",
+            approval_signing_key=self.approval_signing_key,
+            initial_time=self.now,
+            principals=self.provisioned_principals,
+        )
+        self.addCleanup(restarted.close)
+        self.platform_host = restarted
+        self.paperclip = restarted.client(self.director)
+        self.foreign_paperclip = restarted.client(self.foreign_director)
+        after_intent = self.paperclip.audit_retention_policy(self.director)
+        self.assertEqual(after_intent["revision"], 2)
+        self.assertEqual(after_intent["minimum_retention_days"], 60)
+        self.assertEqual(
+            after_intent["previous_checksum"], original["content_checksum"]
+        )
+        self.assertEqual(
+            self.foreign_paperclip.audit_retention_policy(self.foreign_director),
+            foreign_policy,
+        )
+
+        restarted.inject_audit_retention_failure("after_policy_commit")
+        with self.assertRaises(PlatformAdapterError):
+            self.paperclip.set_audit_retention_policy(
+                self.director,
+                minimum_retention_days=90,
+                evidence_ref="evidence://audit/crash-after-policy",
+            )
+        with sqlite3.connect(self.database_path) as connection:
+            self.assertEqual(
+                connection.execute(
+                    """
+                    SELECT COUNT(*) FROM tenant_audit_retention_policies
+                    WHERE brand_id = ?
+                    """,
+                    (self.director.brand_id,),
+                ).fetchone()[0],
+                3,
+            )
+        with sqlite3.connect(self.deletion_ledger_path) as connection:
+            self.assertEqual(
+                connection.execute(
+                    """
+                    SELECT revision FROM tenant_audit_retention_intents
+                    WHERE authority_id = ? AND brand_id = ?
+                    """,
+                    (
+                        "fictional_paperclip_approval_authority",
+                        self.director.brand_id,
+                    ),
+                ).fetchone(),
+                (3,),
+            )
+            self.assertEqual(
+                connection.execute(
+                    """
+                    SELECT MAX(revision) FROM tenant_audit_retention_anchors
+                    WHERE authority_id = ? AND brand_id = ?
+                    """,
+                    (
+                        "fictional_paperclip_approval_authority",
+                        self.director.brand_id,
+                    ),
+                ).fetchone(),
+                (2,),
+            )
+
+        restarted.close()
+        restarted_after_policy = _provision_platform_authority_host(
+            self.database_path,
+            deletion_ledger_path=self.deletion_ledger_path,
+            authority_id="fictional_paperclip_approval_authority",
+            approval_signing_key=self.approval_signing_key,
+            initial_time=self.now,
+            principals=self.provisioned_principals,
+        )
+        self.addCleanup(restarted_after_policy.close)
+        self.platform_host = restarted_after_policy
+        self.paperclip = restarted_after_policy.client(self.director)
+        after_policy = self.paperclip.audit_retention_policy(self.director)
+        self.assertEqual(after_policy["revision"], 3)
+        self.assertEqual(after_policy["minimum_retention_days"], 90)
+
+        restarted_after_policy.inject_audit_retention_failure(
+            "after_anchor_commit"
+        )
+        with self.assertRaises(PlatformAdapterError):
+            self.paperclip.set_audit_retention_policy(
+                self.director,
+                minimum_retention_days=120,
+                evidence_ref="evidence://audit/crash-after-anchor",
+            )
+        completed = self.paperclip.audit_retention_policy(self.director)
+        self.assertEqual(completed["revision"], 4)
+        self.assertEqual(completed["minimum_retention_days"], 120)
+        self.assertEqual(
+            self.paperclip.set_audit_retention_policy(
+                self.director,
+                minimum_retention_days=120,
+                evidence_ref="evidence://audit/crash-after-anchor",
+            ),
+            completed,
+        )
+        with sqlite3.connect(self.deletion_ledger_path) as connection:
+            self.assertEqual(
+                connection.execute(
+                    "SELECT COUNT(*) FROM tenant_audit_retention_intents"
+                ).fetchone()[0],
+                0,
+            )
+            self.assertEqual(
+                connection.execute(
+                    """
+                    SELECT MAX(revision) FROM tenant_audit_retention_anchors
+                    WHERE authority_id = ? AND brand_id = ?
+                    """,
+                    (
+                        "fictional_paperclip_approval_authority",
+                        self.director.brand_id,
+                    ),
+                ).fetchone(),
+                (4,),
+            )
+        policy_events = [
+            event
+            for event in self.paperclip.audit_events(self.director)
+            if event["event_type"]
+            == "authority.audit_retention_policy.recorded"
+        ]
+        self.assertEqual(len(policy_events), 4)
+
+        restarted_after_policy.close()
+        final_restart = _provision_platform_authority_host(
+            self.database_path,
+            deletion_ledger_path=self.deletion_ledger_path,
+            authority_id="fictional_paperclip_approval_authority",
+            approval_signing_key=self.approval_signing_key,
+            initial_time=self.now,
+            principals=self.provisioned_principals,
+        )
+        self.addCleanup(final_restart.close)
+        self.assertEqual(
+            final_restart.client(self.director).audit_retention_policy(
+                self.director
+            ),
+            completed,
+        )
+        self.assertEqual(
+            final_restart.client(self.foreign_director).audit_retention_policy(
+                self.foreign_director
+            ),
+            foreign_policy,
+        )
 
     def test_audit_retention_and_telemetry_are_governed_and_tenant_scoped(
         self,
