@@ -16,6 +16,7 @@ from agency_os.integrations import (
     BuzzCliTransport,
     IntegrationError,
     PaperclipHTTPTransport,
+    PaperclipBoardHTTPTransport,
     PaperclipBoardApprovalAdapter,
     PaperclipBrandBinding,
     PaperclipLifecycleAdapter,
@@ -62,6 +63,35 @@ class IntegrationTests(unittest.TestCase):
             PaperclipHTTPTransport(base_url="http://example.com", bearer_token="x")
         with self.assertRaises(IntegrationError):
             transport.request("DELETE", "/api/issues/one")
+        approval_id = "00000000-0000-4000-8000-000000000901"
+        with self.assertRaises(IntegrationError):
+            transport.request(
+                "POST", f"/api/approvals/{approval_id}/approve",
+                {"decisionNote": "must use board identity"},
+            )
+
+        board_captured = {}
+
+        def board_opener(request: object, *, timeout: float) -> _Response:
+            board_captured["request"] = request
+            return _Response({"id": approval_id, "status": "approved"})
+
+        board_transport = PaperclipBoardHTTPTransport(
+            base_url="http://172.30.0.1:3100",
+            bearer_token="board-secret-canary",
+            opener=board_opener,
+        )
+        self.assertEqual(
+            board_transport.decide(
+                approval_id, decision="approve", decision_note="human approval"
+            )["status"],
+            "approved",
+        )
+        self.assertEqual(
+            board_captured["request"].get_header("Authorization"),
+            "Bearer board-secret-canary",
+        )
+        self.assertFalse(hasattr(board_transport, "request"))
 
     def test_lifecycle_adapter_uses_exact_routes_and_separate_board_authority(self) -> None:
         transport = InMemoryPaperclipTransport(company_id=COMPANY_ID, brand_id="brand_lantern")
@@ -69,10 +99,10 @@ class IntegrationTests(unittest.TestCase):
         adapter = PaperclipLifecycleAdapter(transport, binding)
         board = PaperclipBoardApprovalAdapter(InMemoryPaperclipBoardTransport(transport), binding)
         task = adapter.create_task(
-            title="Proof", stage="qa", acceptance_criteria=["pass"],
+            title="Proof", campaign_id="camp_proof", stage="qa", acceptance_criteria=["pass"],
             idempotency_key="proof-1", artifact_refs=["qa_v1"], status="todo",
         )
-        manifest = finalize_record({"brand_id": "brand_lantern", "manifest_id": "m1"})
+        manifest = finalize_record({"brand_id": "brand_lantern", "campaign_id": "camp_proof", "manifest_id": "m1"})
         approval = adapter.request_approval(issue_ids=[task["id"]], manifest=manifest)
         self.assertEqual(UUID(task["id"]).version, 4)
         create_call = transport.calls[-1]
@@ -87,12 +117,20 @@ class IntegrationTests(unittest.TestCase):
         )
         self.assertEqual(decided["status"], "approved")
         self.assertEqual(UUID(approval["id"]).version, 4)
-        with self.assertRaises(IntegrationError):
-            board.transport.request("GET", f"/api/approvals/{approval['id']}")
+        self.assertFalse(hasattr(board.transport, "request"))
         self.assertEqual(
             [item["id"] for item in adapter.get_approval_issues(approval["id"])],
             [task["id"]],
         )
+        other_campaign = adapter.create_task(
+            title="Other campaign", campaign_id="camp_other", stage="qa",
+            acceptance_criteria=["separate"], idempotency_key="proof-other",
+        )
+        with self.assertRaises(ContractError):
+            adapter.request_approval(
+                issue_ids=[task["id"], other_campaign["id"]],
+                manifest=manifest,
+            )
         event = adapter.record_cost(
             {
                 "agentId": "00000000-0000-4000-8000-000000000008",
@@ -161,6 +199,7 @@ class IntegrationTests(unittest.TestCase):
             ["admin", "delete", "--channel", "c1"],
             ["messages", "get", "--channel", "c1", "--channel", "c2"],
             ["messages", "send", "--broadcast"],
+            ["messages", "send", "--channel", "c1", "--content", "--broadcast"],
         )
         for arguments in denied:
             with self.assertRaises(IntegrationError):

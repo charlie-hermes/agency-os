@@ -452,6 +452,21 @@ def run_fictional_article() -> VerticalSliceResult:
     prepared = prepare_fictional_article()
     now = prepared.prepared_at
     manifest = prepared.records["manifest"]
+    paperclip_evidence = finalize_record(
+        {
+            "schema_version": "1.0",
+            "artifact_type": "paperclip_approval_evidence",
+            "brand_id": manifest["brand_id"],
+            "company_id": "00000000-0000-4000-8000-000000000001",
+            "paperclip_approval_id": "00000000-0000-4000-8000-000000000901",
+            "status": "approved",
+            "issue_ids": ["00000000-0000-4000-8000-000000000107"],
+            "manifest_checksum": manifest["content_checksum"],
+            "observed_at": now.isoformat(),
+        }
+    )
+    prepared.records["paperclip_approval_evidence"] = paperclip_evidence
+
     approval = make_approval_record(
         approval_id="approval_guide_v1",
         manifest=manifest,
@@ -459,5 +474,9 @@ def run_fictional_article() -> VerticalSliceResult:
         authority_role="brand_owner",
         decided_at=now.isoformat(),
         expires_at=(now + timedelta(minutes=30)).isoformat(),
+        paperclip_approval_id=paperclip_evidence["paperclip_approval_id"],
+        paperclip_approval_evidence_checksum=paperclip_evidence[
+            "content_checksum"
+        ],
     )
     return dispatch_prepared_article(prepared, approval=approval)

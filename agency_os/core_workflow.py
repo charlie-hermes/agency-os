@@ -8,12 +8,7 @@ from typing import Any, Callable, Mapping
 
 from .contracts import finalize_record, make_approval_record
 from .gateway import MockPublisher
-from .integrations import (
-    BuzzTransport,
-    PaperclipLifecycleAdapter,
-    PaperclipTransport,
-    TypedBuzzAdapter,
-)
+from .integrations import PaperclipLifecycleAdapter, TypedBuzzAdapter
 from .operator_view import build_campaign_projection
 from .workflow import VerticalSliceResult, dispatch_prepared_article, prepare_fictional_article
 
@@ -41,9 +36,6 @@ ApprovalAuthority = Callable[
 
 @dataclass
 class CoreWorkflowResult:
-    paperclip: PaperclipLifecycleAdapter
-    paperclip_transport: PaperclipTransport
-    buzz_transport: BuzzTransport
     vertical_slice: VerticalSliceResult
     tasks_by_role: dict[str, dict[str, Any]]
     records: dict[str, dict[str, Any]]
@@ -89,9 +81,6 @@ def run_core_workflow(
 ) -> CoreWorkflowResult:
     """Run onboarding through learning with a real reject/revise branch."""
 
-    paperclip_transport = paperclip.transport
-    buzz_transport = buzz.transport
-
     definitions = (
         ("agency-director", "Direct Lantern Core campaign", "campaign_direction", ["campaign graph accepted"], ["campaign_brief_v1"]),
         ("brand-brief-steward", "Validate Lantern brand and brief", "onboarding", ["brand truth and constraints approved"], ["brand_profile_v1", "campaign_brief_v1"]),
@@ -109,6 +98,7 @@ def run_core_workflow(
         is_director = role_id == "agency-director"
         task = paperclip.create_task(
             title=title,
+            campaign_id="camp_summer",
             stage=stage,
             acceptance_criteria=criteria,
             parent_id=None if is_director else root_id,
@@ -180,7 +170,20 @@ def run_core_workflow(
     channel = buzz.create_context_channel(campaign_id="camp_summer", purpose="Resolve QA finding UNSUPPORTED_CLAIM", ttl_seconds=900)
     buzz.post_context(channel["id"], {"brand_id": "brand_lantern", "campaign_id": "camp_summer", "paperclip_issue_id": producer_task["id"], "decision_needed": "revision disposition", "exit_condition": "evidence-safe wording agreed"})
     decision = buzz.post_decision(channel["id"], paperclip_issue_id=producer_task["id"], decision="Remove the guarantee; retain only the supported five-check decision aid.", evidence_refs=["qa_revise_v0", "source_observation_v1"])
-    paperclip.comment(producer_task["id"], f"Buzz decision write-back {decision['id']}: remove guarantee; evidence qa_revise_v0 and source_observation_v1.")
+    writeback = paperclip.comment(producer_task["id"], f"Buzz decision write-back {decision['id']}: remove guarantee; evidence qa_revise_v0 and source_observation_v1.")
+    records["buzz_decision_writeback"] = _artifact(
+        "buzz_decision_writeback",
+        "buzz_decision_writeback_v1",
+        issue_id=producer_task["id"],
+        role_id="content-producer",
+        payload={
+            "buzz_message_id": decision["id"],
+            "buzz_channel_id": channel["id"],
+            "paperclip_comment_id": writeback["id"],
+            "decision_authority": "paperclip_writeback",
+        },
+        source_artifact_ids=["qa_revise_v0", "source_observation_v1"],
+    )
 
     prepared = prepare_fictional_article(
         issue_id=tasks_by_role["publishing-operator"]["id"],
@@ -257,13 +260,11 @@ def run_core_workflow(
 
     projection = build_campaign_projection(
         paperclip,
+        campaign_id="camp_summer",
         task_ids=[item["id"] for item in tasks_by_role.values()],
         approval_ids=[approval["id"]],
     )
     return CoreWorkflowResult(
-        paperclip=paperclip,
-        paperclip_transport=paperclip_transport,
-        buzz_transport=buzz_transport,
         vertical_slice=vertical,
         tasks_by_role=tasks_by_role,
         records=records,

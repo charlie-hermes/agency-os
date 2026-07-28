@@ -35,6 +35,16 @@ class PaperclipTransport(Protocol):
     ) -> Any: ...
 
 
+class PaperclipBoardTransport(Protocol):
+    def decide(
+        self,
+        approval_id: str,
+        *,
+        decision: str,
+        decision_note: str,
+    ) -> Any: ...
+
+
 class BuzzTransport(Protocol):
     def run(self, arguments: Sequence[str]) -> Any: ...
 
@@ -140,6 +150,19 @@ class PaperclipHTTPTransport:
     ) -> Any:
         if method not in {"GET", "POST", "PATCH"} or not path.startswith("/api/"):
             raise IntegrationError("Paperclip operation is not admitted")
+        parts = path.removeprefix("/api/").split("/")
+        if (
+            method == "POST"
+            and len(parts) == 3
+            and parts[0] == "approvals"
+            and parts[2] in {"approve", "reject"}
+        ):
+            raise IntegrationError("Paperclip board operation requires board transport")
+        return self._request_json(method, path, payload)
+
+    def _request_json(
+        self, method: str, path: str, payload: Mapping[str, Any] | None
+    ) -> Any:
         body = None if payload is None else canonical_bytes(dict(payload))
         request = urllib.request.Request(
             f"{self._base_url}{path}",
@@ -160,6 +183,42 @@ class PaperclipHTTPTransport:
             return json.loads(raw.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
             raise IntegrationError("Paperclip response is not valid JSON") from exc
+
+
+class PaperclipBoardHTTPTransport:
+    """Separately credentialed HTTP transport exposing board decisions only."""
+
+    def __init__(
+        self,
+        *,
+        base_url: str,
+        bearer_token: str,
+        timeout_seconds: float = 10.0,
+        opener: Callable[..., Any] = urllib.request.urlopen,
+    ) -> None:
+        self._http = PaperclipHTTPTransport(
+            base_url=base_url,
+            bearer_token=bearer_token,
+            timeout_seconds=timeout_seconds,
+            opener=opener,
+        )
+
+    def decide(
+        self,
+        approval_id: str,
+        *,
+        decision: str,
+        decision_note: str,
+    ) -> Any:
+        if decision not in {"approve", "reject"} or not decision_note:
+            raise ContractError("Paperclip approval decision is invalid")
+        approval_id = _require_uuid(approval_id, "Paperclip approval_id")
+        return self._http._request_json(
+            "POST",
+            f"/api/approvals/{approval_id}/{decision}",
+            {"decisionNote": decision_note},
+        )
+
 
 
 @dataclass(frozen=True)
@@ -185,6 +244,7 @@ class PaperclipLifecycleAdapter:
         self,
         *,
         title: str,
+        campaign_id: str,
         stage: str,
         acceptance_criteria: Sequence[str],
         parent_id: str | None = None,
@@ -193,11 +253,18 @@ class PaperclipLifecycleAdapter:
         idempotency_key: str,
         artifact_refs: Sequence[str] = (),
     ) -> dict[str, Any]:
-        if not title or not stage or status not in self._STATUSES:
+        if (
+            not title
+            or not isinstance(campaign_id, str)
+            or not campaign_id
+            or not stage
+            or status not in self._STATUSES
+        ):
             raise ContractError("Paperclip task input is invalid")
         metadata = {
             "schema_version": "1.0",
             "brand_id": self.brand_id,
+            "campaign_id": campaign_id,
             "stage": stage,
             "acceptance_criteria": list(acceptance_criteria),
             "artifact_refs": list(artifact_refs),
@@ -303,14 +370,24 @@ class PaperclipLifecycleAdapter:
         manifest: Mapping[str, Any],
         requested_by_agent_id: str | None = None,
     ) -> dict[str, Any]:
-        if not issue_ids or manifest.get("brand_id") != self.brand_id:
+        campaign_id = manifest.get("campaign_id")
+        if (
+            not issue_ids
+            or manifest.get("brand_id") != self.brand_id
+            or not isinstance(campaign_id, str)
+            or not campaign_id
+        ):
             raise ContractError("Paperclip approval tenant binding is invalid")
         validated_issue_ids = [
             _require_uuid(item, "Paperclip approval issue_id")
             for item in issue_ids
         ]
         for item in validated_issue_ids:
-            self.get_task(item)
+            task = self.get_task(item)
+            if _task_metadata(task).get("campaign_id") != campaign_id:
+                raise ContractError(
+                    "Paperclip approval campaign binding is invalid"
+                )
         payload = {
             "type": "request_board_approval",
             "issueIds": validated_issue_ids,
@@ -405,7 +482,7 @@ class PaperclipLifecycleAdapter:
 class PaperclipBoardApprovalAdapter:
     """Decision surface requiring a separately authenticated board transport."""
 
-    transport: PaperclipTransport
+    transport: PaperclipBoardTransport
     binding: PaperclipBrandBinding
 
     def decide_approval(
@@ -419,10 +496,10 @@ class PaperclipBoardApprovalAdapter:
             raise ContractError("Paperclip approval decision is invalid")
         approval_id = _require_uuid(approval_id, "Paperclip approval_id")
         return _approval_binding(
-            self.transport.request(
-                "POST",
-                f"/api/approvals/{approval_id}/{decision}",
-                {"decisionNote": decision_note},
+            self.transport.decide(
+                approval_id,
+                decision=decision,
+                decision_note=decision_note,
             ),
             self.binding,
             "Paperclip approval decision",
@@ -463,6 +540,15 @@ def _validate_buzz_arguments(arguments: Sequence[str]) -> list[str]:
     if len(tail) % 2:
         raise IntegrationError("Buzz command arguments are invalid")
     flags = tail[::2]
+    values = tail[1::2]
+    if any(
+        not isinstance(flag, str) or not flag.startswith("--") for flag in flags
+    ):
+        raise IntegrationError("Buzz command flags are invalid")
+    if any(
+        not isinstance(value, str) or value.startswith("--") for value in values
+    ):
+        raise IntegrationError("Buzz command values are invalid")
     if len(flags) != len(set(flags)):
         raise IntegrationError("Buzz command repeats a flag")
     observed = set(flags)

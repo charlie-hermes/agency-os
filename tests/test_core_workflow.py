@@ -15,6 +15,7 @@ from agency_os.fictional_platforms import (
 )
 from agency_os.gateway import MockPublisher
 from agency_os.integrations import (
+    IntegrationError,
     PaperclipBoardApprovalAdapter,
     PaperclipBrandBinding,
     PaperclipLifecycleAdapter,
@@ -72,15 +73,22 @@ class CoreWorkflowTests(unittest.TestCase):
         self.assertEqual(local_approval["paperclip_approval_id"], result.approval["id"])
         self.assertEqual(result.vertical_slice.publisher.calls, 1)
         self.assertFalse(result.external_writes)
+        self.assertFalse(hasattr(result, "paperclip"))
+        self.assertFalse(hasattr(result, "paperclip_transport"))
+        self.assertFalse(hasattr(result, "buzz_transport"))
 
     def test_buzz_decision_is_written_back_and_never_becomes_task_authority(self) -> None:
         result = self.result
         producer_id = result.tasks_by_role["content-producer"]["id"]
-        messages = next(iter(result.buzz_transport.channel_messages.values()))
-        self.assertEqual(messages[-1]["content"]["authority"], "non_authoritative_until_written_to_paperclip")
-        comments = result.paperclip_transport.comments[producer_id]
-        self.assertTrue(any("Buzz decision write-back" in item["body"] for item in comments))
-        self.assertEqual(result.paperclip_transport.issues[producer_id]["status"], "done")
+        writeback = result.records["buzz_decision_writeback"]
+        self.assertEqual(writeback["paperclip_issue_id"], producer_id)
+        self.assertEqual(
+            writeback["payload"]["decision_authority"],
+            "paperclip_writeback",
+        )
+        self.assertTrue(writeback["payload"]["buzz_message_id"])
+        self.assertTrue(writeback["payload"]["paperclip_comment_id"])
+        self.assertEqual(result.tasks_by_role["content-producer"]["status"], "done")
 
     def test_operator_projection_is_read_only_and_paperclip_derived(self) -> None:
         projection = self.result.operator_projection
@@ -89,21 +97,40 @@ class CoreWorkflowTests(unittest.TestCase):
         self.assertEqual(projection["task_counts"], {"done": 8})
         self.assertEqual(len(projection["tasks"]), 8)
         self.assertEqual(projection["approvals"][0]["status"], "approved")
+        self.assertEqual(projection["campaign_id"], "camp_summer")
 
-        unrelated = self.result.paperclip.create_task(
-            title="Unrelated same-company task",
+        _, lifecycle, _, _, _ = _dependencies()
+        included = lifecycle.create_task(
+            title="Campaign task",
+            campaign_id="camp_summer",
+            stage="research",
+            acceptance_criteria=["projected"],
+            idempotency_key="campaign-task",
+            status="todo",
+        )
+        unrelated = lifecycle.create_task(
+            title="Other campaign task",
+            campaign_id="camp_other",
             stage="unrelated",
             acceptance_criteria=["not projected"],
             idempotency_key="unrelated-task",
             status="todo",
         )
         scoped = build_campaign_projection(
-            self.result.paperclip,
-            task_ids=[item["id"] for item in self.result.tasks_by_role.values()],
-            approval_ids=[self.result.approval["id"]],
+            lifecycle,
+            campaign_id="camp_summer",
+            task_ids=[included["id"]],
         )
-        self.assertEqual(len(scoped["tasks"]), 8)
-        self.assertNotIn(unrelated["id"], {item["paperclip_issue_id"] for item in scoped["tasks"]})
+        self.assertEqual(
+            [item["paperclip_issue_id"] for item in scoped["tasks"]],
+            [included["id"]],
+        )
+        with self.assertRaises(IntegrationError):
+            build_campaign_projection(
+                lifecycle,
+                campaign_id="camp_summer",
+                task_ids=[included["id"], unrelated["id"]],
+            )
 
     def test_denied_pending_and_altered_approvals_make_zero_publisher_calls(self) -> None:
         for outcome in ("rejected", "pending", "altered"):

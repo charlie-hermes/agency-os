@@ -184,8 +184,8 @@ def make_approval_record(
     authority_role: str,
     decided_at: str,
     expires_at: str,
-    paperclip_approval_id: str | None = None,
-    paperclip_approval_evidence_checksum: str | None = None,
+    paperclip_approval_id: str,
+    paperclip_approval_evidence_checksum: str,
 ) -> dict[str, Any]:
     verify_record(manifest)
     record = {
@@ -209,15 +209,16 @@ def make_approval_record(
         "expires_at": expires_at,
     }
     decision_time = parse_time(decided_at)
-    if (paperclip_approval_id is None) != (
-        paperclip_approval_evidence_checksum is None
-    ):
-        raise ContractError("Paperclip approval evidence binding is incomplete")
-    if paperclip_approval_id is not None:
-        record["paperclip_approval_id"] = paperclip_approval_id
-        record["paperclip_approval_evidence_checksum"] = (
-            paperclip_approval_evidence_checksum
-        )
+    paperclip_evidence = (
+        paperclip_approval_id,
+        paperclip_approval_evidence_checksum,
+    )
+    if not all(isinstance(value, str) and value for value in paperclip_evidence):
+        raise ContractError("Paperclip approval evidence is required")
+    record["paperclip_approval_id"] = paperclip_approval_id
+    record["paperclip_approval_evidence_checksum"] = (
+        paperclip_approval_evidence_checksum
+    )
     expiry_time = parse_time(expires_at)
     if decision_time >= expiry_time:
         raise ContractError("approval decided_at must precede expires_at")

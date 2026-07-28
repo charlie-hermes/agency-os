@@ -1190,6 +1190,27 @@ class GatewayTests(unittest.TestCase):
                 )
         self.assertEqual(self.publisher.calls, 0)
 
+    def test_missing_paperclip_evidence_is_denied_without_dispatch(self) -> None:
+        approval = copy.deepcopy(self.approval)
+        approval["approval_id"] = "approval_missing_paperclip_evidence"
+        approval.pop("paperclip_approval_id")
+        approval.pop("paperclip_approval_evidence_checksum")
+        approval = finalize_record(approval)
+        self._persist_approval(approval)
+
+        with self.assertRaises(GatewayDenied) as denied:
+            self.gateway.publish(
+                manifest=self.manifest,
+                approval_id=approval["approval_id"],
+                idempotency_key="missing-paperclip-evidence",
+            )
+
+        self.assertEqual(
+            str(denied.exception),
+            "PAPERCLIP_APPROVAL_EVIDENCE_INCOMPLETE",
+        )
+        self.assertEqual(self.publisher.calls, 0)
+
     def test_cross_brand_approval_reference_is_denied(self) -> None:
         approval = copy.deepcopy(self.approval)
         approval.update(

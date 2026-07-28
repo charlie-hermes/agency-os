@@ -182,23 +182,19 @@ class InMemoryPaperclipBoardTransport:
         self._authority = authority
         self.calls: list[tuple[str, str, dict[str, Any] | None]] = []
 
-    def request(
+    def decide(
         self,
-        method: str,
-        path: str,
-        payload: Mapping[str, Any] | None = None,
+        approval_id: str,
+        *,
+        decision: str,
+        decision_note: str,
     ) -> Any:
-        parts = path.removeprefix("/api/").split("/")
-        if (
-            method != "POST"
-            or len(parts) != 3
-            or parts[0] != "approvals"
-            or parts[2] not in {"approve", "reject"}
-        ):
+        if decision not in {"approve", "reject"} or not decision_note:
             raise IntegrationError("Paperclip board operation is not admitted")
-        body = None if payload is None else copy.deepcopy(dict(payload))
-        self.calls.append((method, path, body))
-        return self._authority.request(method, path, payload)
+        path = f"/api/approvals/{approval_id}/{decision}"
+        body = {"decisionNote": decision_note}
+        self.calls.append(("POST", path, body))
+        return self._authority.request("POST", path, body)
 
 
 class InMemoryBuzzTransport:
