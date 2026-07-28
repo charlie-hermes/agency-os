@@ -59,6 +59,7 @@ class IntegrationTests(unittest.TestCase):
         request = captured["request"]
         self.assertEqual(request.get_header("Authorization"), "Bearer paperclip-secret-canary")
         self.assertNotIn("paperclip-secret-canary", repr(transport.__dict__.keys()))
+        self.assertFalse(hasattr(transport, "_request_json"))
         with self.assertRaises(ValueError):
             PaperclipHTTPTransport(base_url="http://example.com", bearer_token="x")
         with self.assertRaises(IntegrationError):
@@ -96,6 +97,8 @@ class IntegrationTests(unittest.TestCase):
             "Bearer board-secret-canary",
         )
         self.assertFalse(hasattr(board_transport, "request"))
+        self.assertFalse(hasattr(board_transport, "_http"))
+        self.assertFalse(hasattr(board_transport, "_request_json"))
 
     def test_lifecycle_adapter_uses_exact_routes_and_separate_board_authority(self) -> None:
         transport = InMemoryPaperclipTransport(company_id=COMPANY_ID, brand_id="brand_lantern")

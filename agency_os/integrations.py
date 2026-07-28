@@ -111,7 +111,7 @@ class PaperclipBrandBinding:
 
 
 class PaperclipHTTPTransport:
-    """Authenticated JSON transport for the pinned private Paperclip API."""
+    """Authenticated lifecycle transport with no unguarded sender method."""
 
     def __init__(
         self,
@@ -160,11 +160,6 @@ class PaperclipHTTPTransport:
             raise IntegrationError("Paperclip query routes are not admitted")
         if method == "POST" and parsed_path.path.startswith("/api/approvals/"):
             raise IntegrationError("Paperclip board operation requires board transport")
-        return self._request_json(method, path, payload)
-
-    def _request_json(
-        self, method: str, path: str, payload: Mapping[str, Any] | None
-    ) -> Any:
         body = None if payload is None else canonical_bytes(dict(payload))
         request = urllib.request.Request(
             f"{self._base_url}{path}",
@@ -188,7 +183,7 @@ class PaperclipHTTPTransport:
 
 
 class PaperclipBoardHTTPTransport:
-    """Separately credentialed HTTP transport exposing board decisions only."""
+    """Independent board credential exposing only exact approval decisions."""
 
     def __init__(
         self,
@@ -198,12 +193,26 @@ class PaperclipBoardHTTPTransport:
         timeout_seconds: float = 10.0,
         opener: Callable[..., Any] = urllib.request.urlopen,
     ) -> None:
-        self._http = PaperclipHTTPTransport(
-            base_url=base_url,
-            bearer_token=bearer_token,
-            timeout_seconds=timeout_seconds,
-            opener=opener,
-        )
+        parsed = urllib.parse.urlparse(base_url)
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+            raise ValueError("Paperclip base URL is invalid")
+        if parsed.scheme == "http":
+            try:
+                address = ipaddress.ip_address(parsed.hostname)
+            except ValueError as exc:
+                raise ValueError(
+                    "plaintext Paperclip URL must use a private IP"
+                ) from exc
+            if not (address.is_private or address.is_loopback):
+                raise ValueError("plaintext Paperclip URL must remain private")
+        if not isinstance(bearer_token, str) or not bearer_token:
+            raise ValueError("Paperclip board bearer token is required")
+        if timeout_seconds <= 0:
+            raise ValueError("Paperclip timeout must be positive")
+        self._base_url = base_url.rstrip("/")
+        self._bearer_token = bearer_token
+        self._timeout_seconds = float(timeout_seconds)
+        self._opener = opener
 
     def decide(
         self,
@@ -215,12 +224,29 @@ class PaperclipBoardHTTPTransport:
         if decision not in {"approve", "reject"} or not decision_note:
             raise ContractError("Paperclip approval decision is invalid")
         approval_id = _require_uuid(approval_id, "Paperclip approval_id")
-        return self._http._request_json(
-            "POST",
-            f"/api/approvals/{approval_id}/{decision}",
-            {"decisionNote": decision_note},
+        path = f"/api/approvals/{approval_id}/{decision}"
+        body = canonical_bytes({"decisionNote": decision_note})
+        request = urllib.request.Request(
+            f"{self._base_url}{path}",
+            data=body,
+            method="POST",
+            headers={
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {self._bearer_token}",
+            },
         )
-
+        try:
+            with self._opener(request, timeout=self._timeout_seconds) as response:
+                raw = response.read()
+        except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError) as exc:
+            raise IntegrationError("Paperclip board request failed") from exc
+        try:
+            return json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise IntegrationError(
+                "Paperclip board response is not valid JSON"
+            ) from exc
 
 
 @dataclass(frozen=True)
