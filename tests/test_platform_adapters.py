@@ -1617,6 +1617,114 @@ class PlatformAdapterTests(unittest.TestCase):
             ["CONFIRMED_NO_WRITE", "DEAD_LETTER"],
         )
 
+    def test_post_lease_task_drift_blocks_internal_and_external_completion(
+        self,
+    ) -> None:
+        director_queue = self.paperclip.work_queue()
+
+        self.paperclip.create_task(self.director, self._task("issue_internal_drift"))
+        internal_planned = self.paperclip.get_task(
+            self.director, "issue_internal_drift"
+        )
+        internal_ready = self.paperclip.set_status(
+            self.director,
+            "issue_internal_drift",
+            internal_planned["content_checksum"],
+            "ready",
+        )
+        director_queue.enqueue(
+            self.director,
+            self._work_item("work_internal_drift", internal_ready),
+        )
+        internal_lease = self.strategist_paperclip.work_queue().lease_next(
+            self.strategist, 10
+        )
+        self.paperclip.set_status(
+            self.director,
+            "issue_internal_drift",
+            internal_ready["content_checksum"],
+            "in_progress",
+        )
+        internal_result = self.strategist_paperclip.work_queue().complete(
+            self.strategist,
+            "work_internal_drift",
+            internal_lease["lease"]["lease_token"],
+        )
+        self.assertEqual(internal_result["state"], "DEAD_LETTER")
+        self.assertEqual(internal_result["error_classes"], ["TASK_DRIFT"])
+
+        self.paperclip.create_task(self.director, self._task("issue_external_drift"))
+        external_planned = self.paperclip.get_task(
+            self.director, "issue_external_drift"
+        )
+        external_ready = self.paperclip.set_status(
+            self.director,
+            "issue_external_drift",
+            external_planned["content_checksum"],
+            "ready",
+        )
+        director_queue.enqueue(
+            self.director,
+            self._work_item(
+                "work_external_drift",
+                external_ready,
+                work_kind="external_write",
+                worker_role="publishing-operator",
+            ),
+        )
+        external_lease = self.publisher_paperclip.work_queue().lease_next(
+            self.publisher, 10
+        )
+        self.paperclip.set_status(
+            self.director,
+            "issue_external_drift",
+            external_ready["content_checksum"],
+            "in_progress",
+        )
+        external_result = self.publisher_paperclip.work_queue().complete(
+            self.publisher,
+            "work_external_drift",
+            external_lease["lease"]["lease_token"],
+        )
+        self.assertEqual(external_result["state"], "RECONCILIATION_REQUIRED")
+        self.assertEqual(external_result["error_classes"], ["TASK_DRIFT"])
+        self.assertIsNone(
+            self.publisher_paperclip.work_queue().lease_next(self.publisher, 10)
+        )
+
+        item_events = {
+            subject_id: [
+                event["event_type"]
+                for event in self.paperclip.audit_events(self.director)
+                if event["subject_id"] == subject_id
+            ]
+            for subject_id in ("work_internal_drift", "work_external_drift")
+        }
+        self.assertEqual(
+            item_events["work_internal_drift"],
+            [
+                "queue.item.enqueued",
+                "queue.item.leased",
+                "queue.item.dead_letter",
+            ],
+        )
+        self.assertEqual(
+            item_events["work_external_drift"],
+            [
+                "queue.item.enqueued",
+                "queue.item.leased",
+                "queue.item.task_drift.reconciliation_required",
+            ],
+        )
+        self.assertNotIn(
+            "queue.item.completed",
+            [
+                event_type
+                for event_types in item_events.values()
+                for event_type in event_types
+            ],
+        )
+
     def test_queue_is_tenant_role_immutable_and_task_version_bound(self) -> None:
         self.paperclip.create_task(self.director, self._task("issue_queue_bound"))
         draft = self.paperclip.get_task(self.director, "issue_queue_bound")

@@ -2712,6 +2712,38 @@ class _AuthorityWorkQueue:
             connection.execute("BEGIN IMMEDIATE")
             row = self._required_row(connection, principal.brand_id, work_item_id)
             self._require_active_lease(row, principal, lease_token, now)
+            work_item = self._validated_work_item(json.loads(row["work_json"]))
+            if not self._task_is_current(connection, work_item):
+                if row["work_kind"] == "internal":
+                    self._move_to_dead_letter(
+                        connection,
+                        principal,
+                        row,
+                        now,
+                        "TASK_DRIFT",
+                    )
+                else:
+                    errors = self._error_classes(row)
+                    errors.append("TASK_DRIFT")
+                    self._set_nonleased_state(
+                        connection,
+                        row,
+                        state="RECONCILIATION_REQUIRED",
+                        now=now,
+                        errors=errors,
+                        next_attempt_at=None,
+                    )
+                    _AuthorityPaperclipAdapter._insert_audit(
+                        connection,
+                        principal,
+                        "queue.item.task_drift.reconciliation_required",
+                        work_item_id,
+                    )
+                result = self._view(
+                    self._required_row(connection, principal.brand_id, work_item_id)
+                )
+                connection.commit()
+                return result
             connection.execute(
                 """
                 UPDATE platform_work_queue

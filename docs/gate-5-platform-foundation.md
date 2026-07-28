@@ -153,7 +153,10 @@ protected object-transfer path.
 the director can enqueue immutable work, and each item binds its tenant, assigned
 worker role and the exact checksum of a current `ready` or `in_progress`
 Paperclip task. A changed task version moves undelivered work to dead letter
-before lease; the queue never changes task status or represents task completion.
+before lease. Completion rechecks the task inside the same queue transaction:
+post-lease drift dead-letters internal work, while external work stops for
+destination reconciliation because its result may already be uncertain. The
+queue never changes task status or represents task completion.
 
 Lease tokens are random, returned only to the assigned actor, stored only as a
 SHA-256 hash, renewable for at most 60 seconds and removed on every terminal or
@@ -231,7 +234,8 @@ work.
 - external unknown/expired-lease reconciliation before retry, with no Paperclip
   task mutation;
 - queue tenant/role isolation, immutable identity and exact task-version drift
-  dead-lettering before delivery;
+  handling both before lease and at completion, including external reconciliation
+  when post-lease drift makes the destination result uncertain;
 - tenant-scoped persistent audit; and
 - replacement of the running authority database across every authority view,
   including the work queue.

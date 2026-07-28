@@ -151,13 +151,16 @@
 The fictional local Platform Authority queue now records renewable `leased_at`,
 `lease_owner`, `lease_expires_at`, attempt count and heartbeat state in protected
 SQLite. Work is immutable, tenant/role-scoped and bound to the exact current
-Paperclip task checksum; delivery never mutates Paperclip task state. Lease
-expiry is recorded and does not imply that an external write is absent. Internal
+Paperclip task checksum; delivery never mutates Paperclip task state. Completion
+rechecks that checksum in its queue transaction. Post-lease task drift
+dead-letters internal work and sends external work to director-owned destination
+reconciliation because the write result may already be uncertain. Lease expiry
+is recorded and does not imply that an external write is absent. Internal
 deterministic work retries only within a fixed item policy. External work in
-`UNKNOWN` state, including an expired lease, requires director-owned destination
-reconciliation before retry. Exhausted work moves to a durable dead letter with
-the original work, attempts and allowlisted error classes. Its evidence-bound
-human disposition is append-only and cannot reopen the item.
+`UNKNOWN` state, including an expired lease, requires reconciliation before
+retry. Exhausted work moves to a durable dead letter with the original work,
+attempts and allowlisted error classes. Its evidence-bound human disposition is
+append-only and cannot reopen the item.
 
 This is a single-host, fictional control path. It has no real dispatcher,
 provider credential or destination query. Artifact deletion does not delete
