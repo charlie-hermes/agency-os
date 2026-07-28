@@ -341,9 +341,10 @@ scheduler, multi-host expiration, backup expiry or storage-media erasure.
   target, restart and post-offboarding resurrection denial;
 - director-controlled monotonic audit-retention policy, protected signed intent
   and exact restart reconciliation across every cross-store commit boundary,
-  content-free tenant-scoped telemetry, exact-manifest expiration,
-  stale/forged/too-early denial, immutable receipts, restart/recovery continuity
-  and offboarding behavior;
+  authority-export denial until reconciliation completes, post-reconciliation
+  empty-target recovery, content-free tenant-scoped telemetry, exact-manifest
+  expiration, stale/forged/too-early denial, immutable receipts,
+  restart/recovery continuity and offboarding behavior;
 - tenant-scoped persistent audit; and
 - replacement of the running authority database across every authority view,
   including the work queue.

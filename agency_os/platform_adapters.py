@@ -4229,6 +4229,12 @@ class _AuthorityTenantRecovery:
         brand_id: str,
     ) -> None:
         try:
+            if self._deletion_ledger.audit_retention_intents(
+                ledger_connection, brand_id
+            ):
+                raise ArtifactStoreError(
+                    "tenant authority audit retention recovery is pending"
+                )
             anchors = self._deletion_ledger.audit_retention_anchors(
                 ledger_connection, brand_id
             )

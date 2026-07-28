@@ -2980,6 +2980,9 @@ class PlatformAdapterTests(unittest.TestCase):
             minimum_retention_days=45,
             evidence_ref="evidence://audit/crash-foreign",
         )
+        pre_interrupt_export = self.paperclip.export_tenant_authority(
+            self.director
+        )
 
         self.platform_host.inject_audit_retention_failure("after_intent_commit")
         with self.assertRaises(PlatformAdapterError):
@@ -2996,6 +2999,17 @@ class PlatformAdapterTests(unittest.TestCase):
                 minimum_retention_days=60,
                 evidence_ref="evidence://audit/conflicting-pending-retry",
             )
+        before_pending_export_denial = self.paperclip.audit_events(self.director)
+        with self.assertRaises(PlatformAdapterError):
+            self.paperclip.export_tenant_authority(self.director)
+        with self.assertRaises(PlatformAdapterError):
+            self.paperclip.restore_tenant_authority(
+                self.director, pre_interrupt_export
+            )
+        self.assertEqual(
+            self.paperclip.audit_events(self.director),
+            before_pending_export_denial,
+        )
         with sqlite3.connect(self.database_path) as connection:
             self.assertEqual(
                 connection.execute(
@@ -3045,6 +3059,25 @@ class PlatformAdapterTests(unittest.TestCase):
             self.foreign_paperclip.audit_retention_policy(self.foreign_director),
             foreign_policy,
         )
+        reconciled_export = self.paperclip.export_tenant_authority(self.director)
+        recovery_path = self.database_path.with_name(
+            "audit-retention-commit-recovery.sqlite3"
+        )
+        recovery_host = _provision_platform_authority_host(
+            recovery_path,
+            deletion_ledger_path=self.deletion_ledger_path,
+            authority_id="fictional_paperclip_approval_authority",
+            approval_signing_key=self.approval_signing_key,
+            initial_time=self.now,
+            principals=self.provisioned_principals,
+        )
+        self.addCleanup(recovery_host.close)
+        recovered = recovery_host.client(self.director)
+        recovered.restore_tenant_authority(self.director, reconciled_export)
+        self.assertEqual(
+            recovered.audit_retention_policy(self.director), after_intent
+        )
+        recovery_host.close()
 
         restarted.inject_audit_retention_failure("after_policy_commit")
         with self.assertRaises(PlatformAdapterError):
