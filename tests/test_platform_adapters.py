@@ -11,7 +11,10 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import agency_os
-from agency_os._approval_authority import _FictionalApprovalAuthority
+from agency_os._approval_authority import (
+    _FictionalApprovalAuthority,
+    _FictionalRecoveryAuthority,
+)
 from agency_os.contracts import (
     ContractError,
     canonical_bytes,
@@ -273,6 +276,15 @@ class PlatformAdapterTests(unittest.TestCase):
             set(tenant_export["records"]),
             {"brief_backup", "learning_backup"},
         )
+        self.assertEqual(tenant_export["exported_at"], self.now.isoformat())
+        self.assertEqual(
+            tenant_export["export_attestation"]["authority_id"],
+            "fictional_paperclip_approval_authority",
+        )
+        self.assertEqual(
+            tenant_export["export_attestation"]["brand_id"],
+            self.director.brand_id,
+        )
         publisher_artifacts = self.publisher_paperclip.artifacts()
         with self.assertRaises(AuthorizationError):
             publisher_artifacts.export_tenant(self.publisher)
@@ -285,35 +297,93 @@ class PlatformAdapterTests(unittest.TestCase):
         restore_path = self.database_path.with_name("restore.sqlite3")
         restored_host = _provision_platform_authority_host(
             restore_path,
-            authority_id="fictional_restore_authority",
-            approval_signing_key=os.urandom(32),
+            authority_id="fictional_paperclip_approval_authority",
+            approval_signing_key=self.approval_signing_key,
             initial_time=self.now,
             principals=self.provisioned_principals,
         )
         self.addCleanup(restored_host.close)
-        restored = restored_host.client(self.director).artifacts()
+        restored_paperclip = restored_host.client(self.director)
+        restored = restored_paperclip.artifacts()
         foreign_restored = restored_host.client(self.foreign_director).artifacts()
 
+        def recompute_public_checksums(value: dict) -> None:
+            for record in value["records"].values():
+                refreshed = finalize_record(record)
+                record.clear()
+                record.update(refreshed)
+            payload = {
+                key: value[key]
+                for key in (
+                    "schema_version",
+                    "brand_id",
+                    "record_count",
+                    "records",
+                    "provenance",
+                )
+            }
+            value["export_checksum"] = canonical_checksum(payload)
+            value["export_attestation"]["export_checksum"] = value[
+                "export_checksum"
+            ]
+
         tampered = copy.deepcopy(tenant_export)
-        tampered["records"]["brief_backup"]["summary"] = "tampered"
+        tampered["records"]["brief_backup"]["summary"] = "attacker altered content"
+        recompute_public_checksums(tampered)
         with self.assertRaises(ContractError):
             restored.restore_tenant(self.director, tampered)
 
-        forged_provenance = copy.deepcopy(tenant_export)
-        forged_provenance["provenance"]["brief_backup"]["role_id"] = (
+        forged_actor = copy.deepcopy(tenant_export)
+        forged_actor["provenance"]["brief_backup"]["actor_id"] = (
+            "invented_strategist"
+        )
+        recompute_public_checksums(forged_actor)
+        with self.assertRaises(ContractError):
+            restored.restore_tenant(self.director, forged_actor)
+
+        forged_role = copy.deepcopy(tenant_export)
+        forged_role["provenance"]["brief_backup"]["role_id"] = (
             "publishing-operator"
         )
-        forged_payload = {
-            key: value
-            for key, value in forged_provenance.items()
-            if key != "export_checksum"
-        }
-        forged_provenance["export_checksum"] = canonical_checksum(forged_payload)
+        recompute_public_checksums(forged_role)
         with self.assertRaises(ContractError):
-            restored.restore_tenant(self.director, forged_provenance)
+            restored.restore_tenant(self.director, forged_role)
+
+        changed_attestation = copy.deepcopy(tenant_export)
+        changed_attestation["export_attestation"]["authority_id"] = (
+            "attacker_authority"
+        )
+        with self.assertRaises(ContractError):
+            restored.restore_tenant(self.director, changed_attestation)
+
+        changed_time = copy.deepcopy(tenant_export)
+        changed_time["exported_at"] = (self.now + timedelta(minutes=1)).isoformat()
+        changed_time["export_attestation"]["exported_at"] = changed_time[
+            "exported_at"
+        ]
+        with self.assertRaises(ContractError):
+            restored.restore_tenant(self.director, changed_time)
 
         with self.assertRaises(AuthorizationError):
             foreign_restored.restore_tenant(self.foreign_director, tenant_export)
+
+        wrong_key_path = self.database_path.with_name("wrong-key-restore.sqlite3")
+        wrong_key_host = _provision_platform_authority_host(
+            wrong_key_path,
+            authority_id="fictional_paperclip_approval_authority",
+            approval_signing_key=os.urandom(32),
+            initial_time=self.now,
+            principals=self.provisioned_principals,
+        )
+        self.addCleanup(wrong_key_host.close)
+        wrong_key_paperclip = wrong_key_host.client(self.director)
+        wrong_key_restore = wrong_key_paperclip.artifacts()
+        with self.assertRaises(ContractError):
+            wrong_key_restore.restore_tenant(self.director, tenant_export)
+        with self.assertRaises(KeyError):
+            wrong_key_restore.get(self.director, "brief_backup")
+        self.assertEqual(wrong_key_paperclip.audit_events(self.director), [])
+        self.assertEqual(restored_paperclip.audit_events(self.director), [])
 
         self.assertEqual(restored.restore_tenant(self.director, tenant_export), 2)
         self.assertEqual(restored.get(self.director, "brief_backup"), brief)
@@ -948,6 +1018,7 @@ class PlatformAdapterTests(unittest.TestCase):
         )
         for forbidden_export in (
             "FictionalApprovalAuthority",
+            "FictionalRecoveryAuthority",
             "FictionalPaperclipAdapter",
             "SQLiteTenantEvidenceStore",
             "SQLiteTenantArtifactStore",
@@ -957,6 +1028,12 @@ class PlatformAdapterTests(unittest.TestCase):
 
         with self.assertRaises(ContractError):
             _FictionalApprovalAuthority(
+                authority_id="fictional_paperclip_approval_authority",
+                signing_key=os.urandom(32),
+                _construction_token=object(),
+            )
+        with self.assertRaises(ContractError):
+            _FictionalRecoveryAuthority(
                 authority_id="fictional_paperclip_approval_authority",
                 signing_key=os.urandom(32),
                 _construction_token=object(),

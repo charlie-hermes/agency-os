@@ -35,11 +35,13 @@
   approver identity and authority-role policy.
 - Durable artifacts and learning use the protected authority SQLite database in
   WAL/full-synchronous mode with pinned owner-only storage identity. Canonical
-  exports bind content and authenticated provenance to one checksum. Restore is
-  same-tenant and empty-target only. Artifact deletion needs the current export
-  checksum, tombstones reactivation and retains no deleted record content in its
-  receipt. This deletion does not yet cover Paperclip, evidence, Buzz or audit
-  tables.
+  exports bind content and authenticated provenance to one checksum, then the
+  protected authority signs that checksum with the tenant, authority ID and
+  export time under a domain separated from approval signatures. Restore is
+  same-tenant and empty-target only and requires the pinned authority identity
+  and recovery key. Artifact deletion needs the current export checksum,
+  tombstones reactivation and retains no deleted record content in its receipt.
+  This deletion does not yet cover Paperclip, evidence, Buzz or audit tables.
 - Public fields and internal notes are separate values; only public fields
   cross the publication adapter.
 - Capability grants are immutable, brand-scoped records issued through an
@@ -172,11 +174,11 @@ Offboarding requires a human-approved plan that:
 6. verifies backups expire or are cryptographically erased as promised; and
 7. records deletion evidence without retaining deleted content.
 
-The current fictional authority implements a checksum-bound export and deletion
-receipt for artifact/learning rows only. It intentionally tombstones that tenant
-inside the artifact authority. It does not claim the full sequence above until
-Paperclip task/approval, evidence, Buzz, audit, credential and backup expiry are
-coordinated and tested together.
+The current fictional authority implements an authority-attested export and
+deletion receipt for artifact/learning rows only. It intentionally tombstones
+that tenant inside the artifact authority. It does not claim the full sequence
+above until Paperclip task/approval, evidence, Buzz, audit, credential and backup
+expiry are coordinated and tested together.
 
 ## Audit and service objectives
 

@@ -114,9 +114,13 @@ clock rather than caller time.
 The store uses the authority SQLite database with WAL, full synchronous writes,
 owner-only mode and pinned file/parent identity. Records survive host restart.
 Only the agency director may export or restore a tenant. The canonical export
-binds every record and its original actor, role and storage time to one SHA-256;
-restore requires the same tenant, valid record checksums and provenance, an empty
-target and no prior deletion tombstone.
+binds every record and its original actor, role and storage time to one SHA-256.
+A domain-separated HMAC held only by the protected host additionally attests the
+authority ID, tenant, exact export checksum and authority export time. Restore
+requires a host provisioned with that same pinned authority identity and key, the
+same tenant, valid record checksums and provenance, an empty target and no prior
+deletion tombstone. Public checksum recomputation cannot create a valid export
+attestation.
 
 Artifact/learning deletion requires the checksum of the current export in the
 same immediate transaction. A stale export makes no deletion. A successful
@@ -172,8 +176,9 @@ a separately designed streaming or protected object-transfer path.
   actor/role;
 - artifact and validated-learning restart persistence, immutable conflict,
   role/tenant denial and authority-clock freshness;
-- checksum-bound export and empty-authority restore, including tampered content,
-  forged provenance, foreign tenant and non-empty restore denial;
+- authority-attested export and empty-authority restore, including fully
+  rechecksummed content forgery, permitted-role actor forgery, changed authority,
+  wrong recovery key, foreign tenant and non-empty restore denial;
 - stale-export deletion denial, durable content-free deletion evidence,
   reactivation denial and preservation of a second tenant;
 - tenant-scoped persistent audit; and
@@ -188,8 +193,9 @@ project still needs:
 - authenticated task, dependency, approval, budget, closure, Buzz-context and
   decision write-back tests against the admitted installed services; version,
   path, service-identity and interface evidence is now recorded read-only;
-- production Paperclip approval signing, protected key custody, rotation and
-  recovery under an authority service account unavailable to workers;
+- production Paperclip approval and recovery signing, protected key custody,
+  rotation and recovery under an authority service account unavailable to
+  workers;
 - queue leases, retries, dead-letter handling and reconciliation;
 - full Platform Authority backup/restore, task/evidence/Buzz/audit export and
   destructive offboarding, retention timing and storage-media erasure drills;

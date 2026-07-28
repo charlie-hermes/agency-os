@@ -17,7 +17,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
-from ._approval_authority import _FictionalApprovalAuthority
+from ._approval_authority import (
+    _FictionalApprovalAuthority,
+    _FictionalRecoveryAuthority,
+)
 from .contracts import (
     ContractError,
     canonical_bytes,
@@ -1531,6 +1534,7 @@ class _AuthorityTenantArtifactStore:
         *,
         timeout_seconds: float = 5.0,
         clock: Callable[[], datetime],
+        recovery_authority: _FictionalRecoveryAuthority,
         _construction_token: object,
     ) -> None:
         if _construction_token is not _AUTHORITY_ADAPTER_TOKEN:
@@ -1538,6 +1542,7 @@ class _AuthorityTenantArtifactStore:
                 "tenant artifact authority construction is denied"
             )
         self._clock = clock
+        self._recovery_authority = recovery_authority
         self._database = _SQLitePlatformDatabase(
             database_path,
             timeout_seconds=timeout_seconds,
@@ -1720,6 +1725,10 @@ class _AuthorityTenantArtifactStore:
         connection = self._database.connect()
         try:
             exported = self._export_from_connection(connection, principal.brand_id)
+            exported["exported_at"] = _authority_now(self._clock).isoformat()
+            exported["export_attestation"] = self._recovery_authority.attest(
+                exported
+            )
             _AuthorityPaperclipAdapter._insert_audit(
                 connection,
                 principal,
@@ -2000,12 +2009,18 @@ class _AuthorityTenantArtifactStore:
             "records",
             "provenance",
             "export_checksum",
+            "exported_at",
+            "export_attestation",
         }:
             raise ContractError("tenant artifact export shape is invalid")
         if exported["schema_version"] != "1.0":
             raise ContractError("tenant artifact export version is unsupported")
         if exported["brand_id"] != principal.brand_id:
             raise AuthorizationError("cross-tenant artifact restore denied")
+        exported_at = exported["exported_at"]
+        if not isinstance(exported_at, str) or not exported_at:
+            raise ContractError("tenant artifact export time is invalid")
+        parse_time(exported_at)
         records = exported["records"]
         provenance = exported["provenance"]
         if not isinstance(records, dict) or not isinstance(provenance, dict):
@@ -2019,9 +2034,22 @@ class _AuthorityTenantArtifactStore:
             or record_count != len(records)
         ):
             raise ContractError("tenant artifact export count is invalid")
-        payload = {key: exported[key] for key in exported if key != "export_checksum"}
+        payload = {
+            key: exported[key]
+            for key in (
+                "schema_version",
+                "brand_id",
+                "record_count",
+                "records",
+                "provenance",
+            )
+        }
         if exported["export_checksum"] != canonical_checksum(payload):
             raise ContractError("tenant artifact export checksum is invalid")
+        self._recovery_authority.verify(
+            exported,
+            exported["export_attestation"],
+        )
         validated_records: dict[str, dict[str, Any]] = {}
         validated_provenance: dict[str, dict[str, str]] = {}
         for record_id, raw_record in records.items():

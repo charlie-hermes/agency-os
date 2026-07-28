@@ -175,9 +175,10 @@ not yet prove authenticated task, approval or Buzz lifecycle integration.
 
 The third bounded slice puts immutable artifacts and governed learning in the
 same protected authority database. Principal-bound clients provide role/tenant
-writes, authority-clock learning reads, checksum-bound logical export, empty
-same-tenant restore, and current-export-bound artifact deletion with a durable
-content-free receipt and reactivation tombstone. Full Platform Authority backup,
+writes, authority-clock learning reads, authority-attested logical export, empty
+same-tenant restore under a pinned recovery identity, and current-export-bound
+artifact deletion with a durable content-free receipt and reactivation
+tombstone. Full Platform Authority backup,
 retention and offboarding remain future work.
 
 **Merged first-slice evidence:** PR #6, reviewed commit

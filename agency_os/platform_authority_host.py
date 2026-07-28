@@ -24,6 +24,7 @@ from typing import Any, Callable, Mapping, Sequence
 from ._approval_authority import (
     _APPROVAL_AUTHORITY_TOKEN,
     _FictionalApprovalAuthority,
+    _FictionalRecoveryAuthority,
 )
 from .contracts import ContractError, canonical_bytes, parse_time
 from .platform_adapters import (
@@ -523,6 +524,11 @@ def _run_platform_authority_host(
             signing_key=approval_signing_key,
             _construction_token=_APPROVAL_AUTHORITY_TOKEN,
         )
+        recovery_authority = _FictionalRecoveryAuthority(
+            authority_id=authority_id,
+            signing_key=approval_signing_key,
+            _construction_token=_APPROVAL_AUTHORITY_TOKEN,
+        )
         paperclip = _AuthorityPaperclipAdapter(
             database_path,
             timeout_seconds=timeout_seconds,
@@ -539,6 +545,7 @@ def _run_platform_authority_host(
             database_path,
             timeout_seconds=timeout_seconds,
             clock=authority_clock,
+            recovery_authority=recovery_authority,
             _construction_token=_AUTHORITY_ADAPTER_TOKEN,
         )
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as server:

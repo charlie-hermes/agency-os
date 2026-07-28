@@ -404,9 +404,9 @@
       "phase": 5,
       "owner": "platform-assurance-reviewer",
       "release_blocker": true,
-      "fixture": "checksum-bound tenant artifact export restored into an empty authority",
+      "fixture": "authority-attested tenant artifact export restored into an empty authority with the pinned recovery identity",
       "command": "python3 -m unittest tests.test_platform_adapters.PlatformAdapterTests.test_artifact_export_restore_is_integrity_and_tenant_bound",
-      "expected_evidence": "valid same-tenant restore succeeds; content, provenance, foreign-tenant and non-empty-target changes deny"
+      "expected_evidence": "valid same-tenant restore succeeds; fully rechecksummed content and actor forgeries, changed attestation, wrong recovery key, foreign tenant and non-empty target all deny without restore audit"
     },
     {
       "id": "ARTIFACT-OFFBOARD-001",
