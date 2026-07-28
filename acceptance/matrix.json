@@ -463,6 +463,15 @@
       "expected_evidence": "uncertain external work blocks offboarding; director evidence closes the queue across restart, preserves immutable history, denies every later worker mutation, and artifact deletion requires the exact content-free cancellation receipt"
     },
     {
+      "id": "TENANT-AUTHORITY-OFFBOARD-001",
+      "phase": 5,
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "fixture": "cancelled fictional tenant with task, Buzz, evidence, artifact, queue and audit content plus a second isolated tenant, injected cleanup failure and the previous deletion-ledger schema",
+      "command": "python3 -m unittest tests.test_platform_adapters.PlatformAdapterTests.test_full_local_tenant_offboarding_is_coordinated_and_durable tests.test_platform_adapters.PlatformAdapterTests.test_tenant_offboarding_failure_closes_access_and_resumes tests.test_platform_adapters.PlatformAdapterTests.test_existing_deletion_ledger_migrates_for_authority_offboarding",
+      "expected_evidence": "stale manifests deny; exact offboarding removes tenant content, preserves content-free receipts, closes old and recovery clients, leaves another tenant intact, resumes fail-closed cleanup only for the immutable original request, and upgrades the protected prior ledger in place"
+    },
+    {
       "id": "INSTALLED-PLATFORM-CONTRACT-001",
       "phase": 5,
       "owner": "platform-assurance-reviewer",

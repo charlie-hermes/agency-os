@@ -200,16 +200,21 @@ Offboarding requires a human-approved plan that:
 6. verifies backups expire or are cryptographically erased as promised; and
 7. records deletion evidence without retaining deleted content.
 
-The current fictional authority implements the first two local ordering steps:
-an evidence-bound queue cancellation reconciles uncertain external results and
-permanently stops worker delivery before artifact deletion may begin. The
-authority-attested artifact/learning export and deletion receipt links that
-queue-cancellation receipt and records its tombstone in a separate protected
-authority ledger which every recovery host must share, so an old signed export
-cannot recreate that tenant in a fresh artifact database. It does not claim the
-full sequence above until Paperclip task/approval, evidence, Buzz, audit,
-credential and backup expiry, protected-ledger replication and storage-media
-erasure are coordinated and tested together.
+The current fictional authority implements the first two local ordering steps
+and one bounded deletion proof. Evidence-bound queue cancellation reconciles
+uncertain external results and permanently stops worker delivery. A director
+then prepares an exact checksum/count manifest and can commit protected artifact
+and authority tombstones before deleting that tenant's local Paperclip-shaped,
+Buzz-context, evidence, artifact, queue and ordinary audit content. Old clients
+fail closed immediately, an interrupted cleanup resumes only with the exact same
+manifest and evidence, and a fresh same-authority recovery database cannot
+reactivate the tenant. Content-free queue, artifact and authority receipts remain.
+
+This manifest is not the required restorable audit/evidence export. The full
+sequence above remains incomplete until real credentials and grants are revoked,
+retention is owner-approved, deployed stores and backups are coordinated across
+hosts, protected-ledger replication is proven, and storage-media erasure is
+drilled.
 
 ## Audit and service objectives
 

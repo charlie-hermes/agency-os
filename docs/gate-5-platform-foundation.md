@@ -180,11 +180,26 @@ the uncertain result. Once clear, all remaining non-terminal work becomes a
 lease-free `TENANT_OFFBOARDED` dead letter, terminal items and reconciliation
 history remain unchanged, and a content-free evidence-linked receipt closes all
 future queue mutation. Workers also lose queue read access; directors and
-reviewers retain the immutable records and receipt. Artifact deletion requires
-that exact queue-cancellation receipt first and links it into the artifact
-deletion receipt. The records are retained in this local slice; retention timing,
-full tenant-data deletion and production multi-host offboarding remain future
-work.
+reviewers retain the immutable records and receipt until destructive local
+offboarding begins.
+
+The next local step prepares a content-free authority manifest containing only
+per-table row counts and aggregate checksums. Full local offboarding requires the
+exact current manifest and queue-cancellation receipt, then commits artifact and
+authority tombstones to the separately protected deletion ledger before removing
+the tenant's task versions, approver policy, approvals, Buzz context/decisions,
+evidence, artifacts, queue rows and ordinary audit rows. The queue-cancellation,
+artifact-deletion and authority-offboarding receipts remain readable to the
+director and reviewer. Every other operation from an old client is denied as soon
+as the authority tombstone commits, including after host restart and against a
+fresh same-authority recovery database. A cleanup failure after that fail-closed
+commit can be resumed only by repeating the exact manifest checksum and evidence
+reference; a different request is denied as an immutable conflict.
+
+This is coordinated deletion in one fictional, single-host authority. It is not
+a complete export or recovery package, cross-host transaction, production
+credential revocation, retention expiry, backup/media erasure or full deployed
+platform offboarding.
 
 ## Tenant and storage controls
 
@@ -249,15 +264,20 @@ work.
 - evidence-bound tenant queue cancellation, denial while external results are
   uncertain, permanent lease/retry closure across restart, retained terminal
   history and queue-cancellation binding before artifact deletion;
+- exact-manifest local authority offboarding, stale-manifest denial, content-free
+  durable receipts, stored-ID tamper denial, immediate old-client denial,
+  fail-closed cleanup resumption, prior-ledger migration, fresh-recovery-host
+  denial and preservation of another tenant;
 - tenant-scoped persistent audit; and
 - replacement of the running authority database across every authority view,
   including the work queue.
 
 ## Recovery and remaining Gate 5 work
 
-This slice proves artifact/learning restart, logical export/restore and bounded
-deletion, not a complete platform recovery plan. Before Gate 5 can complete, the
-project still needs:
+These slices prove artifact/learning restart, logical export/restore and
+coordinated destructive cleanup inside one fictional local authority, not a
+complete deployed platform recovery or offboarding plan. Before Gate 5 can
+complete, the project still needs:
 
 - authenticated task, dependency, approval, budget, closure, Buzz-context and
   decision write-back tests against the admitted installed services; version,
@@ -270,8 +290,9 @@ project still needs:
   gateway/destination reconcilers;
 - production backup, replication and disaster recovery for the protected
   deletion ledger;
-- full Platform Authority backup/restore, task/evidence/Buzz/audit export and
-  destructive offboarding, retention timing and storage-media erasure drills;
+- full deployed Platform Authority backup/restore, restorable task/evidence/
+  Buzz/audit export, cross-store offboarding, retention timing and storage-media
+  erasure drills beyond the local checksum-manifest cleanup;
 - immutable audit-retention and tenant-scoped telemetry policy; and
 - verified runtime bundles and fresh-session load evidence for all roles.
 

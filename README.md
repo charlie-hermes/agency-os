@@ -13,8 +13,8 @@ This fictional reference deliberately does five things:
 4. begins Gate 5 with a protected local Platform Authority host, principal-bound
    worker clients, durable typed tasks, versioned approver policy, host-attested
    approvals, deadline-enforced restartable collaboration decisions, tenant
-   evidence/artifact durability, and a fictional durable lease/retry queue with
-   evidence-bound tenant cancellation; and
+   evidence/artifact durability, a fictional durable lease/retry queue, and
+   exact-manifest coordinated local tenant offboarding; and
 5. admits one exact installed Paperclip/Buzz command contract from read-only,
    checksum-pinned target-host evidence while failing closed on drift.
 
