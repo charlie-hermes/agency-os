@@ -56,6 +56,7 @@ class RepositoryContractTests(unittest.TestCase):
             "BuzzContextPacket",
             "BuzzDecisionSummary",
             "EvidenceRecord",
+            "WorkQueueItem",
             "LearningContextManifest",
             "FailureObservation",
             "CandidateLearning",

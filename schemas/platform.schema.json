@@ -181,6 +181,54 @@
         "content_checksum": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"}
       }
     },
+    "WorkQueueItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "artifact_type",
+        "work_item_id",
+        "brand_id",
+        "paperclip_issue_id",
+        "paperclip_task_checksum",
+        "work_kind",
+        "worker_role",
+        "payload",
+        "max_attempts",
+        "created_by",
+        "created_at",
+        "content_checksum"
+      ],
+      "properties": {
+        "schema_version": {"const": "1.0"},
+        "artifact_type": {"const": "work_queue_item"},
+        "work_item_id": {"type": "string", "minLength": 1},
+        "brand_id": {"type": "string", "pattern": "^brand_"},
+        "paperclip_issue_id": {"type": "string", "minLength": 1},
+        "paperclip_task_checksum": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"},
+        "work_kind": {"enum": ["internal", "external_write"]},
+        "worker_role": {
+          "enum": [
+            "technical-implementation-specialist",
+            "platform-assurance-reviewer",
+            "brand-brief-steward",
+            "search-content-strategist",
+            "content-producer",
+            "search-answer-optimiser",
+            "visual-creative-specialist",
+            "editorial-integrity-qa",
+            "social-amplifier",
+            "publishing-operator",
+            "growth-intelligence-analyst"
+          ]
+        },
+        "payload": {"type": "object"},
+        "max_attempts": {"type": "integer", "minimum": 1, "maximum": 5},
+        "created_by": {"type": "string", "minLength": 1},
+        "created_at": {"type": "string", "format": "date-time"},
+        "content_checksum": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"}
+      }
+    },
     "EvidenceRecord": {
       "type": "object",
       "required": [

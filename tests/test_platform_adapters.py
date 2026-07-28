@@ -24,6 +24,7 @@ from agency_os.contracts import (
 from agency_os.platform_authority_host import (
     PlatformAuthorityClient,
     PlatformAuthorityUnavailable,
+    TenantWorkQueueClient,
     _provision_platform_authority_host,
 )
 from agency_os.platform_adapters import (
@@ -33,10 +34,12 @@ from agency_os.platform_adapters import (
     EvidenceStoreError,
     FictionalBuzzAdapter,
     PlatformAdapterError,
+    WorkQueueError,
     make_approver_policy,
     make_buzz_context_packet,
     make_evidence_record,
     make_paperclip_task,
+    make_work_queue_item,
 )
 from agency_os.store import AuthorizationError, Principal
 
@@ -129,6 +132,28 @@ class PlatformAdapterTests(unittest.TestCase):
         )
         return self.paperclip.set_status(
             self.director, issue_id, current["content_checksum"], "in_progress"
+        )
+
+    def _work_item(
+        self,
+        work_item_id: str,
+        task: dict,
+        *,
+        work_kind: str = "internal",
+        worker_role: str = "search-content-strategist",
+        max_attempts: int = 2,
+    ) -> dict:
+        return make_work_queue_item(
+            work_item_id=work_item_id,
+            brand_id="brand_lantern",
+            paperclip_issue_id=task["paperclip_issue_id"],
+            paperclip_task_checksum=task["content_checksum"],
+            work_kind=work_kind,
+            worker_role=worker_role,
+            payload={"fictional_operation": "draft-local-artifact"},
+            max_attempts=max_attempts,
+            created_by=self.director.actor_id,
+            created_at=self.now.isoformat(),
         )
 
     def _evidence(
@@ -1046,6 +1071,7 @@ class PlatformAdapterTests(unittest.TestCase):
             PlatformAuthorityClient.__slots__,
             ("_socket_path", "_principal", "_client_token"),
         )
+        self.assertEqual(TenantWorkQueueClient.__slots__, ("_authority",))
         for forbidden_export in (
             "FictionalApprovalAuthority",
             "FictionalRecoveryAuthority",
@@ -1053,6 +1079,7 @@ class PlatformAdapterTests(unittest.TestCase):
             "SQLiteTenantEvidenceStore",
             "SQLiteTenantArtifactStore",
             "SQLiteArtifactDeletionLedger",
+            "AuthorityWorkQueue",
             "provision_platform_authority_host",
         ):
             self.assertFalse(hasattr(agency_os, forbidden_export))
@@ -1424,6 +1451,320 @@ class PlatformAdapterTests(unittest.TestCase):
         with self.assertRaises(AuthorizationError):
             self.evidence.put(self.strategist, forged)
 
+    def test_internal_queue_lease_retry_dead_letter_survives_restart(self) -> None:
+        self.paperclip.create_task(self.director, self._task("issue_queue_retry"))
+        task = self._advance_to_in_progress("issue_queue_retry")
+        item = self._work_item("work_retry", task, max_attempts=2)
+        director_queue = self.paperclip.work_queue()
+        strategist_queue = self.strategist_paperclip.work_queue()
+        self.assertEqual(director_queue.enqueue(self.director, item), "work_retry")
+
+        first = strategist_queue.lease_next(self.strategist, 10)
+        self.assertEqual(first["lease"]["attempt_count"], 1)
+        self.assertIsNone(
+            self.platform_host.client(self.strategist).work_queue().lease_next(
+                self.strategist, 10
+            )
+        )
+        with self.assertRaises(AuthorizationError):
+            self.publisher_paperclip.work_queue().complete(
+                self.publisher,
+                "work_retry",
+                first["lease"]["lease_token"],
+            )
+        renewed = strategist_queue.heartbeat(
+            self.strategist,
+            "work_retry",
+            first["lease"]["lease_token"],
+            10,
+        )
+        self.assertEqual(renewed["lease_owner"], self.strategist.actor_id)
+
+        self.platform_host.close()
+        self.now += timedelta(seconds=11)
+        restarted = _provision_platform_authority_host(
+            self.database_path,
+            deletion_ledger_path=self.deletion_ledger_path,
+            authority_id="fictional_paperclip_approval_authority",
+            approval_signing_key=self.approval_signing_key,
+            initial_time=self.now,
+            principals=self.provisioned_principals,
+        )
+        self.addCleanup(restarted.close)
+        second = restarted.client(self.strategist).work_queue().lease_next(
+            self.strategist, 10
+        )
+        self.assertEqual(second["lease"]["attempt_count"], 2)
+        dead_letter = restarted.client(self.strategist).work_queue().fail(
+            self.strategist,
+            "work_retry",
+            second["lease"]["lease_token"],
+            error_class="INTERNAL_PERMANENT",
+            retryable=False,
+            external_result="NOT_APPLICABLE",
+        )
+        self.assertEqual(dead_letter["state"], "DEAD_LETTER")
+        self.assertEqual(
+            dead_letter["error_classes"],
+            ["LEASE_EXPIRED", "INTERNAL_PERMANENT"],
+        )
+        director_queue = restarted.client(self.director).work_queue()
+        dispositioned = director_queue.record_dead_letter_disposition(
+            self.director,
+            "work_retry",
+            evidence_ref="evidence://human-review/retry",
+            disposition="Do not reopen; create a new Paperclip task if needed.",
+        )
+        self.assertEqual(
+            dispositioned["dispositions"][-1]["outcome"], "DEAD_LETTER"
+        )
+        with self.assertRaises(ContractError):
+            director_queue.record_dead_letter_disposition(
+                self.director,
+                "work_retry",
+                evidence_ref="evidence://human-review/changed",
+                disposition="Attempt to change immutable disposition.",
+            )
+        self.assertIsNone(
+            restarted.client(self.strategist).work_queue().lease_next(
+                self.strategist, 10
+            )
+        )
+
+    def test_external_unknown_requires_reconciliation_before_retry(self) -> None:
+        self.paperclip.create_task(self.director, self._task("issue_queue_external"))
+        task = self._advance_to_in_progress("issue_queue_external")
+        item = self._work_item(
+            "work_external",
+            task,
+            work_kind="external_write",
+            worker_role="publishing-operator",
+            max_attempts=2,
+        )
+        director_queue = self.paperclip.work_queue()
+        publisher_queue = self.publisher_paperclip.work_queue()
+        director_queue.enqueue(self.director, item)
+        first = publisher_queue.lease_next(self.publisher, 10)
+        unknown = publisher_queue.fail(
+            self.publisher,
+            "work_external",
+            first["lease"]["lease_token"],
+            error_class="EXTERNAL_TIMEOUT",
+            retryable=True,
+            external_result="UNKNOWN",
+        )
+        self.assertEqual(unknown["state"], "RECONCILIATION_REQUIRED")
+        self.assertIsNone(publisher_queue.lease_next(self.publisher, 10))
+        with self.assertRaises(AuthorizationError):
+            publisher_queue.reconcile(
+                self.publisher,
+                "work_external",
+                outcome="CONFIRMED_NO_WRITE",
+                evidence_ref="evidence://destination/check",
+                disposition="Retry safely.",
+            )
+        reconciled = director_queue.reconcile(
+            self.director,
+            "work_external",
+            outcome="CONFIRMED_NO_WRITE",
+            evidence_ref="evidence://destination/check",
+            disposition="Destination confirms no write; retry once.",
+        )
+        self.assertEqual(reconciled["state"], "READY")
+        second = publisher_queue.lease_next(self.publisher, 10)
+        completed = publisher_queue.complete(
+            self.publisher,
+            "work_external",
+            second["lease"]["lease_token"],
+        )
+        self.assertEqual(completed["state"], "COMPLETED")
+        self.assertEqual(len(completed["dispositions"]), 1)
+        current_task = self.paperclip.get_task(self.director, "issue_queue_external")
+        self.assertEqual(current_task, task)
+
+        expired_item = self._work_item(
+            "work_external_expired",
+            task,
+            work_kind="external_write",
+            worker_role="publishing-operator",
+            max_attempts=1,
+        )
+        director_queue.enqueue(self.director, expired_item)
+        publisher_queue.lease_next(self.publisher, 5)
+        self.now += timedelta(seconds=6)
+        self.platform_host.set_time(self.now)
+        self.assertIsNone(publisher_queue.lease_next(self.publisher, 5))
+        self.assertEqual(
+            director_queue.get(self.director, "work_external_expired")["state"],
+            "RECONCILIATION_REQUIRED",
+        )
+        exhausted = director_queue.reconcile(
+            self.director,
+            "work_external_expired",
+            outcome="CONFIRMED_NO_WRITE",
+            evidence_ref="evidence://destination/expired-check",
+            disposition="No write occurred, but the attempt limit is exhausted.",
+        )
+        self.assertEqual(exhausted["state"], "DEAD_LETTER")
+        dispositioned = director_queue.record_dead_letter_disposition(
+            self.director,
+            "work_external_expired",
+            evidence_ref="evidence://human-review/expired",
+            disposition="Do not reopen this exhausted external work item.",
+        )
+        self.assertEqual(
+            [entry["outcome"] for entry in dispositioned["dispositions"]],
+            ["CONFIRMED_NO_WRITE", "DEAD_LETTER"],
+        )
+
+    def test_post_lease_task_drift_blocks_internal_and_external_completion(
+        self,
+    ) -> None:
+        director_queue = self.paperclip.work_queue()
+
+        self.paperclip.create_task(self.director, self._task("issue_internal_drift"))
+        internal_planned = self.paperclip.get_task(
+            self.director, "issue_internal_drift"
+        )
+        internal_ready = self.paperclip.set_status(
+            self.director,
+            "issue_internal_drift",
+            internal_planned["content_checksum"],
+            "ready",
+        )
+        director_queue.enqueue(
+            self.director,
+            self._work_item("work_internal_drift", internal_ready),
+        )
+        internal_lease = self.strategist_paperclip.work_queue().lease_next(
+            self.strategist, 10
+        )
+        self.paperclip.set_status(
+            self.director,
+            "issue_internal_drift",
+            internal_ready["content_checksum"],
+            "in_progress",
+        )
+        internal_result = self.strategist_paperclip.work_queue().complete(
+            self.strategist,
+            "work_internal_drift",
+            internal_lease["lease"]["lease_token"],
+        )
+        self.assertEqual(internal_result["state"], "DEAD_LETTER")
+        self.assertEqual(internal_result["error_classes"], ["TASK_DRIFT"])
+
+        self.paperclip.create_task(self.director, self._task("issue_external_drift"))
+        external_planned = self.paperclip.get_task(
+            self.director, "issue_external_drift"
+        )
+        external_ready = self.paperclip.set_status(
+            self.director,
+            "issue_external_drift",
+            external_planned["content_checksum"],
+            "ready",
+        )
+        director_queue.enqueue(
+            self.director,
+            self._work_item(
+                "work_external_drift",
+                external_ready,
+                work_kind="external_write",
+                worker_role="publishing-operator",
+            ),
+        )
+        external_lease = self.publisher_paperclip.work_queue().lease_next(
+            self.publisher, 10
+        )
+        self.paperclip.set_status(
+            self.director,
+            "issue_external_drift",
+            external_ready["content_checksum"],
+            "in_progress",
+        )
+        external_result = self.publisher_paperclip.work_queue().complete(
+            self.publisher,
+            "work_external_drift",
+            external_lease["lease"]["lease_token"],
+        )
+        self.assertEqual(external_result["state"], "RECONCILIATION_REQUIRED")
+        self.assertEqual(external_result["error_classes"], ["TASK_DRIFT"])
+        self.assertIsNone(
+            self.publisher_paperclip.work_queue().lease_next(self.publisher, 10)
+        )
+
+        item_events = {
+            subject_id: [
+                event["event_type"]
+                for event in self.paperclip.audit_events(self.director)
+                if event["subject_id"] == subject_id
+            ]
+            for subject_id in ("work_internal_drift", "work_external_drift")
+        }
+        self.assertEqual(
+            item_events["work_internal_drift"],
+            [
+                "queue.item.enqueued",
+                "queue.item.leased",
+                "queue.item.dead_letter",
+            ],
+        )
+        self.assertEqual(
+            item_events["work_external_drift"],
+            [
+                "queue.item.enqueued",
+                "queue.item.leased",
+                "queue.item.task_drift.reconciliation_required",
+            ],
+        )
+        self.assertNotIn(
+            "queue.item.completed",
+            [
+                event_type
+                for event_types in item_events.values()
+                for event_type in event_types
+            ],
+        )
+
+    def test_queue_is_tenant_role_immutable_and_task_version_bound(self) -> None:
+        self.paperclip.create_task(self.director, self._task("issue_queue_bound"))
+        draft = self.paperclip.get_task(self.director, "issue_queue_bound")
+        ready = self.paperclip.set_status(
+            self.director,
+            "issue_queue_bound",
+            draft["content_checksum"],
+            "ready",
+        )
+        item = self._work_item("work_bound", ready)
+        with self.assertRaises(ContractError):
+            self._work_item("work_unknown_role", ready, worker_role="invented-role")
+        director_queue = self.paperclip.work_queue()
+        director_queue.enqueue(self.director, item)
+        self.assertEqual(director_queue.enqueue(self.director, item), "work_bound")
+        changed = copy.deepcopy(item)
+        changed["payload"] = {"fictional_operation": "changed"}
+        changed = finalize_record(changed)
+        with self.assertRaises(ContractError):
+            director_queue.enqueue(self.director, changed)
+        with self.assertRaises(KeyError):
+            self.foreign_paperclip.work_queue().get(
+                self.foreign_director, "work_bound"
+            )
+        with self.assertRaises(AuthorizationError):
+            self.publisher_paperclip.work_queue().get(self.publisher, "work_bound")
+
+        self.paperclip.set_status(
+            self.director,
+            "issue_queue_bound",
+            ready["content_checksum"],
+            "in_progress",
+        )
+        self.assertIsNone(
+            self.strategist_paperclip.work_queue().lease_next(self.strategist, 10)
+        )
+        dead_letter = director_queue.get(self.director, "work_bound")
+        self.assertEqual(dead_letter["state"], "DEAD_LETTER")
+        self.assertEqual(dead_letter["error_classes"], ["TASK_DRIFT"])
+
     def test_recovery_host_requires_preprovisioned_deletion_ledger(self) -> None:
         recovery_path = self.database_path.with_name("unprovisioned-recovery.sqlite3")
         missing_ledger = self.database_path.with_name("missing-deletions.sqlite3")
@@ -1479,6 +1820,10 @@ class PlatformAdapterTests(unittest.TestCase):
 
     def test_replaced_storage_identity_is_rejected_by_all_authorities(self) -> None:
         self.paperclip.create_task(self.director, self._task("issue_asset"))
+        task = self._advance_to_in_progress("issue_asset")
+        self.paperclip.work_queue().enqueue(
+            self.director, self._work_item("work_storage", task)
+        )
         self.artifacts.put(self.director, self._learning("learning_storage"))
         replacement_path = self.database_path.with_name("replacement.sqlite3")
         replacement_host = _provision_platform_authority_host(
@@ -1498,6 +1843,8 @@ class PlatformAdapterTests(unittest.TestCase):
             self.evidence.get(self.strategist, "evidence_primary")
         with self.assertRaises(ArtifactStoreError):
             self.artifacts.get(self.director, "learning_storage")
+        with self.assertRaises(WorkQueueError):
+            self.paperclip.work_queue().get(self.director, "work_storage")
 
     def test_audit_is_persistent_and_tenant_scoped(self) -> None:
         self.paperclip.create_task(self.director, self._task("issue_asset"))

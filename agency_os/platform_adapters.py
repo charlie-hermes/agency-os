@@ -10,10 +10,12 @@ approval.
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import os
+import secrets
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
@@ -57,6 +59,10 @@ class ArtifactStoreError(RuntimeError):
     """The persistent tenant artifact and learning authority failed closed."""
 
 
+class WorkQueueError(RuntimeError):
+    """The protected fictional work queue failed closed."""
+
+
 TASK_STATUSES = frozenset(
     {"planned", "ready", "in_progress", "blocked", "done", "cancelled"}
 )
@@ -76,6 +82,45 @@ EVIDENCE_WRITERS = frozenset(
         "editorial-integrity-qa",
         "platform-assurance-reviewer",
     }
+)
+WORK_KINDS = frozenset({"internal", "external_write"})
+WORKER_QUEUE_ROLES = frozenset(
+    {
+        "technical-implementation-specialist",
+        "platform-assurance-reviewer",
+        "brand-brief-steward",
+        "search-content-strategist",
+        "content-producer",
+        "search-answer-optimiser",
+        "visual-creative-specialist",
+        "editorial-integrity-qa",
+        "social-amplifier",
+        "publishing-operator",
+        "growth-intelligence-analyst",
+    }
+)
+WORK_QUEUE_STATES = frozenset(
+    {
+        "READY",
+        "LEASED",
+        "RETRY_WAIT",
+        "RECONCILIATION_REQUIRED",
+        "DEAD_LETTER",
+        "COMPLETED",
+    }
+)
+WORK_ERROR_CLASSES = frozenset(
+    {
+        "INTERNAL_TRANSIENT",
+        "INTERNAL_PERMANENT",
+        "EXTERNAL_TIMEOUT",
+        "EXTERNAL_REJECTED",
+        "LEASE_EXPIRED",
+        "TASK_DRIFT",
+    }
+)
+WORK_RECONCILIATION_OUTCOMES = frozenset(
+    {"CONFIRMED_COMPLETED", "CONFIRMED_NO_WRITE", "DEAD_LETTER"}
 )
 
 
@@ -132,6 +177,64 @@ def make_paperclip_task(
             "created_by": created_by,
             "created_at": timestamp,
             "updated_at": timestamp,
+        }
+    )
+
+
+def make_work_queue_item(
+    *,
+    work_item_id: str,
+    brand_id: str,
+    paperclip_issue_id: str,
+    paperclip_task_checksum: str,
+    work_kind: str,
+    worker_role: str,
+    payload: Mapping[str, Any],
+    max_attempts: int,
+    created_by: str,
+    created_at: str | None = None,
+) -> dict[str, Any]:
+    """Create immutable fictional delivery work bound to one Paperclip version."""
+
+    if not all(
+        isinstance(value, str) and value
+        for value in (
+            work_item_id,
+            paperclip_issue_id,
+            paperclip_task_checksum,
+            worker_role,
+            created_by,
+        )
+    ):
+        raise ContractError("work queue identity and Paperclip binding are required")
+    if not brand_id.startswith("brand_"):
+        raise ContractError("work queue brand_id must use the brand_ prefix")
+    if work_kind not in WORK_KINDS:
+        raise ContractError("work queue kind is invalid")
+    if worker_role not in WORKER_QUEUE_ROLES:
+        raise ContractError("work queue worker role is invalid")
+    if isinstance(max_attempts, bool) or not isinstance(max_attempts, int):
+        raise ContractError("work queue max_attempts must be an integer")
+    if not 1 <= max_attempts <= 5:
+        raise ContractError("work queue max_attempts must be between 1 and 5")
+    if not isinstance(payload, Mapping):
+        raise ContractError("work queue payload must be an object")
+    timestamp = created_at or utc_now()
+    parse_time(timestamp)
+    return finalize_record(
+        {
+            "schema_version": "1.0",
+            "artifact_type": "work_queue_item",
+            "work_item_id": work_item_id,
+            "brand_id": brand_id,
+            "paperclip_issue_id": paperclip_issue_id,
+            "paperclip_task_checksum": paperclip_task_checksum,
+            "work_kind": work_kind,
+            "worker_role": worker_role,
+            "payload": copy.deepcopy(dict(payload)),
+            "max_attempts": max_attempts,
+            "created_by": created_by,
+            "created_at": timestamp,
         }
     )
 
@@ -379,6 +482,43 @@ class _SQLitePlatformDatabase:
                 );
                 CREATE INDEX IF NOT EXISTS tenant_artifacts_by_type
                     ON tenant_artifacts (brand_id, artifact_type, record_id);
+                CREATE TABLE IF NOT EXISTS platform_work_queue (
+                    brand_id TEXT NOT NULL,
+                    work_item_id TEXT NOT NULL,
+                    work_json TEXT NOT NULL,
+                    work_checksum TEXT NOT NULL,
+                    work_kind TEXT NOT NULL
+                        CHECK (work_kind IN ('internal', 'external_write')),
+                    worker_role TEXT NOT NULL,
+                    state TEXT NOT NULL CHECK (
+                        state IN (
+                            'READY',
+                            'LEASED',
+                            'RETRY_WAIT',
+                            'RECONCILIATION_REQUIRED',
+                            'DEAD_LETTER',
+                            'COMPLETED'
+                        )
+                    ),
+                    attempt_count INTEGER NOT NULL,
+                    max_attempts INTEGER NOT NULL,
+                    next_attempt_at TEXT,
+                    leased_at TEXT,
+                    lease_owner TEXT,
+                    lease_token_hash TEXT,
+                    lease_expires_at TEXT,
+                    heartbeat_at TEXT,
+                    error_classes_json TEXT NOT NULL,
+                    disposition_json TEXT,
+                    completed_at TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY (brand_id, work_item_id)
+                );
+                CREATE INDEX IF NOT EXISTS platform_work_queue_available
+                    ON platform_work_queue (
+                        brand_id, worker_role, state, next_attempt_at, created_at
+                    );
                 CREATE TABLE IF NOT EXISTS platform_audit (
                     sequence INTEGER PRIMARY KEY AUTOINCREMENT,
                     brand_id TEXT NOT NULL,
@@ -2309,6 +2449,890 @@ class _AuthorityTenantArtifactStore:
                 "stored_at": stored_at,
             }
         return validated_records, validated_provenance
+
+
+class _AuthorityWorkQueue:
+    """Durable tenant queue inside the protected fictional Platform Authority."""
+
+    MAX_LEASE_SECONDS = 60
+
+    def __init__(
+        self,
+        database_path: str | os.PathLike[str],
+        *,
+        timeout_seconds: float = 5.0,
+        clock: Callable[[], datetime],
+        _construction_token: object,
+    ) -> None:
+        if _construction_token is not _AUTHORITY_ADAPTER_TOKEN:
+            raise WorkQueueError("work queue authority construction is denied")
+        self._clock = clock
+        self._database = _SQLitePlatformDatabase(
+            database_path,
+            timeout_seconds=timeout_seconds,
+            error_type=WorkQueueError,
+        )
+
+    def enqueue(self, principal: Principal, work_item: Mapping[str, Any]) -> str:
+        if principal.role_id != "agency-director":
+            raise AuthorizationError("only the agency director may enqueue work")
+        item = self._validated_work_item(work_item)
+        if item["brand_id"] != principal.brand_id:
+            raise AuthorizationError("cross-tenant work enqueue denied")
+        if item["created_by"] != principal.actor_id:
+            raise AuthorizationError("work queue creator does not match actor")
+        now = _authority_now(self._clock)
+        connection = self._connect()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            existing = connection.execute(
+                """
+                SELECT work_checksum FROM platform_work_queue
+                WHERE brand_id = ? AND work_item_id = ?
+                """,
+                (principal.brand_id, item["work_item_id"]),
+            ).fetchone()
+            if existing is not None:
+                if existing["work_checksum"] != item["content_checksum"]:
+                    raise ContractError("work queue item is immutable")
+                connection.commit()
+                return item["work_item_id"]
+            self._require_current_task(connection, item)
+            timestamp = now.isoformat()
+            connection.execute(
+                """
+                INSERT INTO platform_work_queue (
+                    brand_id,
+                    work_item_id,
+                    work_json,
+                    work_checksum,
+                    work_kind,
+                    worker_role,
+                    state,
+                    attempt_count,
+                    max_attempts,
+                    next_attempt_at,
+                    leased_at,
+                    lease_owner,
+                    lease_token_hash,
+                    lease_expires_at,
+                    heartbeat_at,
+                    error_classes_json,
+                    disposition_json,
+                    completed_at,
+                    created_at,
+                    updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, 'READY', 0, ?, ?, NULL, NULL,
+                          NULL, NULL, NULL, '[]', NULL, NULL, ?, ?)
+                """,
+                (
+                    principal.brand_id,
+                    item["work_item_id"],
+                    canonical_bytes(item).decode("utf-8"),
+                    item["content_checksum"],
+                    item["work_kind"],
+                    item["worker_role"],
+                    item["max_attempts"],
+                    timestamp,
+                    timestamp,
+                    timestamp,
+                ),
+            )
+            _AuthorityPaperclipAdapter._insert_audit(
+                connection,
+                principal,
+                "queue.item.enqueued",
+                item["work_item_id"],
+            )
+            connection.commit()
+            return item["work_item_id"]
+        except (AuthorizationError, ContractError, WorkQueueError):
+            _rollback(connection)
+            raise
+        except (json.JSONDecodeError, sqlite3.Error, TypeError, ValueError) as exc:
+            _rollback(connection)
+            raise WorkQueueError("could not enqueue work") from exc
+        finally:
+            connection.close()
+
+    def lease_next(
+        self, principal: Principal, lease_seconds: int
+    ) -> dict[str, Any] | None:
+        self._validate_lease_seconds(lease_seconds)
+        now = _authority_now(self._clock)
+        connection = self._connect()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            self._expire_leases(connection, principal, now)
+            while True:
+                row = connection.execute(
+                    """
+                    SELECT * FROM platform_work_queue
+                    WHERE brand_id = ?
+                      AND worker_role = ?
+                      AND (
+                        state = 'READY'
+                        OR (
+                          state = 'RETRY_WAIT'
+                          AND next_attempt_at IS NOT NULL
+                          AND next_attempt_at <= ?
+                        )
+                      )
+                    ORDER BY created_at, work_item_id
+                    LIMIT 1
+                    """,
+                    (principal.brand_id, principal.role_id, now.isoformat()),
+                ).fetchone()
+                if row is None:
+                    connection.commit()
+                    return None
+                work_item = self._validated_work_item(json.loads(row["work_json"]))
+                if not self._task_is_current(connection, work_item):
+                    self._move_to_dead_letter(
+                        connection,
+                        principal,
+                        row,
+                        now,
+                        "TASK_DRIFT",
+                    )
+                    continue
+                token = secrets.token_urlsafe(32)
+                expires_at = now + timedelta(seconds=lease_seconds)
+                attempt_count = int(row["attempt_count"]) + 1
+                connection.execute(
+                    """
+                    UPDATE platform_work_queue
+                    SET state = 'LEASED',
+                        attempt_count = ?,
+                        next_attempt_at = NULL,
+                        leased_at = ?,
+                        lease_owner = ?,
+                        lease_token_hash = ?,
+                        lease_expires_at = ?,
+                        heartbeat_at = ?,
+                        updated_at = ?
+                    WHERE brand_id = ? AND work_item_id = ?
+                    """,
+                    (
+                        attempt_count,
+                        now.isoformat(),
+                        principal.actor_id,
+                        self._token_hash(token),
+                        expires_at.isoformat(),
+                        now.isoformat(),
+                        now.isoformat(),
+                        principal.brand_id,
+                        row["work_item_id"],
+                    ),
+                )
+                _AuthorityPaperclipAdapter._insert_audit(
+                    connection,
+                    principal,
+                    "queue.item.leased",
+                    row["work_item_id"],
+                )
+                connection.commit()
+                return {
+                    "work_item": work_item,
+                    "lease": {
+                        "work_item_id": row["work_item_id"],
+                        "lease_token": token,
+                        "lease_owner": principal.actor_id,
+                        "leased_at": now.isoformat(),
+                        "lease_expires_at": expires_at.isoformat(),
+                        "attempt_count": attempt_count,
+                    },
+                }
+        except (AuthorizationError, ContractError, WorkQueueError):
+            _rollback(connection)
+            raise
+        except (json.JSONDecodeError, sqlite3.Error, TypeError, ValueError) as exc:
+            _rollback(connection)
+            raise WorkQueueError("could not lease queued work") from exc
+        finally:
+            connection.close()
+
+    def heartbeat(
+        self,
+        principal: Principal,
+        work_item_id: str,
+        lease_token: str,
+        lease_seconds: int,
+    ) -> dict[str, Any]:
+        self._validate_lease_seconds(lease_seconds)
+        now = _authority_now(self._clock)
+        connection = self._connect()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            row = self._required_row(connection, principal.brand_id, work_item_id)
+            self._require_active_lease(row, principal, lease_token, now)
+            expires_at = now + timedelta(seconds=lease_seconds)
+            connection.execute(
+                """
+                UPDATE platform_work_queue
+                SET heartbeat_at = ?, lease_expires_at = ?, updated_at = ?
+                WHERE brand_id = ? AND work_item_id = ?
+                """,
+                (
+                    now.isoformat(),
+                    expires_at.isoformat(),
+                    now.isoformat(),
+                    principal.brand_id,
+                    work_item_id,
+                ),
+            )
+            _AuthorityPaperclipAdapter._insert_audit(
+                connection, principal, "queue.item.heartbeat", work_item_id
+            )
+            connection.commit()
+            return {
+                "work_item_id": work_item_id,
+                "lease_owner": principal.actor_id,
+                "lease_expires_at": expires_at.isoformat(),
+                "attempt_count": int(row["attempt_count"]),
+            }
+        except (AuthorizationError, ContractError, WorkQueueError, KeyError):
+            _rollback(connection)
+            raise
+        except (sqlite3.Error, TypeError, ValueError) as exc:
+            _rollback(connection)
+            raise WorkQueueError("could not renew work lease") from exc
+        finally:
+            connection.close()
+
+    def complete(
+        self,
+        principal: Principal,
+        work_item_id: str,
+        lease_token: str,
+    ) -> dict[str, Any]:
+        now = _authority_now(self._clock)
+        connection = self._connect()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            row = self._required_row(connection, principal.brand_id, work_item_id)
+            self._require_active_lease(row, principal, lease_token, now)
+            work_item = self._validated_work_item(json.loads(row["work_json"]))
+            if not self._task_is_current(connection, work_item):
+                if row["work_kind"] == "internal":
+                    self._move_to_dead_letter(
+                        connection,
+                        principal,
+                        row,
+                        now,
+                        "TASK_DRIFT",
+                    )
+                else:
+                    errors = self._error_classes(row)
+                    errors.append("TASK_DRIFT")
+                    self._set_nonleased_state(
+                        connection,
+                        row,
+                        state="RECONCILIATION_REQUIRED",
+                        now=now,
+                        errors=errors,
+                        next_attempt_at=None,
+                    )
+                    _AuthorityPaperclipAdapter._insert_audit(
+                        connection,
+                        principal,
+                        "queue.item.task_drift.reconciliation_required",
+                        work_item_id,
+                    )
+                result = self._view(
+                    self._required_row(connection, principal.brand_id, work_item_id)
+                )
+                connection.commit()
+                return result
+            connection.execute(
+                """
+                UPDATE platform_work_queue
+                SET state = 'COMPLETED',
+                    leased_at = NULL,
+                    lease_owner = NULL,
+                    lease_token_hash = NULL,
+                    lease_expires_at = NULL,
+                    heartbeat_at = NULL,
+                    completed_at = ?,
+                    updated_at = ?
+                WHERE brand_id = ? AND work_item_id = ?
+                """,
+                (
+                    now.isoformat(),
+                    now.isoformat(),
+                    principal.brand_id,
+                    work_item_id,
+                ),
+            )
+            _AuthorityPaperclipAdapter._insert_audit(
+                connection, principal, "queue.item.completed", work_item_id
+            )
+            row = self._required_row(connection, principal.brand_id, work_item_id)
+            result = self._view(row)
+            connection.commit()
+            return result
+        except (AuthorizationError, ContractError, WorkQueueError, KeyError):
+            _rollback(connection)
+            raise
+        except (json.JSONDecodeError, sqlite3.Error, TypeError, ValueError) as exc:
+            _rollback(connection)
+            raise WorkQueueError("could not complete queued work") from exc
+        finally:
+            connection.close()
+
+    def fail(
+        self,
+        principal: Principal,
+        work_item_id: str,
+        lease_token: str,
+        *,
+        error_class: str,
+        retryable: bool,
+        external_result: str,
+    ) -> dict[str, Any]:
+        if error_class not in WORK_ERROR_CLASSES - {"LEASE_EXPIRED", "TASK_DRIFT"}:
+            raise ContractError("work queue error class is invalid")
+        if not isinstance(retryable, bool):
+            raise ContractError("work queue retryable flag is invalid")
+        now = _authority_now(self._clock)
+        connection = self._connect()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            row = self._required_row(connection, principal.brand_id, work_item_id)
+            self._require_active_lease(row, principal, lease_token, now)
+            if row["work_kind"] == "internal":
+                if external_result != "NOT_APPLICABLE":
+                    raise ContractError("internal work cannot report external state")
+            elif external_result not in {
+                "UNKNOWN",
+                "CONFIRMED_NO_WRITE",
+                "CONFIRMED_REJECTED",
+            }:
+                raise ContractError("external work result state is invalid")
+            errors = self._error_classes(row)
+            errors.append(error_class)
+            if row["work_kind"] == "external_write" and external_result == "UNKNOWN":
+                state = "RECONCILIATION_REQUIRED"
+                next_attempt_at = None
+            elif retryable and int(row["attempt_count"]) < int(row["max_attempts"]):
+                state = "RETRY_WAIT"
+                next_attempt_at = self._retry_time(
+                    now, int(row["attempt_count"])
+                ).isoformat()
+            else:
+                state = "DEAD_LETTER"
+                next_attempt_at = None
+            self._set_nonleased_state(
+                connection,
+                row,
+                state=state,
+                now=now,
+                errors=errors,
+                next_attempt_at=next_attempt_at,
+            )
+            _AuthorityPaperclipAdapter._insert_audit(
+                connection,
+                principal,
+                f"queue.item.{state.lower()}",
+                work_item_id,
+            )
+            result = self._view(
+                self._required_row(connection, principal.brand_id, work_item_id)
+            )
+            connection.commit()
+            return result
+        except (AuthorizationError, ContractError, WorkQueueError, KeyError):
+            _rollback(connection)
+            raise
+        except (json.JSONDecodeError, sqlite3.Error, TypeError, ValueError) as exc:
+            _rollback(connection)
+            raise WorkQueueError("could not record work failure") from exc
+        finally:
+            connection.close()
+
+    def reconcile(
+        self,
+        principal: Principal,
+        work_item_id: str,
+        *,
+        outcome: str,
+        evidence_ref: str,
+        disposition: str,
+    ) -> dict[str, Any]:
+        if principal.role_id != "agency-director":
+            raise AuthorizationError("only the agency director may reconcile work")
+        if outcome not in WORK_RECONCILIATION_OUTCOMES:
+            raise ContractError("work reconciliation outcome is invalid")
+        if not all(isinstance(value, str) and value for value in (evidence_ref, disposition)):
+            raise ContractError("work reconciliation evidence and disposition are required")
+        now = _authority_now(self._clock)
+        connection = self._connect()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            row = self._required_row(connection, principal.brand_id, work_item_id)
+            if row["state"] != "RECONCILIATION_REQUIRED":
+                raise ContractError("work item does not require reconciliation")
+            disposition_record = {
+                "outcome": outcome,
+                "evidence_ref": evidence_ref,
+                "disposition": disposition,
+                "decided_by": principal.actor_id,
+                "decided_at": now.isoformat(),
+            }
+            dispositions = self._dispositions(row)
+            dispositions.append(disposition_record)
+            if outcome == "CONFIRMED_COMPLETED":
+                state = "COMPLETED"
+                completed_at = now.isoformat()
+                next_attempt_at = None
+            elif outcome == "CONFIRMED_NO_WRITE" and int(row["attempt_count"]) < int(
+                row["max_attempts"]
+            ):
+                state = "READY"
+                completed_at = None
+                next_attempt_at = now.isoformat()
+            else:
+                state = "DEAD_LETTER"
+                completed_at = None
+                next_attempt_at = None
+            connection.execute(
+                """
+                UPDATE platform_work_queue
+                SET state = ?,
+                    next_attempt_at = ?,
+                    disposition_json = ?,
+                    completed_at = ?,
+                    updated_at = ?
+                WHERE brand_id = ? AND work_item_id = ?
+                """,
+                (
+                    state,
+                    next_attempt_at,
+                    canonical_bytes(dispositions).decode("utf-8"),
+                    completed_at,
+                    now.isoformat(),
+                    principal.brand_id,
+                    work_item_id,
+                ),
+            )
+            _AuthorityPaperclipAdapter._insert_audit(
+                connection,
+                principal,
+                f"queue.item.reconciled.{state.lower()}",
+                work_item_id,
+            )
+            result = self._view(
+                self._required_row(connection, principal.brand_id, work_item_id)
+            )
+            connection.commit()
+            return result
+        except (AuthorizationError, ContractError, WorkQueueError, KeyError):
+            _rollback(connection)
+            raise
+        except (json.JSONDecodeError, sqlite3.Error, TypeError, ValueError) as exc:
+            _rollback(connection)
+            raise WorkQueueError("could not reconcile queued work") from exc
+        finally:
+            connection.close()
+
+    def record_dead_letter_disposition(
+        self,
+        principal: Principal,
+        work_item_id: str,
+        *,
+        evidence_ref: str,
+        disposition: str,
+    ) -> dict[str, Any]:
+        if principal.role_id != "agency-director":
+            raise AuthorizationError("only the agency director may disposition dead letters")
+        if not all(isinstance(value, str) and value for value in (evidence_ref, disposition)):
+            raise ContractError("dead-letter evidence and disposition are required")
+        now = _authority_now(self._clock)
+        connection = self._connect()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            row = self._required_row(connection, principal.brand_id, work_item_id)
+            if row["state"] != "DEAD_LETTER":
+                raise ContractError("work item is not dead-lettered")
+            disposition_record = {
+                "outcome": "DEAD_LETTER",
+                "evidence_ref": evidence_ref,
+                "disposition": disposition,
+                "decided_by": principal.actor_id,
+                "decided_at": now.isoformat(),
+            }
+            dispositions = self._dispositions(row)
+            dead_letter_dispositions = [
+                existing
+                for existing in dispositions
+                if existing.get("outcome") == "DEAD_LETTER"
+            ]
+            if dead_letter_dispositions:
+                existing = dead_letter_dispositions[0]
+                if any(
+                    existing.get(field) != disposition_record[field]
+                    for field in ("evidence_ref", "disposition", "decided_by")
+                ):
+                    raise ContractError("dead-letter disposition is immutable")
+                connection.commit()
+                return self._view(row)
+            dispositions.append(disposition_record)
+            encoded = canonical_bytes(dispositions).decode("utf-8")
+            connection.execute(
+                """
+                UPDATE platform_work_queue
+                SET disposition_json = ?, updated_at = ?
+                WHERE brand_id = ? AND work_item_id = ?
+                """,
+                (encoded, now.isoformat(), principal.brand_id, work_item_id),
+            )
+            _AuthorityPaperclipAdapter._insert_audit(
+                connection,
+                principal,
+                "queue.item.dead_letter_dispositioned",
+                work_item_id,
+            )
+            result = self._view(
+                self._required_row(connection, principal.brand_id, work_item_id)
+            )
+            connection.commit()
+            return result
+        except (AuthorizationError, ContractError, WorkQueueError, KeyError):
+            _rollback(connection)
+            raise
+        except (json.JSONDecodeError, sqlite3.Error, TypeError, ValueError) as exc:
+            _rollback(connection)
+            raise WorkQueueError("could not disposition dead-letter work") from exc
+        finally:
+            connection.close()
+
+    def get(self, principal: Principal, work_item_id: str) -> dict[str, Any]:
+        connection = self._connect()
+        try:
+            row = self._required_row(connection, principal.brand_id, work_item_id)
+            if principal.role_id not in {
+                "agency-director",
+                "platform-assurance-reviewer",
+                row["worker_role"],
+            }:
+                raise AuthorizationError("role cannot read this work item")
+            return self._view(row)
+        except (AuthorizationError, ContractError, WorkQueueError, KeyError):
+            raise
+        except (json.JSONDecodeError, sqlite3.Error, TypeError, ValueError) as exc:
+            raise WorkQueueError("could not read queued work") from exc
+        finally:
+            connection.close()
+
+    def dead_letters(self, principal: Principal) -> list[dict[str, Any]]:
+        if principal.role_id not in {
+            "agency-director",
+            "platform-assurance-reviewer",
+        }:
+            raise AuthorizationError("role cannot read dead-letter work")
+        connection = self._connect()
+        try:
+            rows = connection.execute(
+                """
+                SELECT * FROM platform_work_queue
+                WHERE brand_id = ? AND state = 'DEAD_LETTER'
+                ORDER BY updated_at, work_item_id
+                """,
+                (principal.brand_id,),
+            ).fetchall()
+            return [self._view(row) for row in rows]
+        except (json.JSONDecodeError, sqlite3.Error, TypeError, ValueError) as exc:
+            raise WorkQueueError("could not list dead-letter work") from exc
+        finally:
+            connection.close()
+
+    def _connect(self) -> sqlite3.Connection:
+        connection = self._database.connect()
+        connection.row_factory = sqlite3.Row
+        return connection
+
+    def _expire_leases(
+        self,
+        connection: sqlite3.Connection,
+        principal: Principal,
+        now: datetime,
+    ) -> None:
+        rows = connection.execute(
+            """
+            SELECT * FROM platform_work_queue
+            WHERE brand_id = ?
+              AND state = 'LEASED'
+              AND lease_expires_at IS NOT NULL
+              AND lease_expires_at <= ?
+            ORDER BY work_item_id
+            """,
+            (principal.brand_id, now.isoformat()),
+        ).fetchall()
+        for row in rows:
+            errors = self._error_classes(row)
+            errors.append("LEASE_EXPIRED")
+            if row["work_kind"] == "external_write":
+                state = "RECONCILIATION_REQUIRED"
+                next_attempt_at = None
+            elif int(row["attempt_count"]) < int(row["max_attempts"]):
+                state = "RETRY_WAIT"
+                next_attempt_at = now.isoformat()
+            else:
+                state = "DEAD_LETTER"
+                next_attempt_at = None
+            self._set_nonleased_state(
+                connection,
+                row,
+                state=state,
+                now=now,
+                errors=errors,
+                next_attempt_at=next_attempt_at,
+            )
+            _AuthorityPaperclipAdapter._insert_audit(
+                connection,
+                principal,
+                f"queue.item.lease_expired.{state.lower()}",
+                row["work_item_id"],
+            )
+
+    def _move_to_dead_letter(
+        self,
+        connection: sqlite3.Connection,
+        principal: Principal,
+        row: sqlite3.Row,
+        now: datetime,
+        error_class: str,
+    ) -> None:
+        errors = self._error_classes(row)
+        errors.append(error_class)
+        self._set_nonleased_state(
+            connection,
+            row,
+            state="DEAD_LETTER",
+            now=now,
+            errors=errors,
+            next_attempt_at=None,
+        )
+        _AuthorityPaperclipAdapter._insert_audit(
+            connection,
+            principal,
+            "queue.item.dead_letter",
+            row["work_item_id"],
+        )
+
+    @staticmethod
+    def _set_nonleased_state(
+        connection: sqlite3.Connection,
+        row: sqlite3.Row,
+        *,
+        state: str,
+        now: datetime,
+        errors: Sequence[str],
+        next_attempt_at: str | None,
+    ) -> None:
+        if state not in WORK_QUEUE_STATES - {"READY", "LEASED", "COMPLETED"}:
+            raise WorkQueueError("invalid nonleased queue state")
+        connection.execute(
+            """
+            UPDATE platform_work_queue
+            SET state = ?,
+                next_attempt_at = ?,
+                leased_at = NULL,
+                lease_owner = NULL,
+                lease_token_hash = NULL,
+                lease_expires_at = NULL,
+                heartbeat_at = NULL,
+                error_classes_json = ?,
+                updated_at = ?
+            WHERE brand_id = ? AND work_item_id = ?
+            """,
+            (
+                state,
+                next_attempt_at,
+                canonical_bytes(list(errors)).decode("utf-8"),
+                now.isoformat(),
+                row["brand_id"],
+                row["work_item_id"],
+            ),
+        )
+
+    @staticmethod
+    def _required_row(
+        connection: sqlite3.Connection,
+        brand_id: str,
+        work_item_id: str,
+    ) -> sqlite3.Row:
+        row = connection.execute(
+            """
+            SELECT * FROM platform_work_queue
+            WHERE brand_id = ? AND work_item_id = ?
+            """,
+            (brand_id, work_item_id),
+        ).fetchone()
+        if row is None:
+            raise KeyError(work_item_id)
+        return row
+
+    def _require_active_lease(
+        self,
+        row: sqlite3.Row,
+        principal: Principal,
+        lease_token: str,
+        now: datetime,
+    ) -> None:
+        if row["worker_role"] != principal.role_id:
+            raise AuthorizationError("work lease role does not match actor")
+        if row["state"] != "LEASED" or row["lease_owner"] != principal.actor_id:
+            raise AuthorizationError("work lease is not held by this actor")
+        if not isinstance(lease_token, str) or not lease_token:
+            raise AuthorizationError("work lease token is invalid")
+        if row["lease_token_hash"] != self._token_hash(lease_token):
+            raise AuthorizationError("work lease token is invalid")
+        expires_at = row["lease_expires_at"]
+        if not isinstance(expires_at, str) or parse_time(expires_at) <= now:
+            raise ContractError("work lease has expired")
+
+    def _require_current_task(
+        self, connection: sqlite3.Connection, item: Mapping[str, Any]
+    ) -> None:
+        if not self._task_is_current(connection, item):
+            raise ContractError("work item is not bound to the current ready task")
+
+    @staticmethod
+    def _task_is_current(
+        connection: sqlite3.Connection, item: Mapping[str, Any]
+    ) -> bool:
+        row = connection.execute(
+            """
+            SELECT record_json, checksum FROM paperclip_task_versions
+            WHERE brand_id = ? AND issue_id = ?
+            ORDER BY version DESC LIMIT 1
+            """,
+            (item["brand_id"], item["paperclip_issue_id"]),
+        ).fetchone()
+        if row is None:
+            return False
+        task = json.loads(row["record_json"])
+        _validate_task(task)
+        return (
+            row["checksum"] == item["paperclip_task_checksum"]
+            and task["content_checksum"] == item["paperclip_task_checksum"]
+            and task["status"] in {"ready", "in_progress"}
+        )
+
+    @staticmethod
+    def _validated_work_item(work_item: Mapping[str, Any]) -> dict[str, Any]:
+        verify_record(work_item)
+        item = copy.deepcopy(dict(work_item))
+        required = {
+            "work_item_id",
+            "brand_id",
+            "paperclip_issue_id",
+            "paperclip_task_checksum",
+            "work_kind",
+            "worker_role",
+            "payload",
+            "max_attempts",
+            "created_by",
+            "created_at",
+        }
+        if item.get("artifact_type") != "work_queue_item" or not required.issubset(item):
+            raise ContractError("invalid work queue item")
+        if not all(
+            isinstance(item[field], str) and item[field]
+            for field in (
+                "work_item_id",
+                "brand_id",
+                "paperclip_issue_id",
+                "paperclip_task_checksum",
+                "worker_role",
+                "created_by",
+                "created_at",
+            )
+        ):
+            raise ContractError("invalid work queue identity")
+        if not item["brand_id"].startswith("brand_"):
+            raise ContractError("invalid work queue brand")
+        if item["work_kind"] not in WORK_KINDS:
+            raise ContractError("invalid work queue kind")
+        if item["worker_role"] not in WORKER_QUEUE_ROLES:
+            raise ContractError("invalid work queue worker role")
+        if not isinstance(item["payload"], dict):
+            raise ContractError("invalid work queue payload")
+        max_attempts = item["max_attempts"]
+        if isinstance(max_attempts, bool) or not isinstance(max_attempts, int):
+            raise ContractError("invalid work queue attempt policy")
+        if not 1 <= max_attempts <= 5:
+            raise ContractError("invalid work queue attempt policy")
+        parse_time(item["created_at"])
+        return item
+
+    @staticmethod
+    def _token_hash(token: str) -> str:
+        return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _validate_lease_seconds(lease_seconds: int) -> None:
+        if isinstance(lease_seconds, bool) or not isinstance(lease_seconds, int):
+            raise ContractError("work lease duration must be an integer")
+        if not 1 <= lease_seconds <= _AuthorityWorkQueue.MAX_LEASE_SECONDS:
+            raise ContractError("work lease duration must be between 1 and 60 seconds")
+
+    @staticmethod
+    def _retry_time(now: datetime, attempt_count: int) -> datetime:
+        return now + timedelta(seconds=min(60, 2**attempt_count))
+
+    @staticmethod
+    def _error_classes(row: sqlite3.Row) -> list[str]:
+        errors = json.loads(row["error_classes_json"])
+        if (
+            not isinstance(errors, list)
+            or any(error not in WORK_ERROR_CLASSES for error in errors)
+        ):
+            raise WorkQueueError("stored work error classes are invalid")
+        return list(errors)
+
+    @staticmethod
+    def _dispositions(row: sqlite3.Row) -> list[dict[str, Any]]:
+        if row["disposition_json"] is None:
+            return []
+        dispositions = json.loads(row["disposition_json"])
+        if not isinstance(dispositions, list) or any(
+            not isinstance(disposition, dict) for disposition in dispositions
+        ):
+            raise WorkQueueError("stored work dispositions are invalid")
+        return copy.deepcopy(dispositions)
+
+    def _view(self, row: sqlite3.Row) -> dict[str, Any]:
+        state = row["state"]
+        if state not in WORK_QUEUE_STATES:
+            raise WorkQueueError("stored work queue state is invalid")
+        item = self._validated_work_item(json.loads(row["work_json"]))
+        if (
+            item["brand_id"] != row["brand_id"]
+            or item["work_item_id"] != row["work_item_id"]
+            or item["content_checksum"] != row["work_checksum"]
+            or item["work_kind"] != row["work_kind"]
+            or item["worker_role"] != row["worker_role"]
+            or item["max_attempts"] != row["max_attempts"]
+        ):
+            raise WorkQueueError("stored work queue identity is invalid")
+        return {
+            "work_item": item,
+            "state": state,
+            "attempt_count": int(row["attempt_count"]),
+            "max_attempts": int(row["max_attempts"]),
+            "next_attempt_at": row["next_attempt_at"],
+            "lease_owner": row["lease_owner"],
+            "leased_at": row["leased_at"],
+            "lease_expires_at": row["lease_expires_at"],
+            "heartbeat_at": row["heartbeat_at"],
+            "error_classes": self._error_classes(row),
+            "dispositions": self._dispositions(row),
+            "completed_at": row["completed_at"],
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+        }
 
 
 def _authority_now(clock: Callable[[], datetime]) -> datetime:
