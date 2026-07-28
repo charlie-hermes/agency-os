@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any, Sequence
 
-from .integrations import PaperclipLifecycleAdapter
+from .integrations import IntegrationError, PaperclipLifecycleAdapter
 
 
 def _metadata(description: Any) -> dict[str, Any]:
@@ -23,10 +23,12 @@ def build_campaign_projection(
     paperclip: PaperclipLifecycleAdapter,
     *,
     approval_ids: Sequence[str] = (),
+    task_ids: Sequence[str],
 ) -> dict[str, Any]:
     """Project campaign state without creating a second source of truth."""
 
-    tasks = paperclip.list_tasks()
+    known_task_ids = set(task_ids)
+    tasks = [paperclip.get_task(item) for item in task_ids]
     approvals = [
         (
             paperclip.get_approval(item),
@@ -35,6 +37,11 @@ def build_campaign_projection(
         for item in approval_ids
     ]
     status_counts: dict[str, int] = {}
+    for _, approval_issues in approvals:
+        if not {item["id"] for item in approval_issues} <= known_task_ids:
+            raise IntegrationError(
+                "Paperclip approval escaped the campaign task boundary"
+            )
     projected_tasks = []
     for task in tasks:
         status_counts[task["status"]] = status_counts.get(task["status"], 0) + 1

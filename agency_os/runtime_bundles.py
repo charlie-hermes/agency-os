@@ -1,4 +1,4 @@
-"""Checksum-bound Core role bundles and a fresh-process reference loader."""
+"""Checksum-bound Core role bundles verified in a fresh process."""
 
 from __future__ import annotations
 
@@ -50,7 +50,7 @@ def verify_bundle_catalog(path: Path = DEFAULT_CATALOG) -> dict[str, Any]:
                 "role_id": entry["role_id"],
                 "agents": _profile(entry["agents_path"], entry["agents_sha256"]),
                 "soul": _profile(entry["soul_path"], entry["soul_sha256"]),
-                "reference_loader_status": "loaded_in_fresh_process",
+                "bundle_verification_status": "checksum_verified_in_fresh_process",
                 "target_runtime_status": "pending_hermes_runtime",
             }
         )

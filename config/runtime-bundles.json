@@ -2,7 +2,7 @@
   "schema_version": "1.0",
   "target_runtime": "hermes",
   "target_runtime_evidence": "pending_runtime_installation",
-  "reference_loader_status": "fresh_process_verified_candidate",
+  "bundle_verification_status": "checksum_candidate",
   "roles": [
     {"role_id":"agency-director","agents_path":"roles/agency-director/AGENTS.md","agents_sha256":"2201a746868c673cc3da27c62e080cd3168d8f96201d8f24bc9261b8203dca5e","soul_path":"roles/agency-director/SOUL.md","soul_sha256":"c1409a8701f56b7ef957558ec18d6bd49f9999218dafffa4baaa2e1814bfb395"},
     {"role_id":"brand-brief-steward","agents_path":"roles/brand-brief-steward/AGENTS.md","agents_sha256":"fb4d7dd52e1c92db9c59e27399a24814c4deb2e97e8def43046a298fc940f20c","soul_path":"roles/brand-brief-steward/SOUL.md","soul_sha256":"06423c9cdc59d05ba550bafed4f201e5e1e3cf012e447c29de982970e1b71af5"},

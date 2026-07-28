@@ -3,14 +3,19 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from typing import Any
+from datetime import datetime, timedelta, timezone
+from typing import Any, Callable, Mapping
 
-from .contracts import finalize_record
-from .fictional_platforms import InMemoryBuzzTransport, InMemoryPaperclipTransport
-from .integrations import PaperclipLifecycleAdapter, TypedBuzzAdapter
+from .contracts import finalize_record, make_approval_record
+from .gateway import MockPublisher
+from .integrations import (
+    BuzzTransport,
+    PaperclipLifecycleAdapter,
+    PaperclipTransport,
+    TypedBuzzAdapter,
+)
 from .operator_view import build_campaign_projection
-from .workflow import VerticalSliceResult, run_fictional_article
+from .workflow import VerticalSliceResult, dispatch_prepared_article, prepare_fictional_article
 
 
 CORE_RUNTIME_ROLES = (
@@ -25,11 +30,20 @@ CORE_RUNTIME_ROLES = (
 )
 
 
+class CoreApprovalDenied(RuntimeError):
+    """The Paperclip board did not approve the exact publication manifest."""
+
+
+ApprovalAuthority = Callable[
+    [dict[str, Any], Mapping[str, Any]], dict[str, Any]
+]
+
+
 @dataclass
 class CoreWorkflowResult:
     paperclip: PaperclipLifecycleAdapter
-    paperclip_transport: InMemoryPaperclipTransport
-    buzz_transport: InMemoryBuzzTransport
+    paperclip_transport: PaperclipTransport
+    buzz_transport: BuzzTransport
     vertical_slice: VerticalSliceResult
     tasks_by_role: dict[str, dict[str, Any]]
     records: dict[str, dict[str, Any]]
@@ -66,20 +80,17 @@ def _artifact(
     )
 
 
-def run_core_workflow() -> CoreWorkflowResult:
+def run_core_workflow(
+    *,
+    paperclip: PaperclipLifecycleAdapter,
+    buzz: TypedBuzzAdapter,
+    approval_authority: ApprovalAuthority,
+    publisher: MockPublisher,
+) -> CoreWorkflowResult:
     """Run onboarding through learning with a real reject/revise branch."""
 
-    company_id = "00000000-0000-4000-8000-000000000001"
-    paperclip_transport = InMemoryPaperclipTransport(
-        company_id=company_id, brand_id="brand_lantern"
-    )
-    buzz_transport = InMemoryBuzzTransport()
-    paperclip = PaperclipLifecycleAdapter(
-        transport=paperclip_transport,
-        company_id=company_id,
-        brand_id="brand_lantern",
-    )
-    buzz = TypedBuzzAdapter(transport=buzz_transport, brand_id="brand_lantern")
+    paperclip_transport = paperclip.transport
+    buzz_transport = buzz.transport
 
     definitions = (
         ("agency-director", "Direct Lantern Core campaign", "campaign_direction", ["campaign graph accepted"], ["campaign_brief_v1"]),
@@ -171,23 +182,59 @@ def run_core_workflow() -> CoreWorkflowResult:
     decision = buzz.post_decision(channel["id"], paperclip_issue_id=producer_task["id"], decision="Remove the guarantee; retain only the supported five-check decision aid.", evidence_refs=["qa_revise_v0", "source_observation_v1"])
     paperclip.comment(producer_task["id"], f"Buzz decision write-back {decision['id']}: remove guarantee; evidence qa_revise_v0 and source_observation_v1.")
 
-    vertical = run_fictional_article()
+    prepared = prepare_fictional_article(
+        issue_id=tasks_by_role["publishing-operator"]["id"],
+        publisher=publisher,
+    )
+    manifest = prepared.records["manifest"]
+    requested_approval = paperclip.request_approval(
+        issue_ids=[tasks_by_role["publishing-operator"]["id"]],
+        manifest=manifest,
+    )
+    approval_authority(requested_approval, manifest)
+    approval = paperclip.get_approval(requested_approval["id"])
+    if (
+        approval.get("id") != requested_approval["id"]
+        or approval.get("status") != "approved"
+        or approval.get("payload") != manifest
+    ):
+        raise CoreApprovalDenied("Paperclip did not approve the exact manifest")
+    approval_issues = paperclip.get_approval_issues(approval["id"])
+    if [item["id"] for item in approval_issues] != requested_approval["issueIds"]:
+        raise CoreApprovalDenied("Paperclip approval issue binding changed")
+    decided_at = datetime.now(timezone.utc)
+    approval_evidence = finalize_record(
+        {
+            "schema_version": "1.0",
+            "artifact_type": "paperclip_approval_evidence",
+            "brand_id": paperclip.brand_id,
+            "company_id": paperclip.company_id,
+            "paperclip_approval_id": approval["id"],
+            "status": approval["status"],
+            "issue_ids": [item["id"] for item in approval_issues],
+            "manifest_checksum": manifest["content_checksum"],
+            "decision_note": approval.get("decisionNote"),
+            "observed_at": decided_at.isoformat(),
+        }
+    )
+    records["paperclip_approval_evidence"] = approval_evidence
+    gateway_approval = make_approval_record(
+        approval_id="approval_guide_v1",
+        manifest=manifest,
+        approver_id="human_owner",
+        authority_role="brand_owner",
+        decided_at=decided_at.isoformat(),
+        expires_at=(decided_at + timedelta(minutes=30)).isoformat(),
+        paperclip_approval_id=approval["id"],
+        paperclip_approval_evidence_checksum=approval_evidence["content_checksum"],
+    )
+    vertical = dispatch_prepared_article(prepared, approval=gateway_approval)
     records.update({f"published_{key}": value for key, value in vertical.records.items()})
     records["optimisation_proposal"] = _artifact(
         "optimisation_proposal", "optimisation_proposal_v1",
         issue_id=tasks_by_role["growth-intelligence-analyst"]["id"], role_id="growth-intelligence-analyst",
         payload={"proposal": "Collect a later fictional outcome snapshot before changing content.", "evidence_refs": ["performance_guide_v1"], "authority": "proposal_only"},
         source_artifact_ids=["performance_guide_v1"], status="draft",
-    )
-
-    manifest = vertical.records["manifest"]
-    approval = paperclip.request_approval(
-        issue_ids=[tasks_by_role["publishing-operator"]["id"]], manifest=manifest
-    )
-    approval = paperclip.decide_approval(
-        approval["id"], decision="approve",
-        decision_note=f"Human owner approved exact sandbox manifest {manifest['content_checksum']}",
-        human_authority=True,
     )
     paperclip.record_cost(
         {
@@ -200,7 +247,7 @@ def run_core_workflow() -> CoreWorkflowResult:
 
     closure_order = (*CORE_RUNTIME_ROLES[1:], CORE_RUNTIME_ROLES[0])
     for role_id in closure_order:
-        task = paperclip_transport.issues[tasks_by_role[role_id]["id"]]
+        task = paperclip.get_task(tasks_by_role[role_id]["id"])
         if task["status"] != "done":
             paperclip.update_task(
                 task["id"], status="done",
@@ -208,7 +255,11 @@ def run_core_workflow() -> CoreWorkflowResult:
             )
         tasks_by_role[role_id] = paperclip.get_task(task["id"])
 
-    projection = build_campaign_projection(paperclip, approval_ids=[approval["id"]])
+    projection = build_campaign_projection(
+        paperclip,
+        task_ids=[item["id"] for item in tasks_by_role.values()],
+        approval_ids=[approval["id"]],
+    )
     return CoreWorkflowResult(
         paperclip=paperclip,
         paperclip_transport=paperclip_transport,

@@ -4,13 +4,20 @@ import json
 import subprocess
 import unittest
 from unittest.mock import patch
+from uuid import UUID
 
 from agency_os.contracts import ContractError, finalize_record
-from agency_os.fictional_platforms import InMemoryBuzzTransport, InMemoryPaperclipTransport
+from agency_os.fictional_platforms import (
+    InMemoryBuzzTransport,
+    InMemoryPaperclipBoardTransport,
+    InMemoryPaperclipTransport,
+)
 from agency_os.integrations import (
     BuzzCliTransport,
     IntegrationError,
     PaperclipHTTPTransport,
+    PaperclipBoardApprovalAdapter,
+    PaperclipBrandBinding,
     PaperclipLifecycleAdapter,
     TypedBuzzAdapter,
 )
@@ -56,23 +63,32 @@ class IntegrationTests(unittest.TestCase):
         with self.assertRaises(IntegrationError):
             transport.request("DELETE", "/api/issues/one")
 
-    def test_lifecycle_adapter_uses_exact_installed_routes_and_human_authority(self) -> None:
+    def test_lifecycle_adapter_uses_exact_routes_and_separate_board_authority(self) -> None:
         transport = InMemoryPaperclipTransport(company_id=COMPANY_ID, brand_id="brand_lantern")
-        adapter = PaperclipLifecycleAdapter(transport, COMPANY_ID, "brand_lantern")
+        binding = PaperclipBrandBinding(COMPANY_ID, "brand_lantern")
+        adapter = PaperclipLifecycleAdapter(transport, binding)
+        board = PaperclipBoardApprovalAdapter(InMemoryPaperclipBoardTransport(transport), binding)
         task = adapter.create_task(
             title="Proof", stage="qa", acceptance_criteria=["pass"],
             idempotency_key="proof-1", artifact_refs=["qa_v1"], status="todo",
         )
         manifest = finalize_record({"brand_id": "brand_lantern", "manifest_id": "m1"})
         approval = adapter.request_approval(issue_ids=[task["id"]], manifest=manifest)
+        self.assertEqual(UUID(task["id"]).version, 4)
         create_call = transport.calls[-1]
         self.assertEqual(create_call[:2], ("POST", f"/api/companies/{COMPANY_ID}/approvals"))
         self.assertEqual(create_call[2]["type"], "request_board_approval")
         self.assertNotIn("requestedByAgentId", create_call[2])
-        with self.assertRaises(PermissionError):
-            adapter.decide_approval(approval["id"], decision="approve", decision_note="no", human_authority=False)
-        decided = adapter.decide_approval(approval["id"], decision="approve", decision_note="human approval", human_authority=True)
+        self.assertFalse(hasattr(adapter, "decide_approval"))
+        decided = board.decide_approval(
+            approval["id"],
+            decision="approve",
+            decision_note="human approval",
+        )
         self.assertEqual(decided["status"], "approved")
+        self.assertEqual(UUID(approval["id"]).version, 4)
+        with self.assertRaises(IntegrationError):
+            board.transport.request("GET", f"/api/approvals/{approval['id']}")
         self.assertEqual(
             [item["id"] for item in adapter.get_approval_issues(approval["id"])],
             [task["id"]],
@@ -92,8 +108,18 @@ class IntegrationTests(unittest.TestCase):
         transport.issues[task["id"]]["companyId"] = "company_other"
         with self.assertRaises(IntegrationError):
             adapter.get_task(task["id"])
+        transport.issues[task["id"]]["companyId"] = COMPANY_ID
+        transport.issues[task["id"]]["description"] = transport.issues[task["id"]][
+            "description"
+        ].replace("brand_lantern", "brand_other")
+        with self.assertRaises(IntegrationError):
+            adapter.get_task(task["id"])
         with self.assertRaises(ContractError):
             adapter.request_approval(issue_ids=[task["id"]], manifest={"brand_id": "brand_other"})
+        with self.assertRaises(ContractError):
+            adapter.get_task("pc_100")
+        with self.assertRaises(ContractError):
+            PaperclipBrandBinding("not-a-uuid", "brand_lantern")
 
     def test_buzz_adapter_is_private_bounded_and_non_authoritative(self) -> None:
         transport = InMemoryBuzzTransport()
@@ -122,6 +148,25 @@ class IntegrationTests(unittest.TestCase):
         self.assertEqual(seen["env"]["BUZZ_PRIVATE_KEY"], "buzz-secret-canary")
         with self.assertRaises(IntegrationError):
             transport.run(["messages", "send", "--broadcast"])
+
+    def test_buzz_denies_unknown_shapes_before_releasing_identity(self) -> None:
+        released: list[bool] = []
+
+        def key() -> str:
+            released.append(True)
+            return "must-not-be-released"
+
+        transport = BuzzCliTransport(relay_url="http://127.0.0.1:9000", private_key_provider=key)
+        denied = (
+            ["admin", "delete", "--channel", "c1"],
+            ["messages", "get", "--channel", "c1", "--channel", "c2"],
+            ["messages", "send", "--broadcast"],
+        )
+        for arguments in denied:
+            with self.assertRaises(IntegrationError):
+                transport.run(arguments)
+        self.assertEqual(released, [])
+
 
 
 if __name__ == "__main__":

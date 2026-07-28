@@ -47,14 +47,57 @@ def _require_mapping(value: Any, label: str) -> dict[str, Any]:
 
 def _require_brand(record: Mapping[str, Any], brand_id: str, label: str) -> None:
     observed = record.get("brand_id", record.get("brandId"))
-    if observed is not None and observed != brand_id:
+    if observed != brand_id:
         raise IntegrationError(f"{label} crossed the tenant boundary")
 
 
 def _require_company(record: Mapping[str, Any], company_id: str, label: str) -> None:
     observed = record.get("companyId", record.get("company_id"))
-    if observed is not None and observed != company_id:
+    if observed != company_id:
         raise IntegrationError(f"{label} crossed the company boundary")
+
+
+def _require_uuid(value: Any, label: str) -> str:
+    try:
+        return str(UUID(str(value)))
+    except (ValueError, TypeError, AttributeError) as exc:
+        raise ContractError(f"{label} must be a UUID") from exc
+
+
+def _task_metadata(record: Mapping[str, Any]) -> dict[str, Any]:
+    description = record.get("description")
+    if not isinstance(description, str) or "```json\n" not in description:
+        raise IntegrationError("Paperclip task has no Agency OS metadata")
+    encoded = description.split("```json\n", 1)[1].split("\n```", 1)[0]
+    try:
+        metadata = json.loads(encoded)
+    except json.JSONDecodeError as exc:
+        raise IntegrationError("Paperclip task metadata is invalid") from exc
+    return _require_mapping(metadata, "Paperclip task metadata")
+
+
+def _approval_binding(
+    value: Any, binding: "PaperclipBrandBinding", label: str
+) -> dict[str, Any]:
+    approval = _require_mapping(value, label)
+    _require_uuid(approval.get("id"), f"{label} identity")
+    _require_company(approval, binding.company_id, label)
+    payload = _require_mapping(approval.get("payload"), f"{label} payload")
+    _require_brand(payload, binding.brand_id, label)
+    return approval
+
+
+@dataclass(frozen=True)
+class PaperclipBrandBinding:
+    """Immutable one-company-per-brand authority boundary."""
+
+    company_id: str
+    brand_id: str
+
+    def __post_init__(self) -> None:
+        _require_uuid(self.company_id, "Paperclip company_id")
+        if not self.brand_id.startswith("brand_"):
+            raise ValueError("Paperclip brand_id is invalid")
 
 
 class PaperclipHTTPTransport:
@@ -124,16 +167,19 @@ class PaperclipLifecycleAdapter:
     """Exact installed task, approval, budget and closure route binding."""
 
     transport: PaperclipTransport
-    company_id: str
-    brand_id: str
+    binding: PaperclipBrandBinding
+
+    @property
+    def company_id(self) -> str:
+        return self.binding.company_id
+
+    @property
+    def brand_id(self) -> str:
+        return self.binding.brand_id
 
     _STATUSES = frozenset(
         {"backlog", "todo", "in_progress", "blocked", "in_review", "done", "cancelled"}
     )
-
-    def __post_init__(self) -> None:
-        if not self.company_id or not self.brand_id:
-            raise ValueError("Paperclip company_id and brand_id are required")
 
     def create_task(
         self,
@@ -169,9 +215,12 @@ class PaperclipLifecycleAdapter:
             "allowDuplicate": False,
         }
         if parent_id is not None:
-            payload["parentId"] = parent_id
+            payload["parentId"] = _require_uuid(parent_id, "Paperclip parent_id")
         if blocked_by_issue_ids:
-            payload["blockedByIssueIds"] = list(blocked_by_issue_ids)
+            payload["blockedByIssueIds"] = [
+                _require_uuid(item, "Paperclip blocker")
+                for item in blocked_by_issue_ids
+            ]
         return self._task(
             self.transport.request(
                 "POST", f"/api/companies/{self.company_id}/issues", payload
@@ -187,6 +236,7 @@ class PaperclipLifecycleAdapter:
         return [self._task(item) for item in response]
 
     def get_task(self, issue_id: str) -> dict[str, Any]:
+        issue_id = _require_uuid(issue_id, "Paperclip issue_id")
         return self._task(
             self.transport.request("GET", f"/api/issues/{issue_id}")
         )
@@ -200,6 +250,7 @@ class PaperclipLifecycleAdapter:
     ) -> dict[str, Any]:
         if status not in self._STATUSES or not comment:
             raise ContractError("Paperclip task transition is invalid")
+        issue_id = _require_uuid(issue_id, "Paperclip issue_id")
         return self._task(
             self.transport.request(
                 "PATCH",
@@ -217,6 +268,8 @@ class PaperclipLifecycleAdapter:
     ) -> dict[str, Any]:
         if not agent_id or not expected_statuses:
             raise ContractError("Paperclip checkout binding is invalid")
+        issue_id = _require_uuid(issue_id, "Paperclip issue_id")
+        agent_id = _require_uuid(agent_id, "Paperclip agent_id")
         return self._task(
             self.transport.request(
                 "POST",
@@ -226,6 +279,7 @@ class PaperclipLifecycleAdapter:
         )
 
     def release(self, issue_id: str) -> dict[str, Any]:
+        issue_id = _require_uuid(issue_id, "Paperclip issue_id")
         return _require_mapping(
             self.transport.request("POST", f"/api/issues/{issue_id}/release", {}),
             "Paperclip release",
@@ -234,6 +288,7 @@ class PaperclipLifecycleAdapter:
     def comment(self, issue_id: str, body: str) -> dict[str, Any]:
         if not body:
             raise ContractError("Paperclip comment body is required")
+        issue_id = _require_uuid(issue_id, "Paperclip issue_id")
         return _require_mapping(
             self.transport.request(
                 "POST", f"/api/issues/{issue_id}/comments", {"body": body}
@@ -250,63 +305,49 @@ class PaperclipLifecycleAdapter:
     ) -> dict[str, Any]:
         if not issue_ids or manifest.get("brand_id") != self.brand_id:
             raise ContractError("Paperclip approval tenant binding is invalid")
+        validated_issue_ids = [
+            _require_uuid(item, "Paperclip approval issue_id")
+            for item in issue_ids
+        ]
+        for item in validated_issue_ids:
+            self.get_task(item)
         payload = {
             "type": "request_board_approval",
-            "issueIds": list(issue_ids),
+            "issueIds": validated_issue_ids,
             "payload": copy.deepcopy(dict(manifest)),
         }
         if requested_by_agent_id is not None:
-            payload["requestedByAgentId"] = requested_by_agent_id
-        approval = _require_mapping(
+            payload["requestedByAgentId"] = _require_uuid(
+                requested_by_agent_id, "Paperclip requester"
+            )
+        return _approval_binding(
             self.transport.request(
                 "POST", f"/api/companies/{self.company_id}/approvals", payload
             ),
+            self.binding,
             "Paperclip approval",
         )
-        _require_brand(approval, self.brand_id, "Paperclip approval")
-        _require_company(approval, self.company_id, "Paperclip approval")
-        return approval
 
     def get_approval(self, approval_id: str) -> dict[str, Any]:
-        approval = _require_mapping(
+        approval_id = _require_uuid(approval_id, "Paperclip approval_id")
+        return _approval_binding(
             self.transport.request("GET", f"/api/approvals/{approval_id}"),
+            self.binding,
             "Paperclip approval",
         )
-        _require_brand(approval, self.brand_id, "Paperclip approval")
-        _require_company(approval, self.company_id, "Paperclip approval")
-        return approval
 
     def get_approval_issues(self, approval_id: str) -> list[dict[str, Any]]:
+        approval = self.get_approval(approval_id)
         response = self.transport.request(
             "GET", f"/api/approvals/{approval_id}/issues"
         )
         if not isinstance(response, list):
             raise IntegrationError("Paperclip approval issue list is invalid")
-        return [self._task(item) for item in response]
-
-    def decide_approval(
-        self,
-        approval_id: str,
-        *,
-        decision: str,
-        decision_note: str,
-        human_authority: bool,
-    ) -> dict[str, Any]:
-        if not human_authority:
-            raise PermissionError("Paperclip approval decision requires human authority")
-        if decision not in {"approve", "reject"} or not decision_note:
-            raise ContractError("Paperclip approval decision is invalid")
-        approval = _require_mapping(
-            self.transport.request(
-                "POST",
-                f"/api/approvals/{approval_id}/{decision}",
-                {"decisionNote": decision_note},
-            ),
-            "Paperclip approval decision",
-        )
-        _require_brand(approval, self.brand_id, "Paperclip approval")
-        _require_company(approval, self.company_id, "Paperclip approval")
-        return approval
+        issues = [self._task(item) for item in response]
+        expected = set(approval.get("issueIds", []))
+        if {item["id"] for item in issues} != expected:
+            raise IntegrationError("Paperclip approval issues changed")
+        return issues
 
     def record_cost(self, payload: Mapping[str, Any]) -> dict[str, Any]:
         body = copy.deepcopy(dict(payload))
@@ -351,13 +392,83 @@ class PaperclipLifecycleAdapter:
 
     def _task(self, value: Any) -> dict[str, Any]:
         task = _require_mapping(value, "Paperclip task")
-        _require_brand(task, self.brand_id, "Paperclip task")
         _require_company(task, self.company_id, "Paperclip task")
-        if not isinstance(task.get("id"), str) or not task["id"]:
-            raise IntegrationError("Paperclip task identity is invalid")
+        _require_uuid(task.get("id"), "Paperclip task identity")
+        metadata = _task_metadata(task)
+        _require_brand(metadata, self.brand_id, "Paperclip task")
         if task.get("status") not in self._STATUSES:
             raise IntegrationError("Paperclip task status is invalid")
         return task
+
+
+@dataclass(frozen=True)
+class PaperclipBoardApprovalAdapter:
+    """Decision surface requiring a separately authenticated board transport."""
+
+    transport: PaperclipTransport
+    binding: PaperclipBrandBinding
+
+    def decide_approval(
+        self,
+        approval_id: str,
+        *,
+        decision: str,
+        decision_note: str,
+    ) -> dict[str, Any]:
+        if decision not in {"approve", "reject"} or not decision_note:
+            raise ContractError("Paperclip approval decision is invalid")
+        approval_id = _require_uuid(approval_id, "Paperclip approval_id")
+        return _approval_binding(
+            self.transport.request(
+                "POST",
+                f"/api/approvals/{approval_id}/{decision}",
+                {"decisionNote": decision_note},
+            ),
+            self.binding,
+            "Paperclip approval decision",
+        )
+
+
+_BUZZ_ALLOWED_FLAGS = {
+    ("channels", "create"): frozenset(
+        {"--name", "--type", "--visibility", "--description", "--ttl"}
+    ),
+    ("channels", "get"): frozenset({"--channel"}),
+    ("messages", "send"): frozenset(
+        {"--channel", "--content", "--reply-to", "--file"}
+    ),
+    ("messages", "get"): frozenset(
+        {"--channel", "--limit", "--before", "--since", "--kinds"}
+    ),
+}
+_BUZZ_REQUIRED_FLAGS = {
+    ("channels", "create"): frozenset(
+        {"--name", "--type", "--visibility", "--description", "--ttl"}
+    ),
+    ("channels", "get"): frozenset({"--channel"}),
+    ("messages", "send"): frozenset({"--channel", "--content"}),
+    ("messages", "get"): frozenset({"--channel"}),
+}
+
+
+def _validate_buzz_arguments(arguments: Sequence[str]) -> list[str]:
+    args = list(arguments)
+    if len(args) < 2:
+        raise IntegrationError("Buzz command is not admitted")
+    command = (args[0], args[1])
+    allowed = _BUZZ_ALLOWED_FLAGS.get(command)
+    if allowed is None:
+        raise IntegrationError("Buzz command is not admitted")
+    tail = args[2:]
+    if len(tail) % 2:
+        raise IntegrationError("Buzz command arguments are invalid")
+    flags = tail[::2]
+    if len(flags) != len(set(flags)):
+        raise IntegrationError("Buzz command repeats a flag")
+    observed = set(flags)
+    if observed - allowed or not _BUZZ_REQUIRED_FLAGS[command] <= observed:
+        raise IntegrationError("Buzz command flags are not admitted")
+    return args
 
 
 class BuzzCliTransport:
@@ -383,8 +494,7 @@ class BuzzCliTransport:
         self._timeout_seconds = timeout_seconds
 
     def run(self, arguments: Sequence[str]) -> Any:
-        if "--broadcast" in arguments:
-            raise IntegrationError("Buzz broadcast is denied")
+        arguments = _validate_buzz_arguments(arguments)
         key = self._private_key_provider()
         if not isinstance(key, str) or not key:
             raise IntegrationError("Buzz identity is unavailable")

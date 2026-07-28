@@ -9,6 +9,7 @@ from __future__ import annotations
 import copy
 import json
 from typing import Any, Mapping, Sequence
+from uuid import UUID
 
 from .integrations import IntegrationError
 
@@ -39,7 +40,10 @@ class InMemoryPaperclipTransport:
 
         if method == "POST" and path == f"{company_prefix}/issues":
             assert body is not None
-            issue_id = f"pc_{self._issue_sequence}"
+            for item in [body.get("parentId"), *body.get("blockedByIssueIds", [])]:
+                if item is not None:
+                    self._require_uuid(item, "Paperclip issue relation")
+            issue_id = f"00000000-0000-4000-8000-{self._issue_sequence:012x}"
             self._issue_sequence += 1
             issue = {
                 "id": issue_id,
@@ -65,7 +69,12 @@ class InMemoryPaperclipTransport:
             assert body is not None
             if body.get("type") != "request_board_approval":
                 raise IntegrationError("Paperclip approval type is not admitted")
-            approval_id = f"approval_pc_{self._approval_sequence}"
+            for item in body.get("issueIds", []):
+                self._require_uuid(item, "Paperclip approval issue")
+                self._issue(item)
+            if body.get("requestedByAgentId") is not None:
+                self._require_uuid(body["requestedByAgentId"], "Paperclip requester")
+            approval_id = f"00000000-0000-4000-8000-{1000 + self._approval_sequence:012x}"
             self._approval_sequence += 1
             approval = {
                 "id": approval_id,
@@ -82,7 +91,7 @@ class InMemoryPaperclipTransport:
 
         if method == "POST" and path == f"{company_prefix}/cost-events":
             assert body is not None
-            event = {"id": f"cost_{len(self.cost_events) + 1}", **body}
+            event = {"id": f"00000000-0000-4000-8000-{2000 + len(self.cost_events):012x}", **body}
             self.cost_events.append(event)
             return copy.deepcopy(event)
 
@@ -103,6 +112,7 @@ class InMemoryPaperclipTransport:
                 assert body is not None
                 if issue["status"] not in body["expectedStatuses"]:
                     raise IntegrationError("Paperclip checkout status changed")
+                self._require_uuid(body.get("agentId"), "Paperclip agent")
                 issue["assigneeAgentId"] = body["agentId"]
                 issue["status"] = "in_progress"
                 issue["version"] += 1
@@ -134,13 +144,22 @@ class InMemoryPaperclipTransport:
 
         raise IntegrationError("Paperclip route is not implemented by the proof")
 
+    @staticmethod
+    def _require_uuid(value: Any, label: str) -> None:
+        try:
+            UUID(str(value))
+        except (ValueError, TypeError, AttributeError) as exc:
+            raise IntegrationError(f"{label} must be a UUID") from exc
+
     def _issue(self, issue_id: str) -> dict[str, Any]:
+        self._require_uuid(issue_id, "Paperclip issue")
         try:
             return self.issues[issue_id]
         except KeyError as exc:
             raise IntegrationError("Paperclip issue was not found") from exc
 
     def _approval(self, approval_id: str) -> dict[str, Any]:
+        self._require_uuid(approval_id, "Paperclip approval")
         try:
             return self.approvals[approval_id]
         except KeyError as exc:
@@ -148,12 +167,38 @@ class InMemoryPaperclipTransport:
 
     def _comment(self, issue_id: str, body: str) -> dict[str, Any]:
         comment = {
-            "id": f"comment_{sum(map(len, self.comments.values())) + 1}",
+            "id": f"00000000-0000-4000-8000-{3000 + sum(map(len, self.comments.values())):012x}",
             "issueId": issue_id,
             "body": body,
         }
         self.comments.setdefault(issue_id, []).append(comment)
         return copy.deepcopy(comment)
+
+
+class InMemoryPaperclipBoardTransport:
+    """Separate board session exposing approval decisions only."""
+
+    def __init__(self, authority: InMemoryPaperclipTransport) -> None:
+        self._authority = authority
+        self.calls: list[tuple[str, str, dict[str, Any] | None]] = []
+
+    def request(
+        self,
+        method: str,
+        path: str,
+        payload: Mapping[str, Any] | None = None,
+    ) -> Any:
+        parts = path.removeprefix("/api/").split("/")
+        if (
+            method != "POST"
+            or len(parts) != 3
+            or parts[0] != "approvals"
+            or parts[2] not in {"approve", "reject"}
+        ):
+            raise IntegrationError("Paperclip board operation is not admitted")
+        body = None if payload is None else copy.deepcopy(dict(payload))
+        self.calls.append((method, path, body))
+        return self._authority.request(method, path, payload)
 
 
 class InMemoryBuzzTransport:

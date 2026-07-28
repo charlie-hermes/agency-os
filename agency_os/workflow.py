@@ -33,6 +33,19 @@ class VerticalSliceResult:
     records: dict[str, dict[str, Any]]
 
 
+@dataclass
+class PreparedVerticalSlice:
+    """Publication-ready artifacts that have not crossed the gateway."""
+
+    store: TenantStore
+    publisher: MockPublisher
+    records: dict[str, dict[str, Any]]
+    principals: dict[str, Principal]
+    capability_registry: CapabilityRegistry
+    capability: dict[str, Any]
+    prepared_at: datetime
+
+
 def _fictional_publish_worker(control: Any) -> None:
     """Worker entrypoint: receive only a socket path and publication request."""
 
@@ -51,13 +64,19 @@ def _fictional_publish_worker(control: Any) -> None:
         control.close()
 
 
-def run_fictional_article() -> VerticalSliceResult:
+def prepare_fictional_article(
+    *,
+    issue_id: str = "00000000-0000-4000-8000-000000000107",
+    publisher: MockPublisher | None = None,
+) -> PreparedVerticalSlice:
+    """Build the exact publication candidate without performing a write."""
+
     brand_id = "brand_lantern"
     campaign_id = "camp_summer"
     asset_id = "asset_guide"
-    issue_id = "pc_100"
     store = TenantStore()
     records: dict[str, dict[str, Any]] = {}
+    publisher = publisher or MockPublisher()
 
     principals = {
         "steward": Principal("agent_steward", "brand-brief-steward", brand_id),
@@ -249,17 +268,6 @@ def run_fictional_article() -> VerticalSliceResult:
     store.put(principals["director"], manifest)
     records["manifest"] = manifest
 
-    approval = make_approval_record(
-        approval_id="approval_guide_v1",
-        manifest=manifest,
-        approver_id="human_owner",
-        authority_role="brand_owner",
-        decided_at=now.isoformat(),
-        expires_at=(now + timedelta(minutes=30)).isoformat(),
-    )
-    store.put(principals["approver"], approval)
-    records["approval"] = approval
-
     capability_registry = CapabilityRegistry()
     capability = make_capability_record(
         capability_id="cap_mock_publish",
@@ -277,8 +285,44 @@ def run_fictional_article() -> VerticalSliceResult:
         expires_at=(now + timedelta(minutes=30)).isoformat(),
     )
     capability_registry.register(principals["director"], capability)
-    publisher = MockPublisher()
+    return PreparedVerticalSlice(
+        store=store,
+        publisher=publisher,
+        records=records,
+        principals=principals,
+        capability_registry=capability_registry,
+        capability=capability,
+        prepared_at=now,
+    )
+
+
+def dispatch_prepared_article(
+    prepared: PreparedVerticalSlice,
+    *,
+    approval: dict[str, Any],
+    idempotency_key: str = "idem_guide_v1",
+) -> VerticalSliceResult:
+    """Dispatch only an externally supplied, exact-manifest approval."""
+
+    store = prepared.store
+    publisher = prepared.publisher
+    records = prepared.records
+    principals = prepared.principals
+    capability_registry = prepared.capability_registry
+    capability = prepared.capability
+    now = prepared.prepared_at
+    manifest = records["manifest"]
+    if approval.get("decision") != "APPROVED":
+        raise GatewayDenied("APPROVAL_DECISION_INVALID")
+    if approval.get("manifest_checksum") != manifest["content_checksum"]:
+        raise GatewayDenied("APPROVAL_MANIFEST_DRIFT")
+    store.put(principals["approver"], approval)
+    records["approval"] = approval
+
     context = multiprocessing.get_context("spawn")
+    brand_id = manifest["brand_id"]
+    campaign_id = manifest["campaign_id"]
+    asset_id = manifest["asset_id"]
     authority_control, worker_control = context.Pipe(duplex=True)
     worker = context.Process(
         target=_fictional_publish_worker, args=(worker_control,), daemon=True
@@ -307,7 +351,7 @@ def run_fictional_article() -> VerticalSliceResult:
                 "socket_path": host.socket_path,
                 "manifest": manifest,
                 "approval_id": approval["approval_id"],
-                "idempotency_key": "idem_guide_v1",
+                "idempotency_key": idempotency_key,
             }
         )
         if not authority_control.poll(5):
@@ -400,3 +444,20 @@ def run_fictional_article() -> VerticalSliceResult:
     store.put(principals["director"], learning_record)
     records["learning_record"] = learning_record
     return VerticalSliceResult(store=store, publisher=publisher, records=records)
+
+
+def run_fictional_article() -> VerticalSliceResult:
+    """Run the legacy fixture through the same explicit dispatch boundary."""
+
+    prepared = prepare_fictional_article()
+    now = prepared.prepared_at
+    manifest = prepared.records["manifest"]
+    approval = make_approval_record(
+        approval_id="approval_guide_v1",
+        manifest=manifest,
+        approver_id="human_owner",
+        authority_role="brand_owner",
+        decided_at=now.isoformat(),
+        expires_at=(now + timedelta(minutes=30)).isoformat(),
+    )
+    return dispatch_prepared_article(prepared, approval=approval)

@@ -158,6 +158,15 @@ class _AuthorityActionGateway:
             "capability_checksum": capability["content_checksum"],
             "manifest_checksum": manifest["content_checksum"],
             "approval_checksum": approval["content_checksum"],
+            **(
+                {
+                    "paperclip_approval_id": approval["paperclip_approval_id"],
+                    "paperclip_approval_evidence_checksum": approval[
+                        "paperclip_approval_evidence_checksum"
+                    ],
+                }
+                if "paperclip_approval_id" in approval else {}
+            ),
             "destination_ref": manifest["destination_ref"],
             "environment": manifest["environment"],
             "operation": manifest["operation"],
@@ -253,6 +262,15 @@ class _AuthorityActionGateway:
                 "manifest_checksum": manifest["content_checksum"],
                 "approval_id": approval["approval_id"],
                 "approval_checksum": approval["content_checksum"],
+                **(
+                    {
+                        "paperclip_approval_id": approval["paperclip_approval_id"],
+                        "paperclip_approval_evidence_checksum": approval[
+                            "paperclip_approval_evidence_checksum"
+                        ],
+                    }
+                    if "paperclip_approval_id" in approval else {}
+                ),
                 "artifact_id": manifest["qa_package_id"],
                 "artifact_checksum": manifest["qa_package_checksum"],
                 "destination_ref": manifest["destination_ref"],
@@ -330,6 +348,14 @@ class _AuthorityActionGateway:
             self._deny("APPROVAL_AUTHORITY_DENIED", dict(manifest))
         if approval.get("decision") != "APPROVED":
             self._deny("NOT_APPROVED", dict(manifest))
+        paperclip_evidence = (
+            approval.get("paperclip_approval_id"),
+            approval.get("paperclip_approval_evidence_checksum"),
+        )
+        if any(value is not None for value in paperclip_evidence) and not all(
+            isinstance(value, str) and value for value in paperclip_evidence
+        ):
+            self._deny("PAPERCLIP_APPROVAL_EVIDENCE_INCOMPLETE", dict(manifest))
         conditions = approval.get("conditions")
         if not isinstance(conditions, list):
             self._deny("APPROVAL_CONDITIONS_INVALID", dict(manifest))
