@@ -224,6 +224,35 @@ class IntegrationTests(unittest.TestCase):
         with self.assertRaises(ContractError):
             PaperclipBrandBinding("not-a-uuid", "brand_lantern")
 
+    def test_company_task_list_filters_other_agency_os_brands(self) -> None:
+        transport = InMemoryPaperclipTransport(
+            company_id=COMPANY_ID, brand_id="brand_lantern"
+        )
+        adapter = PaperclipLifecycleAdapter(
+            transport, PaperclipBrandBinding(COMPANY_ID, "brand_lantern")
+        )
+        own_task = adapter.create_task(
+            title="Lantern proof",
+            campaign_id="camp_lantern",
+            stage="qa",
+            acceptance_criteria=["visible"],
+            idempotency_key="lantern-proof",
+        )
+        other_id = "00000000-0000-4000-8000-000000000777"
+        other_task = dict(own_task)
+        other_task["id"] = other_id
+        other_task["description"] = other_task["description"].replace(
+            "brand_lantern", "brand_fleet"
+        )
+        transport.issues[other_id] = other_task
+
+        self.assertEqual(
+            [task["id"] for task in adapter.list_tasks()],
+            [own_task["id"]],
+        )
+        with self.assertRaises(IntegrationError):
+            adapter.get_task(other_id)
+
     def test_buzz_adapter_is_private_bounded_and_non_authoritative(self) -> None:
         transport = InMemoryBuzzTransport()
         adapter = TypedBuzzAdapter(transport, "brand_lantern")
