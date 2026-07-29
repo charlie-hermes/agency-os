@@ -125,8 +125,9 @@ def verify_foundation(
             enabled_modules.append(module)
         if set(config["available_modules"]) != PRODUCT_MODULES:
             raise FleetTenancyError("Fleet module catalogue differs from runtime")
-        if enabled_modules != ["content_engine"]:
-            raise FleetTenancyError("only Content Engine may be enabled at G2.1")
+        configured_enabled_modules = sorted(expected_entitlements)
+        if enabled_modules != configured_enabled_modules:
+            raise FleetTenancyError("live Fleet modules differ from configured entitlements")
     finally:
         connection.close()
 

@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Mapping
 
-from .contracts import finalize_record, make_approval_record
+from .contracts import finalize_record, make_approval_record, verify_record
 from .gateway import MockPublisher
 from .integrations import PaperclipLifecycleAdapter, TypedBuzzAdapter
 from .operator_view import build_campaign_projection
@@ -84,6 +85,8 @@ def run_core_workflow(
     campaign_id: str = "camp_summer",
     asset_id: str = "asset_guide",
     brand_name: str = "Lantern Garden Co.",
+    brand_grounding: Mapping[str, Any] | None = None,
+    content_scenario: Mapping[str, Any] | None = None,
     product_tier: str = "search_authority_core",
     cost_agent_id: str | None = "00000000-0000-4000-8000-000000000008",
 ) -> CoreWorkflowResult:
@@ -96,6 +99,48 @@ def run_core_workflow(
         raise ValueError("Core workflow identity is incomplete")
     if product_tier not in {"search_authority_core", "search_authority_social"}:
         raise ValueError("Core workflow product tier is invalid")
+
+    scenario = copy.deepcopy(dict(content_scenario or {}))
+    topic = str(scenario.get("topic", "balcony guide"))
+    audience = str(scenario.get("audience", "Apartment gardeners"))
+    objective = str(
+        scenario.get("objective", "Help the approved audience choose a safe first project.")
+    )
+    information_gain = str(
+        scenario.get("information_gain", "A five-step decision checklist.")
+    )
+    cta = str(scenario.get("cta", "Download the fictional worksheet."))
+    supported_claim_text = str(
+        scenario.get("supported_claim_text", "The guide contains five checklist steps.")
+    )
+    public_fields = copy.deepcopy(
+        scenario.get(
+            "public_fields",
+            {
+                "title": "Five checks before starting a balcony garden",
+                "body": [
+                    "Check the light, wind, space, water access, and building rules.",
+                    "Use the fictional worksheet to record each answer.",
+                ],
+                "cta": cta,
+            },
+        )
+    )
+    if brand_grounding is not None:
+        verify_record(brand_grounding)
+        if (
+            brand_grounding.get("artifact_type") != "content_grounding"
+            or brand_grounding.get("brand_id") != brand_id
+            or brand_grounding.get("conflicts")
+        ):
+            raise ValueError("Brand Twin grounding is invalid, foreign, or conflicted")
+    grounding_claim_ids = (
+        list(brand_grounding["claim_ids"])
+        if brand_grounding is not None else ["claim_1"]
+    )
+    grounding_checksum = (
+        brand_grounding["content_checksum"] if brand_grounding is not None else None
+    )
 
     def artifact(
         artifact_type: str,
@@ -114,11 +159,11 @@ def run_core_workflow(
     definitions = (
         ("agency-director", f"Direct {brand_name} Core campaign", "campaign_direction", ["campaign graph accepted"], ["campaign_brief_v1"]),
         ("brand-brief-steward", f"Validate {brand_name} brand and brief", "onboarding", ["brand truth and constraints approved"], ["brand_profile_v1", "campaign_brief_v1"]),
-        ("search-content-strategist", "Research and plan balcony guide", "research_strategy", ["sources and opportunity plan retained"], ["source_observation_v1", "research_pack_v1", "content_plan_v1", "content_brief_v1"]),
-        ("content-producer", "Draft and revise balcony guide", "drafting", ["rejected checksum revised without unsupported claim"], ["draft_rejected_v0", "draft_guide_v1"]),
-        ("search-answer-optimiser", "Optimise revised guide", "search_optimisation", ["complete package is checksum-bound"], ["complete_guide_v1"]),
-        ("editorial-integrity-qa", "Independently QA guide", "quality_assurance", ["one REVISE then PASS is recorded"], ["qa_revise_v0", "qa_guide_v1"]),
-        ("publishing-operator", "Publish approved guide to sandbox", "publication", ["exact approved manifest reaches mock gateway"], ["manifest_guide_v1", "receipt_idem_guide_v1"]),
+        ("search-content-strategist", f"Research and plan {topic}", "research_strategy", ["sources and opportunity plan retained"], ["source_observation_v1", "research_pack_v1", "content_plan_v1", "content_brief_v1"]),
+        ("content-producer", f"Draft and revise {topic}", "drafting", ["rejected checksum revised without unsupported claim"], ["draft_rejected_v0", "draft_guide_v1"]),
+        ("search-answer-optimiser", f"Optimise revised {topic}", "search_optimisation", ["complete package is checksum-bound"], ["complete_guide_v1"]),
+        ("editorial-integrity-qa", f"Independently QA {topic}", "quality_assurance", ["one REVISE then PASS is recorded"], ["qa_revise_v0", "qa_guide_v1"]),
+        ("publishing-operator", f"Publish approved {topic} to sandbox", "publication", ["exact approved manifest reaches mock gateway"], ["manifest_guide_v1", "receipt_idem_guide_v1"]),
         ("growth-intelligence-analyst", "Validate and measure publication", "measurement_learning", ["validation, proposal and learning disposition retained"], ["performance_guide_v1", "optimisation_proposal_v1", "learning_guide_v1"]),
     )
     tasks_by_role: dict[str, dict[str, Any]] = {}
@@ -150,42 +195,50 @@ def run_core_workflow(
         "brand_profile", "brand_profile_v1",
         issue_id=tasks_by_role["brand-brief-steward"]["id"],
         role_id="brand-brief-steward",
-        payload={"brand_name": brand_name, "prohibited_claims": ["guaranteed results"], "approval_owner": "human_owner"},
+        payload={
+            "brand_name": brand_name,
+            "prohibited_claims": ["guaranteed results"],
+            "approval_owner": "human_owner",
+            **(
+                {"generation2_grounding_checksum": grounding_checksum}
+                if grounding_checksum is not None else {}
+            ),
+        },
     )
     records["campaign_brief"] = artifact(
         "campaign_brief", "campaign_brief_v1",
         issue_id=tasks_by_role["agency-director"]["id"], role_id="agency-director",
-        payload={"objective": "Help the approved audience choose a safe first project.", "product": product_tier, "budget_mode": "fictional"},
+        payload={"objective": objective, "product": product_tier, "budget_mode": "fictional"},
         source_artifact_ids=["brand_profile_v1"],
     )
     records["source_observation"] = artifact(
         "source_observation", "source_observation_v1",
         issue_id=tasks_by_role["search-content-strategist"]["id"], role_id="search-content-strategist",
-        payload={"source_class": "approved_brand_fact", "supported_proposition": "The guide contains five fictional checklist steps.", "retrieval_mode": "fixture"},
+        payload={"source_class": "approved_brand_fact", "supported_proposition": supported_claim_text, "retrieval_mode": "approved_brand_twin" if grounding_checksum is not None else "fixture", "grounding_checksum": grounding_checksum},
         source_artifact_ids=["brand_profile_v1"],
     )
     records["research_pack"] = artifact(
         "research_pack", "research_pack_v1",
         issue_id=tasks_by_role["search-content-strategist"]["id"], role_id="search-content-strategist",
-        payload={"observations": ["source_observation_v1"], "evidence_gaps": [], "audience_need": "a concrete pre-start checklist"},
+        payload={"observations": ["source_observation_v1"], "evidence_gaps": [], "audience_need": information_gain},
         source_artifact_ids=["source_observation_v1"],
     )
     records["content_plan"] = artifact(
         "content_plan", "content_plan_v1",
         issue_id=tasks_by_role["search-content-strategist"]["id"], role_id="search-content-strategist",
-        payload={"asset_type": "article", "angle": "five checks", "success_signal": "sandbox publication integrity"},
+        payload={"asset_type": "article", "angle": topic, "success_signal": "sandbox publication integrity"},
         source_artifact_ids=["research_pack_v1"],
     )
     records["content_brief"] = artifact(
         "content_brief", "content_brief_v1",
         issue_id=tasks_by_role["search-content-strategist"]["id"], role_id="search-content-strategist",
-        payload={"audience": "Apartment gardeners", "cta": "Download the fictional worksheet.", "required_claim_ids": ["claim_1"]},
+        payload={"audience": audience, "cta": cta, "required_claim_ids": grounding_claim_ids, "brand_grounding_checksum": grounding_checksum},
         source_artifact_ids=["content_plan_v1", "research_pack_v1"],
     )
     records["rejected_draft"] = artifact(
         "draft_asset_package", "draft_rejected_v0",
         issue_id=tasks_by_role["content-producer"]["id"], role_id="content-producer",
-        payload={"public_fields": {"title": "Guaranteed balcony-garden success", "body": ["Follow these steps for guaranteed results."]}, "internal_notes": ["unsupported guarantee deliberately injected for QA proof"], "claim_register": [{"claim_id": "claim_bad", "status": "pending_authority"}], "source_register": []},
+        payload={"public_fields": {"title": f"Guaranteed results for {topic}", "body": ["Follow these steps for guaranteed results."]}, "internal_notes": ["unsupported guarantee deliberately injected for QA proof"], "claim_register": [{"claim_id": "claim_bad", "status": "pending_authority"}], "source_register": []},
         source_artifact_ids=["content_brief_v1"], status="rejected",
     )
     records["qa_revise"] = artifact(
@@ -230,6 +283,19 @@ def run_core_workflow(
         campaign_id=campaign_id,
         asset_id=asset_id,
         brand_name=brand_name,
+        credential_endpoint=str(scenario.get("credential_endpoint", "mock://cms/lantern")),
+        public_fields=public_fields,
+        content_description=str(
+            scenario.get("content_description", "A fictional five-step balcony garden checklist.")
+        ),
+        article_objective=objective,
+        audience=audience,
+        information_gain=information_gain,
+        cta=cta,
+        supported_claim_text=supported_claim_text,
+        destination_ref=str(scenario.get("destination_ref", "mock_cms:lantern")),
+        internal_note=str(scenario.get("internal_note", "Fictional fixture; no real client or claim.")),
+        brand_grounding=copy.deepcopy(dict(brand_grounding)) if brand_grounding is not None else None,
     )
     manifest = prepared.records["manifest"]
     requested_approval = paperclip.request_approval(

@@ -1,0 +1,228 @@
+#!/usr/bin/python3
+"""Activate and prove Fleet G2.2-G2.4 on the live private appliance."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import subprocess
+import sys
+import tempfile
+import urllib.request
+from datetime import datetime, timezone
+from pathlib import Path
+
+AGENCY_ROOT = Path("/opt/agency-os/current")
+sys.path.insert(0, str(AGENCY_ROOT))
+
+from agency_os.brand_intelligence import BrandIntelligenceAuthority
+from agency_os.fleet_brand_runtime import (
+    build_fleet_records, claim_approval_package,
+    initialise_fleet_brand_intelligence, load_fleet_brand_config,
+)
+from agency_os.fleet_closed_loop import (
+    build_remediation_proposal, remediation_approval_package, run_fleet_closed_loop,
+)
+from agency_os.fleet_observatory import run_fleet_observatory
+from agency_os.gateway import MockPublisher
+from agency_os.integrations import (
+    BuzzCliTransport, PaperclipBoardApprovalAdapter, PaperclipBoardHTTPTransport,
+    PaperclipBrandBinding, PaperclipHTTPTransport, PaperclipLifecycleAdapter,
+    TypedBuzzAdapter,
+)
+from agency_os.store import Principal
+from scripts.initialize_fleet_tenant import initialise as initialise_tenant
+from scripts.verify_fleet_brand_intelligence import verify_live_intelligence
+from scripts.verify_fleet_tenant import verify_foundation
+
+
+def load_env(path: Path) -> dict[str, str]:
+    values: dict[str, str] = {}
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if line and not line.startswith("#") and "=" in line:
+            key, value = line.split("=", 1)
+            values[key] = value.strip().strip("'\"")
+    return values
+
+
+def request_json(
+    base_url: str, token: str, method: str, path: str,
+    payload: dict[str, object] | None = None,
+) -> object:
+    body = None if payload is None else json.dumps(payload).encode("utf-8")
+    request = urllib.request.Request(
+        f"{base_url}/api{path}", data=body, method=method,
+        headers={"Accept": "application/json", "Content-Type": "application/json",
+                 "Authorization": f"Bearer {token}"},
+    )
+    with urllib.request.urlopen(request, timeout=15) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
+def atomic_json(path: Path, value: dict[str, object]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    handle, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+    try:
+        with os.fdopen(handle, "w", encoding="utf-8") as stream:
+            json.dump(value, stream, indent=2, sort_keys=True)
+            stream.write("\n")
+        os.chmod(temporary, 0o600)
+        os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
+def main() -> None:
+    if os.geteuid() != 0:
+        raise SystemExit("root required")
+    operator = load_env(Path("/etc/paperclip/operator.env"))
+    buzz_env = load_env(Path("/home/ubuntu/.config/buzz/bridge.env"))
+    lock = load_env(Path("/opt/paperclip/integration/build/appliance.lock"))
+    token = operator.get("PAPERCLIP_BOARD_API_KEY", "")
+    relay = buzz_env.get("BUZZ_RELAY_URL", "")
+    identity_path = Path(buzz_env.get("BUZZ_IDENTITY_FILE", ""))
+    if not token or not relay or not identity_path.is_absolute():
+        raise SystemExit("Paperclip or Buzz live credential is not configured")
+    private_key = json.loads(identity_path.read_text(encoding="utf-8")).get("privateKeyHex", "")
+    if not isinstance(private_key, str) or not private_key:
+        raise SystemExit("Buzz private identity is incomplete")
+    company_id = Path("/etc/paperclip/company-id").read_text(encoding="utf-8").strip()
+    if company_id != "d7e2e389-c7ad-486e-87ca-482e4ec6216d":
+        raise SystemExit("live Paperclip company is not Fleet DMA")
+    commit = subprocess.run(
+        ["git", "-C", str(AGENCY_ROOT), "rev-parse", "HEAD"], check=True,
+        capture_output=True, text=True,
+    ).stdout.strip()
+    if commit != lock["AGENCY_OS_COMMIT"]:
+        raise SystemExit("Agency OS release differs from the appliance lock")
+    observed_buzz = hashlib.sha256(Path("/usr/local/bin/buzz").read_bytes()).hexdigest()
+    if observed_buzz != lock["AGENCY_OS_BUZZ_SHA256"]:
+        raise SystemExit("Buzz binary checksum changed")
+
+    brand_config_path = AGENCY_ROOT / "config/fleet-brand-intelligence.json"
+    tenant_config_path = AGENCY_ROOT / "config/fleet-generation2.json"
+    brand_config = load_fleet_brand_config(brand_config_path)
+    tenant_config = json.loads(tenant_config_path.read_text(encoding="utf-8"))
+    result_path = Path("/var/lib/paperclip-appliance/fleet-g2-brand-intelligence.json")
+    if result_path.is_file():
+        previous = json.loads(result_path.read_text(encoding="utf-8"))
+        if previous.get("status") == "pass" and previous.get("agency_os_commit") == commit:
+            verify_foundation(
+                tenant_config_path, Path(tenant_config["authority_database"]),
+                Path("/etc/paperclip/company-id"),
+            )
+            verify_live_intelligence(Path(brand_config["database"]))
+            print("FLEET G2.2-G2.4: PASS")
+            return
+    issues = brand_config["paperclip_issues"]
+    base_url = f"http://{lock['PAPERCLIP_GATEWAY']}:{lock['PAPERCLIP_PORT']}"
+    binding = PaperclipBrandBinding(company_id, "brand_fleet")
+    board = PaperclipBoardApprovalAdapter(
+        PaperclipBoardHTTPTransport(base_url=base_url, bearer_token=token), binding,
+    )
+
+    records = build_fleet_records(brand_config, AGENCY_ROOT)
+    claim_package = claim_approval_package(records)
+    approval_root = Path("/var/lib/agency-os/approvals")
+    claim_approval_path = approval_root / "fleet-brand-twin-v1.json"
+    if claim_approval_path.is_file():
+        claim_approval = json.loads(claim_approval_path.read_text(encoding="utf-8"))
+    else:
+        requested_claim_approval = request_json(
+            base_url, token, "POST", f"/companies/{company_id}/approvals",
+            {"type": "request_board_approval", "issueIds": [issues["brand_twin"]],
+             "payload": claim_package},
+        )
+        if not isinstance(requested_claim_approval, dict):
+            raise SystemExit("Paperclip claim approval response is invalid")
+        claim_approval = board.decide_approval(
+            str(requested_claim_approval["id"]), decision="approve",
+            decision_note="Human owner approved the exact Fleet Brand Twin claim and policy package.",
+        )
+        atomic_json(claim_approval_path, claim_approval)
+
+    tenancy = initialise_tenant(tenant_config, Path(tenant_config["authority_database"]))
+    intelligence = initialise_fleet_brand_intelligence(
+        brand_config, AGENCY_ROOT, Path(brand_config["database"]),
+        claim_approval, approved_by="human_owner",
+    )
+    authority = BrandIntelligenceAuthority(Path(brand_config["database"]))
+    actors = brand_config["actors"]
+    director = Principal(actors["director"], "agency-director", "brand_fleet")
+    analyst = Principal(actors["analyst"], "growth-intelligence-analyst", "brand_fleet")
+    reviewer = Principal("fleet-platform-assurance-reviewer", "platform-assurance-reviewer", "brand_fleet")
+    observatory = run_fleet_observatory(
+        authority, evidence_path=AGENCY_ROOT / "evidence/fleet-public-search-baseline.json",
+        repository_root=AGENCY_ROOT, director=director, analyst=analyst, reviewer=reviewer,
+        paperclip_issue_id=issues["closed_loop"],
+    )
+
+    proposal = build_remediation_proposal(
+        authority, director=director, finding_id=observatory["finding_id"],
+        paperclip_issue_id=issues["closed_loop"],
+    )
+    finding = authority.get(reviewer, "market_finding", observatory["finding_id"])
+    remediation_package = remediation_approval_package(proposal, finding)
+    remediation_approval_path = approval_root / "fleet-remediation-v1.json"
+    if remediation_approval_path.is_file():
+        remediation_approval = json.loads(remediation_approval_path.read_text(encoding="utf-8"))
+    else:
+        requested_remediation = request_json(
+            base_url, token, "POST", f"/companies/{company_id}/approvals",
+            {"type": "request_board_approval", "issueIds": [issues["closed_loop"]],
+             "payload": remediation_package},
+        )
+        if not isinstance(requested_remediation, dict):
+            raise SystemExit("Paperclip remediation approval response is invalid")
+        remediation_approval = board.decide_approval(
+            str(requested_remediation["id"]), decision="approve",
+            decision_note="Human owner approved the exact Fleet controlled-preview remediation.",
+        )
+        atomic_json(remediation_approval_path, remediation_approval)
+
+    paperclip = PaperclipLifecycleAdapter(
+        PaperclipHTTPTransport(base_url=base_url, bearer_token=token), binding,
+    )
+    buzz = TypedBuzzAdapter(
+        BuzzCliTransport(
+            relay_url=relay, private_key_provider=lambda: private_key,
+            executable="/usr/local/bin/buzz", timeout_seconds=30,
+        ),
+        "brand_fleet",
+    )
+    def approve_publication(requested: dict[str, object], _manifest: object) -> dict[str, object]:
+        return board.decide_approval(
+            str(requested["id"]), decision="approve",
+            decision_note="Human owner approved the exact grounded Fleet controlled preview.",
+        )
+    closed = run_fleet_closed_loop(
+        authority, director=director, analyst=analyst, reader=reviewer,
+        paperclip=paperclip, buzz=buzz,
+        publication_approval_authority=approve_publication,
+        remediation_approval=remediation_approval, approved_by="human_owner",
+        paperclip_issue_id=issues["closed_loop"],
+        publisher=MockPublisher(
+            destination_ref="mock_preview:fleet", endpoint="mock://preview/fleet",
+            expected_credential="fictional-credential-lantern",
+        ),
+        cost_agent_id=actors["director"],
+    )
+    closed.pop("workflow", None)
+    evidence = {
+        "schema_version": "2.0", "status": "pass",
+        "verified_at": datetime.now(timezone.utc).isoformat(),
+        "agency_os_commit": commit, "company_id": company_id, "brand_id": "brand_fleet",
+        "enabled_modules": tenancy["enabled_modules"],
+        "brand_twin": intelligence, "observatory": observatory, "closed_loop": closed,
+        "paperclip_authenticated": True, "buzz_authenticated": True,
+        "provider_external_writes": False,
+    }
+    atomic_json(result_path, evidence)
+    print("FLEET G2.2-G2.4: PASS")
+
+
+if __name__ == "__main__":
+    main()

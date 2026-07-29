@@ -1,0 +1,141 @@
+{
+    "schema_version": "1.0",
+    "artifact_type": "permitted_public_search_snapshot",
+    "brand_id": "brand_fleet",
+    "captured_at": "2026-07-29T12:04:18Z",
+    "capture_runs": [
+        {
+            "run_id": "run_fleet_public_search_001",
+            "completed_at": "2026-07-29T12:04:18Z",
+            "query_count": 20
+        },
+        {
+            "run_id": "run_fleet_public_search_002",
+            "completed_at": "2026-07-29T12:04:18Z",
+            "query_count": 20
+        }
+    ],
+    "adapter": "OpenAI web search",
+    "adapter_version": "2026-07-29",
+    "result_interpretation": "No exact madebyfleet.com result was returned for any of the 20 recorded queries.",
+    "external_ai_coverage": "unknown",
+    "queries": [
+        "\"madebyfleet.com\" understand what an AI-ready brand operating system is",
+        "\"madebyfleet.com\" compare an AI brand operating system with a traditional agency",
+        "\"madebyfleet.com\" find a governed way to automate brand content",
+        "\"madebyfleet.com\" understand how approved brand truth can guide AI content",
+        "\"madebyfleet.com\" assess whether a brand is ready for AI agents",
+        "\"madebyfleet.com\" find a partner for AI-era brand operations",
+        "\"madebyfleet.com\" understand how AI systems perceive a brand",
+        "\"madebyfleet.com\" identify gaps in a brand's public AI presence",
+        "\"madebyfleet.com\" connect content production with AI discoverability",
+        "\"madebyfleet.com\" retain human approval in an agent-run marketing system",
+        "\"madebyfleet.com\" modernise marketing operations with governed AI agents",
+        "\"madebyfleet.com\" improve brand consistency across automated content",
+        "\"madebyfleet.com\" measure whether AI assistants understand the brand",
+        "\"madebyfleet.com\" create an evidence-backed digital brand twin",
+        "\"madebyfleet.com\" reduce unsupported claims in AI-generated marketing",
+        "\"madebyfleet.com\" turn market intelligence into approved content action",
+        "\"madebyfleet.com\" evaluate a unified content and brand intelligence platform",
+        "\"madebyfleet.com\" understand the governance needed for agentic marketing",
+        "\"madebyfleet.com\" find a safe path from AI experiments to production",
+        "\"madebyfleet.com\" explain AI brand readiness to executive stakeholders"
+    ],
+    "results": [
+        {
+            "query_position": 1,
+            "exact_domain_result_count": 0
+        },
+        {
+            "query_position": 2,
+            "exact_domain_result_count": 0
+        },
+        {
+            "query_position": 3,
+            "exact_domain_result_count": 0
+        },
+        {
+            "query_position": 4,
+            "exact_domain_result_count": 0
+        },
+        {
+            "query_position": 5,
+            "exact_domain_result_count": 0
+        },
+        {
+            "query_position": 6,
+            "exact_domain_result_count": 0
+        },
+        {
+            "query_position": 7,
+            "exact_domain_result_count": 0
+        },
+        {
+            "query_position": 8,
+            "exact_domain_result_count": 0
+        },
+        {
+            "query_position": 9,
+            "exact_domain_result_count": 0
+        },
+        {
+            "query_position": 10,
+            "exact_domain_result_count": 0
+        },
+        {
+            "query_position": 11,
+            "exact_domain_result_count": 0
+        },
+        {
+            "query_position": 12,
+            "exact_domain_result_count": 0
+        },
+        {
+            "query_position": 13,
+            "exact_domain_result_count": 0
+        },
+        {
+            "query_position": 14,
+            "exact_domain_result_count": 0
+        },
+        {
+            "query_position": 15,
+            "exact_domain_result_count": 0
+        },
+        {
+            "query_position": 16,
+            "exact_domain_result_count": 0
+        },
+        {
+            "query_position": 17,
+            "exact_domain_result_count": 0
+        },
+        {
+            "query_position": 18,
+            "exact_domain_result_count": 0
+        },
+        {
+            "query_position": 19,
+            "exact_domain_result_count": 0
+        },
+        {
+            "query_position": 20,
+            "exact_domain_result_count": 0
+        }
+    ],
+    "knowns": [
+        "All 20 exact public-search queries returned no exact madebyfleet.com result in this approved snapshot."
+    ],
+    "inferences": [
+        "Fleet currently has a public explainer gap for the selected launch missions."
+    ],
+    "unknowns": [
+        "Coverage in external AI assistants and private model interfaces is not measured.",
+        "A missing search result does not prove absence from every index, region, model or interface."
+    ],
+    "prohibitions": [
+        "Do not call this a universal ranking.",
+        "Do not treat this observation as approved Brand Twin truth.",
+        "Do not claim a causal effect from later changes without stronger evidence."
+    ]
+}

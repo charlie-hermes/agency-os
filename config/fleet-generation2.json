@@ -27,6 +27,29 @@
       "expires_at": null,
       "supersedes_entitlement_id": null,
       "limits": {}
+    },
+    {
+      "entitlement_id": "entitlement_fleet_brand_twin",
+      "module": "brand_twin",
+      "version": 1,
+      "issued_at": "2026-07-29T12:04:18Z",
+      "effective_at": "2026-07-29T12:04:18Z",
+      "expires_at": null,
+      "supersedes_entitlement_id": null,
+      "limits": {}
+    },
+    {
+      "entitlement_id": "entitlement_fleet_ai_market_observatory",
+      "module": "ai_market_observatory",
+      "version": 1,
+      "issued_at": "2026-07-29T12:04:18Z",
+      "effective_at": "2026-07-29T12:04:18Z",
+      "expires_at": null,
+      "supersedes_entitlement_id": null,
+      "limits": {
+        "launch_missions": 20,
+        "registered_missions": 50
+      }
     }
   ],
   "available_modules": [
