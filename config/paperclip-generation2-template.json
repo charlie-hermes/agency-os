@@ -162,7 +162,7 @@
       "gate": "G2.6A",
       "title": "Portal product, UX and security contract",
       "parent": "FL2-80",
-      "depends_on": ["FL2-80"],
+      "depends_on": ["FL2-70"],
       "priority": "high",
       "acceptance": [
         "system_of_record_matrix", "permission_matrix", "threat_model",

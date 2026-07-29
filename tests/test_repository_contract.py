@@ -133,6 +133,7 @@ class RepositoryContractTests(unittest.TestCase):
         self.assertNotIn("week", json.dumps(template).lower())
         issues = {issue["key"]: issue for issue in template["issues"]}
         self.assertEqual(set(issues), {"FL2-00", "FL2-10", "FL2-20", "FL2-30", "FL2-40", "FL2-50", "FL2-60", "FL2-70", "FL2-80", "FL2-80A", "FL2-80B", "FL2-80C", "FL2-80D", "FL2-90", "FL2-100"})
+        self.assertEqual(issues["FL2-80A"]["depends_on"], ["FL2-70"])
         self.assertEqual(issues["FL2-90"]["depends_on"], ["FL2-80D"])
         self.assertEqual(issues["FL2-00"]["parent"], None)
         for key, issue in issues.items():
