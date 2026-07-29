@@ -371,6 +371,8 @@ class PaperclipLifecycleAdapter:
                 "Agency OS authoritative task metadata:\n"
             ):
                 continue
+            if _task_metadata(task).get("brand_id") != self.brand_id:
+                continue
             tasks.append(self._task(task))
         return tasks
 
