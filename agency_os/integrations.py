@@ -363,7 +363,16 @@ class PaperclipLifecycleAdapter:
         )
         if not isinstance(response, list):
             raise IntegrationError("Paperclip task list response is invalid")
-        return [self._task(item) for item in response]
+        tasks = []
+        for item in response:
+            task = _require_mapping(item, "Paperclip task")
+            description = task.get("description")
+            if not isinstance(description, str) or not description.startswith(
+                "Agency OS authoritative task metadata:\n"
+            ):
+                continue
+            tasks.append(self._task(task))
+        return tasks
 
     def get_task(self, issue_id: str) -> dict[str, Any]:
         issue_id = _require_uuid(issue_id, "Paperclip issue_id")

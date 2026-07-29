@@ -30,6 +30,15 @@ class OperatorPortalTests(unittest.TestCase):
                 idempotency_key=f"portal-{suffix}",
                 artifact_refs=[f"performance_{suffix}"],
             )
+            unrelated_id = f"00000000-0000-4000-8000-{suffix + 900:012x}"
+            transport.issues[unrelated_id] = {
+                "id": unrelated_id,
+                "companyId": binding.company_id,
+                "title": "Unrelated operator task",
+                "description": "This task belongs to another Paperclip workflow.",
+                "status": "done",
+                "blockedByIssueIds": [],
+            }
             transports.append(transport)
             adapters.append(adapter)
         before = [len(item.calls) for item in transports]
