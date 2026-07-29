@@ -116,6 +116,43 @@ class CoreWorkflowTests(unittest.TestCase):
         self.assertEqual(len(revision_updates), 1)
         self.assertEqual(revision_updates[0]["status"], "todo")
 
+    def test_separate_campaigns_do_not_reuse_paperclip_tasks(self) -> None:
+        transport, lifecycle, board, buzz, publisher = _dependencies()
+
+        def approve(requested, _manifest):
+            return board.decide_approval(
+                requested["id"],
+                decision="approve",
+                decision_note="Human approved the exact fictional package.",
+            )
+
+        first = run_core_workflow(
+            paperclip=lifecycle,
+            buzz=buzz,
+            approval_authority=approve,
+            publisher=publisher,
+            campaign_id="camp_one",
+            asset_id="asset_one",
+        )
+        second = run_core_workflow(
+            paperclip=lifecycle,
+            buzz=buzz,
+            approval_authority=approve,
+            publisher=publisher,
+            campaign_id="camp_two",
+            asset_id="asset_two",
+        )
+        first_ids = {task["id"] for task in first.tasks_by_role.values()}
+        second_ids = {task["id"] for task in second.tasks_by_role.values()}
+        self.assertTrue(first_ids.isdisjoint(second_ids))
+        self.assertEqual(len(transport.issues), 16)
+        self.assertTrue(
+            all("[camp_one]" in task["title"] for task in first.tasks_by_role.values())
+        )
+        self.assertTrue(
+            all("[camp_two]" in task["title"] for task in second.tasks_by_role.values())
+        )
+
     def test_operator_projection_is_read_only_and_paperclip_derived(self) -> None:
         projection = self.result.operator_projection
         self.assertEqual(projection["authority"], "paperclip")

@@ -40,6 +40,10 @@ class InMemoryPaperclipTransport:
 
         if method == "POST" and path == f"{company_prefix}/issues":
             assert body is not None
+            if not body.get("allowDuplicate", False):
+                for existing in self.issues.values():
+                    if existing["title"] == body["title"]:
+                        return copy.deepcopy(existing)
             for item in [body.get("parentId"), *body.get("blockedByIssueIds", [])]:
                 if item is not None:
                     self._require_uuid(item, "Paperclip issue relation")

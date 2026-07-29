@@ -126,7 +126,7 @@ def run_core_workflow(
     for role_id, title, stage, criteria, artifact_refs in definitions:
         is_director = role_id == "agency-director"
         task = paperclip.create_task(
-            title=title,
+            title=f"{title} [{campaign_id}]",
             campaign_id=campaign_id,
             stage=stage,
             acceptance_criteria=criteria,
