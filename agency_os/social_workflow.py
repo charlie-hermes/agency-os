@@ -111,7 +111,7 @@ def run_social_workflow(
     previous: str | None = None
     for role_id, title, stage, criteria in definitions:
         task = paperclip.create_task(
-            title=title,
+            title=f"{title} [{campaign_id}]",
             campaign_id=campaign_id,
             stage=stage,
             acceptance_criteria=criteria,
