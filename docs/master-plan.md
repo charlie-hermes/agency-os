@@ -437,16 +437,16 @@ governed DecisionPacket workshop.
 
 ## Current checkpoint
 
-- Status: live production. Core and Social workflows, two-brand isolation,
-  12 checksum-bound Hermes role bundles, authenticated Paperclip and Buzz,
-  provider handoffs, the read-only operator portal, and Fleet Generation 2
-  foundation Gates G2.0/G2.1 are active and verified.
-- Generation 2 foundation: Fleet DMA is bound to `brand_fleet`; Content Engine
-  is enabled; later modules are disabled; protected tenancy, hostname,
-  entitlement and foundational data contracts pass isolation and restart tests.
-- Evidence: 161 repository tests passed; all 12 roles passed fresh-session and
-  role-boundary checks; the live Core, Social and isolation workflows passed;
-  the secret audit passed; and the VM reported zero failed systemd units.
+- Status authority: live production status comes from the latest protected
+  six-gate appliance result; G2.0/G2.1 status comes from Paperclip issues
+  `PAP-152`, `PAP-153` and `PAP-154`. This plan does not cache their state.
+- Generation 2 foundation target: Fleet DMA is bound to `brand_fleet`; Content
+  Engine alone is enabled; later modules are disabled; tenancy, hostname,
+  entitlement, migration and foundational data contracts fail closed.
+- Source evidence: the G2 correction repository gate passed 174 tests while the
+  Core workflow and all 12 checksum-bound runtime bundles remained green. Live
+  evidence is valid only when `/var/lib/paperclip-appliance/verification-result.json`
+  records all six exact gates with exit status zero for the pinned release.
 - Real provider accounts remain manual handoffs until the owner supplies each
   account, scoped credential and destination.
 - VM backup and disaster recovery remain outside this plan.

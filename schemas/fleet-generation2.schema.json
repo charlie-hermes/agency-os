@@ -10,285 +10,1595 @@
     },
     "EvidenceReference": {
       "type": "object",
-      "required": ["source_id", "source_version", "source_checksum"],
+      "required": [
+        "source_id",
+        "source_version",
+        "source_checksum"
+      ],
       "properties": {
-        "source_id": {"type": "string", "minLength": 1},
-        "source_version": {"type": "integer", "minimum": 1},
-        "source_checksum": {"$ref": "#/$defs/Checksum"},
-        "locator": {"type": "string", "minLength": 1}
+        "source_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source_version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "source_checksum": {
+          "$ref": "#/$defs/Checksum"
+        },
+        "locator": {
+          "type": "string",
+          "minLength": 1
+        }
       },
       "additionalProperties": false
     },
     "BrandTenant": {
       "type": "object",
-      "required": ["schema_version", "artifact_type", "tenant_id", "brand_id", "paperclip_company_id", "company_name", "status", "created_by", "created_at", "content_checksum"],
+      "required": [
+        "schema_version",
+        "artifact_type",
+        "tenant_id",
+        "brand_id",
+        "paperclip_company_id",
+        "company_name",
+        "status",
+        "created_by",
+        "created_at",
+        "content_checksum"
+      ],
       "properties": {
-        "schema_version": {"const": "2.0"},
-        "artifact_type": {"const": "brand_tenant"},
-        "tenant_id": {"type": "string", "pattern": "^tenant_"},
-        "brand_id": {"type": "string", "pattern": "^brand_"},
-        "paperclip_company_id": {"type": "string", "format": "uuid"},
-        "company_name": {"type": "string", "minLength": 1},
-        "status": {"const": "active"},
-        "created_by": {"type": "string", "minLength": 1},
-        "created_at": {"type": "string", "format": "date-time"},
-        "content_checksum": {"$ref": "#/$defs/Checksum"}
+        "schema_version": {
+          "const": "2.0"
+        },
+        "artifact_type": {
+          "const": "brand_tenant"
+        },
+        "tenant_id": {
+          "type": "string",
+          "pattern": "^tenant_"
+        },
+        "brand_id": {
+          "$ref": "#/$defs/BrandId"
+        },
+        "paperclip_company_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "company_name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "status": {
+          "const": "active"
+        },
+        "created_by": {
+          "type": "string",
+          "minLength": 1
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "content_checksum": {
+          "$ref": "#/$defs/Checksum"
+        }
       },
       "additionalProperties": false
     },
     "PortalHostnameBinding": {
       "type": "object",
-      "required": ["schema_version", "artifact_type", "binding_id", "brand_id", "brand_slug", "hostname", "base_domain", "status", "created_by", "created_at", "content_checksum"],
+      "required": [
+        "schema_version",
+        "artifact_type",
+        "binding_id",
+        "brand_id",
+        "brand_slug",
+        "hostname",
+        "base_domain",
+        "status",
+        "created_by",
+        "created_at",
+        "content_checksum"
+      ],
       "properties": {
-        "schema_version": {"const": "2.0"},
-        "artifact_type": {"const": "portal_hostname_binding"},
-        "binding_id": {"type": "string", "minLength": 1},
-        "brand_id": {"type": "string", "pattern": "^brand_"},
-        "brand_slug": {"type": "string", "pattern": "^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$"},
-        "hostname": {"type": "string", "pattern": "^[a-z0-9-]+\\.madebyfleet\\.com$"},
-        "base_domain": {"const": "madebyfleet.com"},
-        "status": {"const": "active"},
-        "created_by": {"type": "string", "minLength": 1},
-        "created_at": {"type": "string", "format": "date-time"},
-        "content_checksum": {"$ref": "#/$defs/Checksum"}
+        "schema_version": {
+          "const": "2.0"
+        },
+        "artifact_type": {
+          "const": "portal_hostname_binding"
+        },
+        "binding_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "brand_id": {
+          "$ref": "#/$defs/BrandId"
+        },
+        "brand_slug": {
+          "type": "string",
+          "pattern": "^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$"
+        },
+        "hostname": {
+          "type": "string",
+          "pattern": "^[a-z0-9-]+\\.madebyfleet\\.com$"
+        },
+        "base_domain": {
+          "const": "madebyfleet.com"
+        },
+        "status": {
+          "const": "active"
+        },
+        "created_by": {
+          "type": "string",
+          "minLength": 1
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "content_checksum": {
+          "$ref": "#/$defs/Checksum"
+        }
       },
       "additionalProperties": false
     },
     "ProductEntitlement": {
       "type": "object",
-      "required": ["schema_version", "artifact_type", "entitlement_id", "brand_id", "module", "limits", "status", "issued_by", "issued_at", "content_checksum"],
+      "required": [
+        "schema_version",
+        "artifact_type",
+        "entitlement_id",
+        "brand_id",
+        "module",
+        "version",
+        "limits",
+        "status",
+        "issued_by",
+        "issued_at",
+        "effective_at",
+        "expires_at",
+        "supersedes_entitlement_id",
+        "content_checksum"
+      ],
       "properties": {
-        "schema_version": {"const": "2.0"},
-        "artifact_type": {"const": "product_entitlement"},
-        "entitlement_id": {"type": "string", "minLength": 1},
-        "brand_id": {"type": "string", "pattern": "^brand_"},
-        "module": {"enum": ["content_engine", "brand_twin", "ai_market_observatory", "brand_agent", "controlled_actions", "client_portal", "measurement", "agentic_commerce"]},
-        "limits": {"type": "object"},
-        "status": {"const": "active"},
-        "issued_by": {"type": "string", "minLength": 1},
-        "issued_at": {"type": "string", "format": "date-time"},
-        "content_checksum": {"$ref": "#/$defs/Checksum"}
+        "schema_version": {
+          "const": "2.0"
+        },
+        "artifact_type": {
+          "const": "product_entitlement"
+        },
+        "entitlement_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "brand_id": {
+          "$ref": "#/$defs/BrandId"
+        },
+        "module": {
+          "enum": [
+            "content_engine",
+            "brand_twin",
+            "ai_market_observatory",
+            "brand_agent",
+            "controlled_actions",
+            "client_portal",
+            "measurement",
+            "agentic_commerce"
+          ]
+        },
+        "limits": {
+          "type": "object",
+          "propertyNames": {
+            "pattern": "^[a-z][a-z0-9_]{0,63}$"
+          },
+          "additionalProperties": {
+            "oneOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "integer",
+                "minimum": 0
+              },
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "status": {
+          "const": "active"
+        },
+        "issued_by": {
+          "type": "string",
+          "minLength": 1
+        },
+        "issued_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "content_checksum": {
+          "$ref": "#/$defs/Checksum"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "effective_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "expires_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "supersedes_entitlement_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1
+        }
       },
       "additionalProperties": false
     },
     "BrandSource": {
       "type": "object",
-      "required": ["artifact_type", "source_id", "brand_id", "source_class", "authority", "locator", "version", "status", "owner_id", "observed_at", "content_checksum"],
+      "required": [
+        "artifact_type",
+        "source_id",
+        "brand_id",
+        "source_class",
+        "authority",
+        "locator",
+        "version",
+        "status",
+        "owner_id",
+        "observed_at",
+        "content_checksum",
+        "schema_version",
+        "created_at",
+        "effective_at",
+        "created_by",
+        "provenance"
+      ],
       "properties": {
-        "artifact_type": {"const": "brand_source"},
-        "source_id": {"type": "string", "minLength": 1},
-        "brand_id": {"type": "string", "pattern": "^brand_"},
-        "source_class": {"enum": ["first_party", "approved_external", "internal_evidence"]},
-        "authority": {"enum": ["authoritative", "supporting", "unverified"]},
-        "locator": {"type": "string", "minLength": 1},
-        "version": {"type": "integer", "minimum": 1},
-        "status": {"enum": ["active", "inactive", "superseded"]},
-        "owner_id": {"type": "string", "minLength": 1},
-        "observed_at": {"type": "string", "format": "date-time"},
-        "expires_at": {"type": ["string", "null"], "format": "date-time"},
-        "content_checksum": {"$ref": "#/$defs/Checksum"}
-      }
+        "artifact_type": {
+          "const": "brand_source"
+        },
+        "source_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "brand_id": {
+          "$ref": "#/$defs/BrandId"
+        },
+        "source_class": {
+          "enum": [
+            "first_party",
+            "approved_external",
+            "internal_evidence"
+          ]
+        },
+        "authority": {
+          "enum": [
+            "authoritative",
+            "supporting",
+            "unverified"
+          ]
+        },
+        "locator": {
+          "type": "string",
+          "minLength": 1
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "status": {
+          "enum": [
+            "active",
+            "inactive",
+            "superseded"
+          ]
+        },
+        "owner_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "observed_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "expires_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "content_checksum": {
+          "$ref": "#/$defs/Checksum"
+        },
+        "schema_version": {
+          "const": "2.0"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "effective_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "created_by": {
+          "type": "string",
+          "minLength": 1
+        },
+        "provenance": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/EvidenceReference"
+          }
+        }
+      },
+      "additionalProperties": false
     },
     "BrandEntity": {
       "type": "object",
-      "required": ["artifact_type", "entity_id", "brand_id", "entity_type", "canonical_name", "version", "status", "evidence_refs", "content_checksum"],
+      "required": [
+        "artifact_type",
+        "entity_id",
+        "brand_id",
+        "entity_type",
+        "canonical_name",
+        "version",
+        "status",
+        "evidence_refs",
+        "content_checksum",
+        "schema_version",
+        "created_at",
+        "effective_at",
+        "created_by",
+        "provenance"
+      ],
       "properties": {
-        "artifact_type": {"const": "brand_entity"},
-        "entity_id": {"type": "string", "minLength": 1},
-        "brand_id": {"type": "string", "pattern": "^brand_"},
-        "entity_type": {"enum": ["brand", "product", "service", "audience", "person", "organisation", "place", "topic"]},
-        "canonical_name": {"type": "string", "minLength": 1},
-        "aliases": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
-        "version": {"type": "integer", "minimum": 1},
-        "status": {"enum": ["active", "inactive", "superseded"]},
-        "evidence_refs": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/EvidenceReference"}},
-        "content_checksum": {"$ref": "#/$defs/Checksum"}
-      }
+        "artifact_type": {
+          "const": "brand_entity"
+        },
+        "entity_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "brand_id": {
+          "$ref": "#/$defs/BrandId"
+        },
+        "entity_type": {
+          "enum": [
+            "brand",
+            "product",
+            "service",
+            "audience",
+            "person",
+            "organisation",
+            "place",
+            "topic"
+          ]
+        },
+        "canonical_name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "aliases": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "status": {
+          "enum": [
+            "active",
+            "inactive",
+            "superseded"
+          ]
+        },
+        "evidence_refs": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/EvidenceReference"
+          }
+        },
+        "content_checksum": {
+          "$ref": "#/$defs/Checksum"
+        },
+        "schema_version": {
+          "const": "2.0"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "effective_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "created_by": {
+          "type": "string",
+          "minLength": 1
+        },
+        "provenance": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/EvidenceReference"
+          }
+        }
+      },
+      "additionalProperties": false
     },
     "BrandClaim": {
       "type": "object",
-      "required": ["artifact_type", "claim_id", "brand_id", "subject_entity_id", "predicate", "object", "version", "status", "approval_state", "owner_id", "evidence_refs", "content_checksum"],
+      "required": [
+        "artifact_type",
+        "claim_id",
+        "brand_id",
+        "subject_entity_id",
+        "predicate",
+        "object",
+        "version",
+        "status",
+        "approval_state",
+        "owner_id",
+        "evidence_refs",
+        "content_checksum",
+        "schema_version",
+        "created_at",
+        "effective_at",
+        "created_by",
+        "provenance"
+      ],
       "properties": {
-        "artifact_type": {"const": "brand_claim"},
-        "claim_id": {"type": "string", "minLength": 1},
-        "brand_id": {"type": "string", "pattern": "^brand_"},
-        "subject_entity_id": {"type": "string", "minLength": 1},
-        "predicate": {"type": "string", "minLength": 1},
+        "artifact_type": {
+          "const": "brand_claim"
+        },
+        "claim_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "brand_id": {
+          "$ref": "#/$defs/BrandId"
+        },
+        "subject_entity_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "predicate": {
+          "type": "string",
+          "minLength": 1
+        },
         "object": {},
-        "version": {"type": "integer", "minimum": 1},
-        "status": {"enum": ["active", "inactive", "disputed", "superseded"]},
-        "approval_state": {"enum": ["draft", "approved", "rejected"]},
-        "owner_id": {"type": "string", "minLength": 1},
-        "evidence_refs": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/EvidenceReference"}},
-        "valid_from": {"type": ["string", "null"], "format": "date-time"},
-        "valid_until": {"type": ["string", "null"], "format": "date-time"},
-        "content_checksum": {"$ref": "#/$defs/Checksum"}
-      }
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "status": {
+          "enum": [
+            "active",
+            "inactive",
+            "disputed",
+            "superseded"
+          ]
+        },
+        "approval_state": {
+          "enum": [
+            "draft",
+            "approved",
+            "rejected"
+          ]
+        },
+        "owner_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "evidence_refs": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/EvidenceReference"
+          }
+        },
+        "valid_from": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "valid_until": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "content_checksum": {
+          "$ref": "#/$defs/Checksum"
+        },
+        "schema_version": {
+          "const": "2.0"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "effective_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "created_by": {
+          "type": "string",
+          "minLength": 1
+        },
+        "provenance": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/EvidenceReference"
+          }
+        }
+      },
+      "additionalProperties": false
     },
     "ClaimEvidence": {
       "type": "object",
-      "required": ["artifact_type", "evidence_id", "brand_id", "claim_id", "source_ref", "extract", "confidence", "observed_at", "content_checksum"],
+      "required": [
+        "artifact_type",
+        "evidence_id",
+        "brand_id",
+        "claim_id",
+        "source_ref",
+        "extract",
+        "confidence",
+        "observed_at",
+        "content_checksum",
+        "schema_version",
+        "created_at",
+        "effective_at",
+        "created_by",
+        "provenance",
+        "version",
+        "status"
+      ],
       "properties": {
-        "artifact_type": {"const": "claim_evidence"},
-        "evidence_id": {"type": "string", "minLength": 1},
-        "brand_id": {"type": "string", "pattern": "^brand_"},
-        "claim_id": {"type": "string", "minLength": 1},
-        "source_ref": {"$ref": "#/$defs/EvidenceReference"},
-        "extract": {"type": "string", "minLength": 1},
-        "confidence": {"type": "number", "minimum": 0, "maximum": 1},
-        "observed_at": {"type": "string", "format": "date-time"},
-        "content_checksum": {"$ref": "#/$defs/Checksum"}
-      }
+        "artifact_type": {
+          "const": "claim_evidence"
+        },
+        "evidence_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "brand_id": {
+          "$ref": "#/$defs/BrandId"
+        },
+        "claim_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source_ref": {
+          "$ref": "#/$defs/EvidenceReference"
+        },
+        "extract": {
+          "type": "string",
+          "minLength": 1
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "observed_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "content_checksum": {
+          "$ref": "#/$defs/Checksum"
+        },
+        "schema_version": {
+          "const": "2.0"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "effective_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "created_by": {
+          "type": "string",
+          "minLength": 1
+        },
+        "provenance": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/EvidenceReference"
+          }
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "status": {
+          "enum": [
+            "active",
+            "inactive",
+            "superseded"
+          ]
+        }
+      },
+      "additionalProperties": false
     },
     "BrandPolicy": {
       "type": "object",
-      "required": ["artifact_type", "policy_id", "brand_id", "policy_type", "rule", "version", "status", "owner_id", "approval_ref", "content_checksum"],
+      "required": [
+        "artifact_type",
+        "policy_id",
+        "brand_id",
+        "policy_type",
+        "rule",
+        "version",
+        "status",
+        "owner_id",
+        "approval_ref",
+        "content_checksum",
+        "schema_version",
+        "created_at",
+        "effective_at",
+        "created_by",
+        "provenance"
+      ],
       "properties": {
-        "artifact_type": {"const": "brand_policy"},
-        "policy_id": {"type": "string", "minLength": 1},
-        "brand_id": {"type": "string", "pattern": "^brand_"},
-        "policy_type": {"enum": ["voice", "visual", "legal", "claims", "safety", "channel", "action"]},
-        "rule": {"type": "object"},
-        "version": {"type": "integer", "minimum": 1},
-        "status": {"enum": ["active", "inactive", "superseded"]},
-        "owner_id": {"type": "string", "minLength": 1},
-        "approval_ref": {"type": "string", "minLength": 1},
-        "content_checksum": {"$ref": "#/$defs/Checksum"}
-      }
+        "artifact_type": {
+          "const": "brand_policy"
+        },
+        "policy_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "brand_id": {
+          "$ref": "#/$defs/BrandId"
+        },
+        "policy_type": {
+          "enum": [
+            "voice",
+            "visual",
+            "legal",
+            "claims",
+            "safety",
+            "channel",
+            "action"
+          ]
+        },
+        "rule": {
+          "type": "object"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "status": {
+          "enum": [
+            "active",
+            "inactive",
+            "superseded"
+          ]
+        },
+        "owner_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "approval_ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "content_checksum": {
+          "$ref": "#/$defs/Checksum"
+        },
+        "schema_version": {
+          "const": "2.0"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "effective_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "created_by": {
+          "type": "string",
+          "minLength": 1
+        },
+        "provenance": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/EvidenceReference"
+          }
+        }
+      },
+      "additionalProperties": false
     },
     "BrandCapability": {
       "type": "object",
-      "required": ["artifact_type", "brand_capability_id", "brand_id", "capability", "allowed_actions", "constraints", "version", "status", "content_checksum"],
+      "required": [
+        "artifact_type",
+        "brand_capability_id",
+        "brand_id",
+        "capability",
+        "allowed_actions",
+        "constraints",
+        "version",
+        "status",
+        "content_checksum",
+        "schema_version",
+        "created_at",
+        "effective_at",
+        "created_by",
+        "provenance"
+      ],
       "properties": {
-        "artifact_type": {"const": "brand_capability"},
-        "brand_capability_id": {"type": "string", "minLength": 1},
-        "brand_id": {"type": "string", "pattern": "^brand_"},
-        "capability": {"type": "string", "minLength": 1},
-        "allowed_actions": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
-        "constraints": {"type": "object"},
-        "version": {"type": "integer", "minimum": 1},
-        "status": {"enum": ["active", "inactive"]},
-        "content_checksum": {"$ref": "#/$defs/Checksum"}
-      }
+        "artifact_type": {
+          "const": "brand_capability"
+        },
+        "brand_capability_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "brand_id": {
+          "$ref": "#/$defs/BrandId"
+        },
+        "capability": {
+          "type": "string",
+          "minLength": 1
+        },
+        "allowed_actions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
+        "constraints": {
+          "type": "object"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "status": {
+          "enum": [
+            "active",
+            "inactive"
+          ]
+        },
+        "content_checksum": {
+          "$ref": "#/$defs/Checksum"
+        },
+        "schema_version": {
+          "const": "2.0"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "effective_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "created_by": {
+          "type": "string",
+          "minLength": 1
+        },
+        "provenance": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/EvidenceReference"
+          }
+        }
+      },
+      "additionalProperties": false
     },
     "CustomerMission": {
       "type": "object",
-      "required": ["artifact_type", "mission_id", "brand_id", "audience", "intent", "success_definition", "variants", "version", "status", "content_checksum"],
+      "required": [
+        "artifact_type",
+        "mission_id",
+        "brand_id",
+        "audience",
+        "intent",
+        "success_definition",
+        "variants",
+        "version",
+        "status",
+        "content_checksum",
+        "schema_version",
+        "created_at",
+        "effective_at",
+        "created_by",
+        "provenance"
+      ],
       "properties": {
-        "artifact_type": {"const": "customer_mission"},
-        "mission_id": {"type": "string", "minLength": 1},
-        "brand_id": {"type": "string", "pattern": "^brand_"},
-        "audience": {"type": "string", "minLength": 1},
-        "intent": {"type": "string", "minLength": 1},
-        "success_definition": {"type": "object"},
-        "variants": {"type": "array", "minItems": 1, "items": {"type": "string"}, "uniqueItems": true},
-        "version": {"type": "integer", "minimum": 1},
-        "status": {"enum": ["active", "inactive", "superseded"]},
-        "content_checksum": {"$ref": "#/$defs/Checksum"}
-      }
+        "artifact_type": {
+          "const": "customer_mission"
+        },
+        "mission_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "brand_id": {
+          "$ref": "#/$defs/BrandId"
+        },
+        "audience": {
+          "type": "string",
+          "minLength": 1
+        },
+        "intent": {
+          "type": "string",
+          "minLength": 1
+        },
+        "success_definition": {
+          "type": "object"
+        },
+        "variants": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "status": {
+          "enum": [
+            "active",
+            "inactive",
+            "superseded"
+          ]
+        },
+        "content_checksum": {
+          "$ref": "#/$defs/Checksum"
+        },
+        "schema_version": {
+          "const": "2.0"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "effective_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "created_by": {
+          "type": "string",
+          "minLength": 1
+        },
+        "provenance": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/EvidenceReference"
+          }
+        }
+      },
+      "additionalProperties": false
     },
     "ObservationRun": {
       "type": "object",
-      "required": ["artifact_type", "run_id", "brand_id", "mission_ids", "adapter", "adapter_version", "model", "model_version", "started_at", "completed_at", "status", "content_checksum"],
+      "required": [
+        "artifact_type",
+        "run_id",
+        "brand_id",
+        "mission_ids",
+        "adapter",
+        "adapter_version",
+        "model",
+        "model_version",
+        "started_at",
+        "completed_at",
+        "status",
+        "content_checksum",
+        "schema_version",
+        "created_at",
+        "effective_at",
+        "created_by",
+        "provenance",
+        "version"
+      ],
       "properties": {
-        "artifact_type": {"const": "observation_run"},
-        "run_id": {"type": "string", "minLength": 1},
-        "brand_id": {"type": "string", "pattern": "^brand_"},
-        "mission_ids": {"type": "array", "minItems": 1, "items": {"type": "string"}, "uniqueItems": true},
-        "adapter": {"type": "string", "minLength": 1},
-        "adapter_version": {"type": "string", "minLength": 1},
-        "model": {"type": "string", "minLength": 1},
-        "model_version": {"type": "string", "minLength": 1},
-        "started_at": {"type": "string", "format": "date-time"},
-        "completed_at": {"type": ["string", "null"], "format": "date-time"},
-        "status": {"enum": ["running", "complete", "failed", "partial"]},
-        "content_checksum": {"$ref": "#/$defs/Checksum"}
-      }
+        "artifact_type": {
+          "const": "observation_run"
+        },
+        "run_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "brand_id": {
+          "$ref": "#/$defs/BrandId"
+        },
+        "mission_ids": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
+        "adapter": {
+          "type": "string",
+          "minLength": 1
+        },
+        "adapter_version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1
+        },
+        "model_version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "started_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "completed_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "status": {
+          "enum": [
+            "running",
+            "complete",
+            "failed",
+            "partial"
+          ]
+        },
+        "content_checksum": {
+          "$ref": "#/$defs/Checksum"
+        },
+        "schema_version": {
+          "const": "2.0"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "effective_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "created_by": {
+          "type": "string",
+          "minLength": 1
+        },
+        "provenance": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/EvidenceReference"
+          }
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "additionalProperties": false
     },
     "Observation": {
       "type": "object",
-      "required": ["artifact_type", "observation_id", "brand_id", "run_id", "mission_id", "variant", "response", "citations", "evaluations", "observed_at", "content_checksum"],
+      "required": [
+        "artifact_type",
+        "observation_id",
+        "brand_id",
+        "run_id",
+        "mission_id",
+        "variant",
+        "response",
+        "citations",
+        "evaluations",
+        "observed_at",
+        "content_checksum",
+        "schema_version",
+        "created_at",
+        "effective_at",
+        "created_by",
+        "provenance",
+        "version",
+        "status"
+      ],
       "properties": {
-        "artifact_type": {"const": "observation"},
-        "observation_id": {"type": "string", "minLength": 1},
-        "brand_id": {"type": "string", "pattern": "^brand_"},
-        "run_id": {"type": "string", "minLength": 1},
-        "mission_id": {"type": "string", "minLength": 1},
-        "variant": {"type": "string", "minLength": 1},
-        "response": {"type": "string"},
-        "citations": {"type": "array", "items": {"type": "string"}},
-        "evaluations": {"type": "object"},
-        "observed_at": {"type": "string", "format": "date-time"},
-        "content_checksum": {"$ref": "#/$defs/Checksum"}
-      }
+        "artifact_type": {
+          "const": "observation"
+        },
+        "observation_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "brand_id": {
+          "$ref": "#/$defs/BrandId"
+        },
+        "run_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "mission_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "variant": {
+          "type": "string",
+          "minLength": 1
+        },
+        "response": {
+          "type": "string"
+        },
+        "citations": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "evaluations": {
+          "type": "object"
+        },
+        "observed_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "content_checksum": {
+          "$ref": "#/$defs/Checksum"
+        },
+        "schema_version": {
+          "const": "2.0"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "effective_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "created_by": {
+          "type": "string",
+          "minLength": 1
+        },
+        "provenance": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/EvidenceReference"
+          }
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "status": {
+          "enum": [
+            "active",
+            "inactive",
+            "superseded"
+          ]
+        }
+      },
+      "additionalProperties": false
     },
     "MarketFinding": {
       "type": "object",
-      "required": ["artifact_type", "finding_id", "brand_id", "mission_ids", "observation_refs", "finding", "classification", "confidence", "knowns", "inferences", "unknowns", "paperclip_issue_id", "content_checksum"],
+      "required": [
+        "artifact_type",
+        "finding_id",
+        "brand_id",
+        "mission_ids",
+        "observation_refs",
+        "finding",
+        "classification",
+        "confidence",
+        "knowns",
+        "inferences",
+        "unknowns",
+        "paperclip_issue_id",
+        "content_checksum",
+        "schema_version",
+        "created_at",
+        "effective_at",
+        "created_by",
+        "provenance",
+        "version",
+        "status"
+      ],
       "properties": {
-        "artifact_type": {"const": "market_finding"},
-        "finding_id": {"type": "string", "minLength": 1},
-        "brand_id": {"type": "string", "pattern": "^brand_"},
-        "mission_ids": {"type": "array", "minItems": 1, "items": {"type": "string"}},
-        "observation_refs": {"type": "array", "minItems": 1, "items": {"type": "string"}},
-        "finding": {"type": "string", "minLength": 1},
-        "classification": {"enum": ["content_gap", "claim_gap", "entity_gap", "experience_gap", "measurement_gap", "no_action"]},
-        "confidence": {"type": "number", "minimum": 0, "maximum": 1},
-        "knowns": {"type": "array", "items": {"type": "string"}},
-        "inferences": {"type": "array", "items": {"type": "string"}},
-        "unknowns": {"type": "array", "items": {"type": "string"}},
-        "paperclip_issue_id": {"type": "string", "minLength": 1},
-        "content_checksum": {"$ref": "#/$defs/Checksum"}
-      }
+        "artifact_type": {
+          "const": "market_finding"
+        },
+        "finding_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "brand_id": {
+          "$ref": "#/$defs/BrandId"
+        },
+        "mission_ids": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string"
+          }
+        },
+        "observation_refs": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string"
+          }
+        },
+        "finding": {
+          "type": "string",
+          "minLength": 1
+        },
+        "classification": {
+          "enum": [
+            "content_gap",
+            "claim_gap",
+            "entity_gap",
+            "experience_gap",
+            "measurement_gap",
+            "no_action"
+          ]
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "knowns": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "inferences": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "unknowns": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "paperclip_issue_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "content_checksum": {
+          "$ref": "#/$defs/Checksum"
+        },
+        "schema_version": {
+          "const": "2.0"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "effective_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "created_by": {
+          "type": "string",
+          "minLength": 1
+        },
+        "provenance": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/EvidenceReference"
+          }
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "status": {
+          "enum": [
+            "active",
+            "inactive",
+            "superseded"
+          ]
+        }
+      },
+      "additionalProperties": false
     },
     "RemediationProposal": {
       "type": "object",
-      "required": ["artifact_type", "proposal_id", "brand_id", "finding_id", "proposed_change", "expected_effect", "risk", "approval_state", "paperclip_issue_id", "content_checksum"],
+      "required": [
+        "artifact_type",
+        "proposal_id",
+        "brand_id",
+        "finding_id",
+        "proposed_change",
+        "expected_effect",
+        "risk",
+        "approval_state",
+        "paperclip_issue_id",
+        "content_checksum",
+        "schema_version",
+        "created_at",
+        "effective_at",
+        "created_by",
+        "provenance",
+        "version",
+        "status"
+      ],
       "properties": {
-        "artifact_type": {"const": "remediation_proposal"},
-        "proposal_id": {"type": "string", "minLength": 1},
-        "brand_id": {"type": "string", "pattern": "^brand_"},
-        "finding_id": {"type": "string", "minLength": 1},
-        "proposed_change": {"type": "object"},
-        "expected_effect": {"type": "string", "minLength": 1},
-        "risk": {"enum": ["low", "medium", "high"]},
-        "approval_state": {"enum": ["proposed", "approved", "rejected", "implemented"]},
-        "paperclip_issue_id": {"type": "string", "minLength": 1},
-        "content_checksum": {"$ref": "#/$defs/Checksum"}
-      }
+        "artifact_type": {
+          "const": "remediation_proposal"
+        },
+        "proposal_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "brand_id": {
+          "$ref": "#/$defs/BrandId"
+        },
+        "finding_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "proposed_change": {
+          "type": "object"
+        },
+        "expected_effect": {
+          "type": "string",
+          "minLength": 1
+        },
+        "risk": {
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ]
+        },
+        "approval_state": {
+          "enum": [
+            "proposed",
+            "approved",
+            "rejected",
+            "implemented"
+          ]
+        },
+        "paperclip_issue_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "content_checksum": {
+          "$ref": "#/$defs/Checksum"
+        },
+        "schema_version": {
+          "const": "2.0"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "effective_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "created_by": {
+          "type": "string",
+          "minLength": 1
+        },
+        "provenance": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/EvidenceReference"
+          }
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "status": {
+          "enum": [
+            "active",
+            "inactive",
+            "superseded"
+          ]
+        }
+      },
+      "additionalProperties": false
     },
     "Experiment": {
       "type": "object",
-      "required": ["artifact_type", "experiment_id", "brand_id", "proposal_id", "hypothesis", "baseline_refs", "treatment", "evaluation_plan", "status", "content_checksum"],
+      "required": [
+        "artifact_type",
+        "experiment_id",
+        "brand_id",
+        "proposal_id",
+        "hypothesis",
+        "baseline_refs",
+        "treatment",
+        "evaluation_plan",
+        "status",
+        "content_checksum",
+        "schema_version",
+        "created_at",
+        "effective_at",
+        "created_by",
+        "provenance",
+        "version"
+      ],
       "properties": {
-        "artifact_type": {"const": "experiment"},
-        "experiment_id": {"type": "string", "minLength": 1},
-        "brand_id": {"type": "string", "pattern": "^brand_"},
-        "proposal_id": {"type": "string", "minLength": 1},
-        "hypothesis": {"type": "string", "minLength": 1},
-        "baseline_refs": {"type": "array", "items": {"type": "string"}},
-        "treatment": {"type": "object"},
-        "evaluation_plan": {"type": "object"},
-        "status": {"enum": ["planned", "running", "complete", "cancelled"]},
-        "content_checksum": {"$ref": "#/$defs/Checksum"}
-      }
+        "artifact_type": {
+          "const": "experiment"
+        },
+        "experiment_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "brand_id": {
+          "$ref": "#/$defs/BrandId"
+        },
+        "proposal_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "hypothesis": {
+          "type": "string",
+          "minLength": 1
+        },
+        "baseline_refs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "treatment": {
+          "type": "object"
+        },
+        "evaluation_plan": {
+          "type": "object"
+        },
+        "status": {
+          "enum": [
+            "planned",
+            "running",
+            "complete",
+            "cancelled"
+          ]
+        },
+        "content_checksum": {
+          "$ref": "#/$defs/Checksum"
+        },
+        "schema_version": {
+          "const": "2.0"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "effective_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "created_by": {
+          "type": "string",
+          "minLength": 1
+        },
+        "provenance": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/EvidenceReference"
+          }
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "additionalProperties": false
     },
     "OutcomeEvent": {
       "type": "object",
-      "required": ["artifact_type", "outcome_id", "brand_id", "experiment_id", "metric", "value", "unit", "source_ref", "observed_at", "causal_status", "content_checksum"],
+      "required": [
+        "artifact_type",
+        "outcome_id",
+        "brand_id",
+        "experiment_id",
+        "metric",
+        "value",
+        "unit",
+        "source_ref",
+        "observed_at",
+        "causal_status",
+        "content_checksum",
+        "schema_version",
+        "created_at",
+        "effective_at",
+        "created_by",
+        "provenance",
+        "version",
+        "status"
+      ],
       "properties": {
-        "artifact_type": {"const": "outcome_event"},
-        "outcome_id": {"type": "string", "minLength": 1},
-        "brand_id": {"type": "string", "pattern": "^brand_"},
-        "experiment_id": {"type": "string", "minLength": 1},
-        "metric": {"type": "string", "minLength": 1},
-        "value": {"type": "number"},
-        "unit": {"type": "string", "minLength": 1},
-        "source_ref": {"$ref": "#/$defs/EvidenceReference"},
-        "observed_at": {"type": "string", "format": "date-time"},
-        "causal_status": {"enum": ["observed", "correlated", "experimentally_supported", "unknown"]},
-        "content_checksum": {"$ref": "#/$defs/Checksum"}
-      }
+        "artifact_type": {
+          "const": "outcome_event"
+        },
+        "outcome_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "brand_id": {
+          "$ref": "#/$defs/BrandId"
+        },
+        "experiment_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "metric": {
+          "type": "string",
+          "minLength": 1
+        },
+        "value": {
+          "type": "number"
+        },
+        "unit": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source_ref": {
+          "$ref": "#/$defs/EvidenceReference"
+        },
+        "observed_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "causal_status": {
+          "enum": [
+            "observed",
+            "correlated",
+            "experimentally_supported",
+            "unknown"
+          ]
+        },
+        "content_checksum": {
+          "$ref": "#/$defs/Checksum"
+        },
+        "schema_version": {
+          "const": "2.0"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "effective_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "created_by": {
+          "type": "string",
+          "minLength": 1
+        },
+        "provenance": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/EvidenceReference"
+          }
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "status": {
+          "enum": [
+            "active",
+            "inactive",
+            "superseded"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "BrandId": {
+      "type": "string",
+      "pattern": "^brand_[a-z0-9](?:[a-z0-9_-]{0,62}[a-z0-9])?$"
     }
-  }
+  },
+  "oneOf": [
+    {
+      "$ref": "#/$defs/BrandTenant"
+    },
+    {
+      "$ref": "#/$defs/PortalHostnameBinding"
+    },
+    {
+      "$ref": "#/$defs/ProductEntitlement"
+    },
+    {
+      "$ref": "#/$defs/BrandSource"
+    },
+    {
+      "$ref": "#/$defs/BrandEntity"
+    },
+    {
+      "$ref": "#/$defs/BrandClaim"
+    },
+    {
+      "$ref": "#/$defs/ClaimEvidence"
+    },
+    {
+      "$ref": "#/$defs/BrandPolicy"
+    },
+    {
+      "$ref": "#/$defs/BrandCapability"
+    },
+    {
+      "$ref": "#/$defs/CustomerMission"
+    },
+    {
+      "$ref": "#/$defs/ObservationRun"
+    },
+    {
+      "$ref": "#/$defs/Observation"
+    },
+    {
+      "$ref": "#/$defs/MarketFinding"
+    },
+    {
+      "$ref": "#/$defs/RemediationProposal"
+    },
+    {
+      "$ref": "#/$defs/Experiment"
+    },
+    {
+      "$ref": "#/$defs/OutcomeEvent"
+    }
+  ]
 }

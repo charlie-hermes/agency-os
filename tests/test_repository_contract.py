@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import copy
 import json
 import unittest
 from pathlib import Path
+
+from jsonschema import Draft202012Validator, FormatChecker
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -92,6 +95,64 @@ class RepositoryContractTests(unittest.TestCase):
         }
         self.assertTrue(expected.issubset(definitions))
 
+    def test_fleet_generation2_schema_validates_every_record_type_strictly(self) -> None:
+        schema = json.loads((ROOT / "schemas/fleet-generation2.schema.json").read_text())
+        fixtures = json.loads(
+            (ROOT / "fixtures/fleet-generation2-schema-records.json").read_text()
+        )["records"]
+        Draft202012Validator.check_schema(schema)
+        validator = Draft202012Validator(schema, format_checker=FormatChecker())
+        expected_types = {
+            "brand_tenant", "portal_hostname_binding", "product_entitlement",
+            "brand_source", "brand_entity", "brand_claim", "claim_evidence",
+            "brand_policy", "brand_capability", "customer_mission",
+            "observation_run", "observation", "market_finding",
+            "remediation_proposal", "experiment", "outcome_event",
+        }
+        self.assertEqual({record["artifact_type"] for record in fixtures}, expected_types)
+        for record in fixtures:
+            validator.validate(record)
+            with self.subTest(record=record["artifact_type"], failure="unknown field"):
+                invalid = copy.deepcopy(record)
+                invalid["internal_notes"] = "must never pass a public contract"
+                self.assertTrue(list(validator.iter_errors(invalid)))
+            with self.subTest(record=record["artifact_type"], failure="weak brand id"):
+                invalid = copy.deepcopy(record)
+                invalid["brand_id"] = "brand_"
+                self.assertTrue(list(validator.iter_errors(invalid)))
+        self.assertTrue(list(validator.iter_errors({})))
+        self.assertTrue(list(validator.iter_errors({"artifact_type": "invented"})))
+
+    def test_paperclip_generation2_template_is_versioned_dependency_only_and_acyclic(self) -> None:
+        template = json.loads(
+            (ROOT / "config/paperclip-generation2-template.json").read_text()
+        )
+        self.assertEqual(template["template_version"], "1.0")
+        self.assertEqual(template["authority"], "Paperclip")
+        self.assertEqual(template["scheduling"], "dependency-and-evidence-only")
+        self.assertNotIn("week", json.dumps(template).lower())
+        issues = {issue["key"]: issue for issue in template["issues"]}
+        self.assertEqual(set(issues), {"FL2-00", "FL2-10", "FL2-20", "FL2-30", "FL2-40", "FL2-50", "FL2-60", "FL2-70", "FL2-80", "FL2-90", "FL2-100"})
+        self.assertEqual(issues["FL2-00"]["parent"], None)
+        for key, issue in issues.items():
+            for dependency in issue["depends_on"]:
+                self.assertIn(dependency, issues)
+                self.assertNotEqual(dependency, key)
+        visited: set[str] = set()
+        visiting: set[str] = set()
+        def visit(key: str) -> None:
+            if key in visiting:
+                self.fail("Paperclip template contains a dependency cycle")
+            if key in visited:
+                return
+            visiting.add(key)
+            for dependency in issues[key]["depends_on"]:
+                visit(dependency)
+            visiting.remove(key)
+            visited.add(key)
+        for key in issues:
+            visit(key)
+
     def test_fleet_generation2_manifest_is_bound_to_live_internal_company(self) -> None:
         config = json.loads((ROOT / "config/fleet-generation2.json").read_text())
         self.assertEqual(config["business_name"], "Fleet")
@@ -104,6 +165,11 @@ class RepositoryContractTests(unittest.TestCase):
             {"content_engine"},
         )
         self.assertTrue(config["disabled_by_default"])
+        entitlement = config["product_entitlements"][0]
+        self.assertEqual(entitlement["version"], 1)
+        self.assertEqual(entitlement["effective_at"], "1970-01-01T00:00:00Z")
+        self.assertIsNone(entitlement["expires_at"])
+        self.assertIsNone(entitlement["supersedes_entitlement_id"])
 
     def test_acceptance_matrix_commands_are_release_blocking(self) -> None:
         matrix = json.loads((ROOT / "acceptance/matrix.json").read_text())

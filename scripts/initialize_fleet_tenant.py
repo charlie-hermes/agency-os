@@ -42,7 +42,6 @@ def initialise(config: dict[str, Any], database_path: Path) -> dict[str, Any]:
         role_id="agency-director",
         brand_id=pilot["brand_id"],
     )
-    authority = FleetTenantAuthority(database_path)
     tenant = make_brand_tenant(
         tenant_id=pilot["tenant_id"],
         brand_id=pilot["brand_id"],
@@ -51,11 +50,8 @@ def initialise(config: dict[str, Any], database_path: Path) -> dict[str, Any]:
         created_by=director.actor_id,
         created_at=pilot["created_at"],
     )
-    authority.register_tenant(director, tenant)
-
-    hostnames: list[str] = []
-    for binding in config.get("hostname_bindings", []):
-        record = make_portal_hostname_binding(
+    hostnames = [
+        make_portal_hostname_binding(
             binding_id=binding["binding_id"],
             brand_id=pilot["brand_id"],
             brand_slug=binding["brand_slug"],
@@ -63,28 +59,33 @@ def initialise(config: dict[str, Any], database_path: Path) -> dict[str, Any]:
             created_by=director.actor_id,
             created_at=pilot["created_at"],
         )
-        authority.register_hostname(director, record)
-        hostnames.append(record["hostname"])
-
-    enabled_modules: list[str] = []
-    for entitlement in config.get("product_entitlements", []):
-        record = make_product_entitlement(
+        for binding in config.get("hostname_bindings", [])
+    ]
+    entitlements = [
+        make_product_entitlement(
             entitlement_id=entitlement["entitlement_id"],
             brand_id=pilot["brand_id"],
             module=entitlement["module"],
+            version=entitlement["version"],
             limits=entitlement.get("limits", {}),
             issued_by=director.actor_id,
-            issued_at=pilot["created_at"],
+            issued_at=entitlement["issued_at"],
+            effective_at=entitlement["effective_at"],
+            expires_at=entitlement.get("expires_at"),
+            supersedes_entitlement_id=entitlement.get("supersedes_entitlement_id"),
         )
-        authority.grant_entitlement(director, record)
-        enabled_modules.append(record["module"])
+        for entitlement in config.get("product_entitlements", [])
+    ]
 
+    authority = FleetTenantAuthority(database_path)
+    authority.initialize_bundle(director, tenant, hostnames, entitlements)
+    enabled_modules = {record["module"] for record in entitlements}
     return {
         "schema_version": authority.schema_version(),
         "tenant_id": tenant["tenant_id"],
         "brand_id": tenant["brand_id"],
         "paperclip_company_id": tenant["paperclip_company_id"],
-        "hostnames": sorted(hostnames),
+        "hostnames": sorted(record["hostname"] for record in hostnames),
         "enabled_modules": sorted(enabled_modules),
         "disabled_modules": sorted(PRODUCT_MODULES.difference(enabled_modules)),
     }
@@ -100,6 +101,9 @@ def main() -> None:
     config = load_config(args.config)
     database_path = args.database or Path(config["authority_database"])
     expected_company_id = config["internal_pilot"]["paperclip_company_id"]
+    production_database = Path(config["authority_database"]).resolve()
+    if database_path.resolve() == production_database and args.assert_company_id_file is None:
+        raise SystemExit("production initialization requires --assert-company-id-file")
     if args.assert_company_id_file is not None:
         observed_company_id = args.assert_company_id_file.read_text(encoding="utf-8").strip()
         if observed_company_id != expected_company_id:

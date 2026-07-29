@@ -625,13 +625,11 @@ programme has no calendar estimates, sprint deadlines, weekly milestones or
 time-based completion forecasts. Work enters a gate only when its dependencies
 are satisfied and leaves only when all exit evidence passes.
 
-Current gate state:
-
-| Gate | State | Evidence |
-|---|---|---|
-| G2.0 | complete | Fleet DMA baseline, decisions, live Paperclip programme and full regression pass |
-| G2.1 | complete | protected tenant/hostname/entitlement authority, schemas, live Fleet binding and isolation tests |
-| G2.2–G2.8 | not started | dependency-linked Paperclip backlog; no later product completion is claimed |
+Current gate state is read from Paperclip, not copied into this plan.
+`PAP-152`, `PAP-153` and `PAP-154` are the G2.0/G2.1 gate records; the protected
+appliance verification result is their live runtime evidence. G2.2–G2.8 remain
+dependency-linked backlog until those foundation issues are authoritatively
+closed after the correction release. No later product completion is claimed.
 
 ### Gate G2.0 — preserve and baseline
 

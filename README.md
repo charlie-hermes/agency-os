@@ -33,10 +33,12 @@ This fictional reference deliberately does seven things:
 7. supplies a read-only Paperclip operator portal plus explicit manual handoffs
    for CMS, analytics, Search Console, SEO data, social, creative, and CRM work.
 
-Generation 2 Gates G2.0 and G2.1 are also complete: Fleet DMA has a protected
-tenant, hostname and module-entitlement authority; only the existing Content
-Engine is enabled; and the Brand Twin and Observatory foundation contracts are
-defined without claiming that those later products already contain live data.
+Generation 2 Gates G2.0 and G2.1 are controlled by Paperclip issues
+`PAP-152`, `PAP-153` and `PAP-154`, plus the protected live appliance result;
+this README does not cache their state. Their target is a protected Fleet DMA
+tenant, hostname and versioned module-entitlement authority with only the
+existing Content Engine enabled. The Brand Twin and Observatory contracts do
+not claim that those later products already contain live data.
 
 The repository does not report an external service as connected without a real
 account, scoped credential, destination, and acceptance check. Until those are
@@ -110,7 +112,14 @@ mounted `/proc` filesystem. The verification script checks these prerequisites
 before running any tests. GitHub Actions runs the same gate on Ubuntu; macOS and
 Windows are not supported validation hosts for Gate 4.
 
+The strict JSON Schema fixture tests require the pinned test dependency in
+`requirements-test.txt`. CI installs it automatically. On another Linux host,
+activate a virtual environment first if the package is not already available.
+
 ```bash
+python3 -m venv .venv
+. .venv/bin/activate
+python -m pip install --requirement requirements-test.txt
 ./scripts/verify
 ```
 
