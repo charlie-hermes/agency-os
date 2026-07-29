@@ -90,6 +90,32 @@ class CoreWorkflowTests(unittest.TestCase):
         self.assertTrue(writeback["payload"]["paperclip_comment_id"])
         self.assertEqual(result.tasks_by_role["content-producer"]["status"], "done")
 
+    def test_unassigned_revision_stays_in_paperclip_queue_until_closure(self) -> None:
+        transport, lifecycle, board, buzz, publisher = _dependencies()
+
+        def approve(requested, _manifest):
+            return board.decide_approval(
+                requested["id"],
+                decision="approve",
+                decision_note="Human approved the exact fictional package.",
+            )
+
+        run_core_workflow(
+            paperclip=lifecycle,
+            buzz=buzz,
+            approval_authority=approve,
+            publisher=publisher,
+        )
+        revision_updates = [
+            payload
+            for method, _path, payload in transport.calls
+            if method == "PATCH"
+            and payload is not None
+            and str(payload.get("comment", "")).startswith("QA REVISE binds ")
+        ]
+        self.assertEqual(len(revision_updates), 1)
+        self.assertEqual(revision_updates[0]["status"], "todo")
+
     def test_operator_projection_is_read_only_and_paperclip_derived(self) -> None:
         projection = self.result.operator_projection
         self.assertEqual(projection["authority"], "paperclip")
