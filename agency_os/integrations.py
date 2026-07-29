@@ -722,6 +722,13 @@ class TypedBuzzAdapter:
             ),
             "Buzz channel",
         )
+        if channel.get("accepted") is False:
+            raise IntegrationError("Buzz channel was not accepted")
+        channel_id = channel.get("id", channel.get("channel_id"))
+        if not isinstance(channel_id, str) or not channel_id:
+            raise IntegrationError("Buzz channel identity is missing")
+        channel["id"] = channel_id
+        channel.setdefault("visibility", "private")
         if channel.get("visibility") not in {None, "private"}:
             raise IntegrationError("Buzz channel is not private")
         return channel
@@ -768,7 +775,7 @@ class TypedBuzzAdapter:
     def _post(self, channel_id: str, content: Mapping[str, Any]) -> dict[str, Any]:
         if not channel_id:
             raise ContractError("Buzz channel identity is required")
-        return _require_mapping(
+        message = _require_mapping(
             self.transport.run(
                 [
                     "messages",
@@ -781,3 +788,10 @@ class TypedBuzzAdapter:
             ),
             "Buzz message",
         )
+        if message.get("accepted") is False:
+            raise IntegrationError("Buzz message was not accepted")
+        message_id = message.get("id", message.get("event_id"))
+        if not isinstance(message_id, str) or not message_id:
+            raise IntegrationError("Buzz message identity is missing")
+        message["id"] = message_id
+        return message
