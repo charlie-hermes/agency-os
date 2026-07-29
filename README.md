@@ -33,6 +33,11 @@ This fictional reference deliberately does seven things:
 7. supplies a read-only Paperclip operator portal plus explicit manual handoffs
    for CMS, analytics, Search Console, SEO data, social, creative, and CRM work.
 
+Generation 2 Gates G2.0 and G2.1 are also complete: Fleet DMA has a protected
+tenant, hostname and module-entitlement authority; only the existing Content
+Engine is enabled; and the Brand Twin and Observatory foundation contracts are
+defined without claiming that those later products already contain live data.
+
 The repository does not report an external service as connected without a real
 account, scoped credential, destination, and acceptance check. Until those are
 supplied, provider work remains an honest, operator-completed manual handoff.
@@ -78,8 +83,23 @@ supplied, provider work remains an honest, operator-completed manual handoff.
 - `agency_os/provider_handoffs.py` and `config/providers.json` — safe provider
   status and manual handoff records without embedded secrets.
 - `docs/delivery-rebaseline.md` — product-first Gate 5–7 scope decision.
+- `docs/fleet-unified-platform-enterprise-plan.md` — approved Generation 2 plan
+  for Fleet's unified Content Engine, Brand Operating System, AI Market
+  Observatory, Brand Agent and future `madebyfleet.com` client portal.
+- `docs/fleet-generation2-decisions.md` — accepted G2.0/G2.1 authority,
+  tenancy, hostname, module, schema, storage and compatibility decisions.
+- `docs/fleet-g2-foundation-evidence.md` — live Fleet DMA binding, Paperclip
+  programme and executable completion evidence for G2.0/G2.1.
+- `agency_os/fleet_tenancy.py` — protected durable authority for immutable
+  brand/company, portal-hostname and product-entitlement bindings.
+- `schemas/fleet-generation2.schema.json` — foundational Brand Twin,
+  Observatory, remediation, experiment and outcome contracts.
+- `config/fleet-generation2.json` and `scripts/initialize_fleet_tenant.py` —
+  non-secret Fleet DMA binding and idempotent protected-state initializer.
 - `fixtures/` — fictional tenant input.
 - `acceptance/matrix.json` — release criteria mapped to executable evidence.
+- `acceptance/fleet-generation2-foundation.json` — G2.0/G2.1 release blockers
+  mapped to executable evidence.
 - `tests/` — allowed-path, denied-path, recovery, and vertical-slice tests.
 
 ## Verify

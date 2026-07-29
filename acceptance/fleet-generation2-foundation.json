@@ -1,0 +1,99 @@
+{
+  "schema_version": "2.0",
+  "candidate_gates": ["G2.0", "G2.1"],
+  "delivery_control": "dependency-and-evidence-only",
+  "release_command": "./scripts/verify",
+  "criteria": [
+    {
+      "id": "G2-TENANT-BINDING-001",
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "command": "python3 -m unittest tests.test_fleet_tenancy.FleetTenantAuthorityTests.test_tenant_binding_is_idempotent_immutable_and_one_to_one",
+      "expected_evidence": "one immutable brand, tenant and Paperclip company UUID binding"
+    },
+    {
+      "id": "G2-TENANT-AUTHORITY-001",
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "command": "python3 -m unittest tests.test_fleet_tenancy.FleetTenantAuthorityTests.test_only_same_brand_director_can_change_authority",
+      "expected_evidence": "only the same-brand Agency Director can change tenant authority"
+    },
+    {
+      "id": "G2-MODULE-DEFAULT-001",
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "command": "python3 -m unittest tests.test_fleet_tenancy.FleetTenantAuthorityTests.test_modules_are_independent_and_disabled_by_default",
+      "expected_evidence": "modules enable independently and absent modules remain disabled"
+    },
+    {
+      "id": "G2-MODULE-SUSPEND-001",
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "command": "python3 -m unittest tests.test_fleet_tenancy.FleetTenantAuthorityTests.test_entitlement_suspension_fails_closed_without_affecting_other_modules",
+      "expected_evidence": "one suspended module is denied without disabling an unrelated module"
+    },
+    {
+      "id": "G2-TENANT-SUSPEND-001",
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "command": "python3 -m unittest tests.test_fleet_tenancy.FleetTenantAuthorityTests.test_tenant_suspension_disables_every_module_and_hostname",
+      "expected_evidence": "tenant suspension disables all modules and hostname routing"
+    },
+    {
+      "id": "G2-HOST-ISOLATION-001",
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "command": "python3 -m unittest tests.test_fleet_tenancy.FleetTenantAuthorityTests.test_hostname_is_exact_and_cross_tenant_lookup_looks_absent",
+      "expected_evidence": "exact same-brand hostname succeeds while foreign and unknown hosts look absent"
+    },
+    {
+      "id": "G2-PORTAL-PROJECTION-001",
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "command": "python3 -m unittest tests.test_fleet_tenancy.FleetTenantAuthorityTests.test_portal_projection_is_server_built_and_safe",
+      "expected_evidence": "server-built projection contains only the bound brand, company, hostname and module states"
+    },
+    {
+      "id": "G2-DURABILITY-001",
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "command": "python3 -m unittest tests.test_fleet_tenancy.FleetTenantAuthorityTests.test_restart_preserves_bindings_entitlements_and_audit",
+      "expected_evidence": "binding, entitlement and audit survive authority restart"
+    },
+    {
+      "id": "G2-MIGRATION-001",
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "command": "python3 -m unittest tests.test_fleet_tenancy.FleetTenantAuthorityTests.test_future_schema_version_is_rejected",
+      "expected_evidence": "older runtime rejects a future database schema"
+    },
+    {
+      "id": "G2-STORAGE-001",
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "command": "python3 -m unittest tests.test_fleet_tenancy.FleetTenantAuthorityTests.test_database_is_owner_only_and_has_migration_metadata",
+      "expected_evidence": "database mode is 0600 and schema metadata is present"
+    },
+    {
+      "id": "G2-SCHEMA-COMPATIBILITY-001",
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "command": "python3 -m unittest tests.test_repository_contract.RepositoryContractTests.test_required_schema_definitions_exist",
+      "expected_evidence": "existing schemas and all G2 foundational definitions coexist"
+    },
+    {
+      "id": "G2-FLEET-BINDING-001",
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "command": "python3 -m unittest tests.test_repository_contract.RepositoryContractTests.test_fleet_generation2_manifest_is_bound_to_live_internal_company",
+      "expected_evidence": "Fleet DMA binding is exact and only Content Engine starts entitled"
+    },
+    {
+      "id": "G2-CONTENT-REGRESSION-001",
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "command": "python3 -m unittest tests.test_core_workflow.CoreWorkflowTests.test_complete_core_flow_has_real_revision_and_authoritative_closure",
+      "expected_evidence": "the existing complete Core content workflow remains unchanged and closes authoritatively"
+    }
+  ]
+}

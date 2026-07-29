@@ -73,8 +73,37 @@ class RepositoryContractTests(unittest.TestCase):
             "OptimisationProposal",
             "RuntimeBundle",
             "OperatorProjection",
+            "BrandTenant",
+            "PortalHostnameBinding",
+            "ProductEntitlement",
+            "BrandSource",
+            "BrandEntity",
+            "BrandClaim",
+            "ClaimEvidence",
+            "BrandPolicy",
+            "BrandCapability",
+            "CustomerMission",
+            "ObservationRun",
+            "Observation",
+            "MarketFinding",
+            "RemediationProposal",
+            "Experiment",
+            "OutcomeEvent",
         }
         self.assertTrue(expected.issubset(definitions))
+
+    def test_fleet_generation2_manifest_is_bound_to_live_internal_company(self) -> None:
+        config = json.loads((ROOT / "config/fleet-generation2.json").read_text())
+        self.assertEqual(config["business_name"], "Fleet")
+        self.assertEqual(config["base_domain"], "madebyfleet.com")
+        self.assertEqual(config["internal_pilot"]["brand_id"], "brand_fleet")
+        self.assertEqual(config["internal_pilot"]["paperclip_company_id"], "d7e2e389-c7ad-486e-87ca-482e4ec6216d")
+        self.assertEqual(config["internal_pilot"]["paperclip_company_name"], "Fleet DMA")
+        self.assertEqual(
+            {item["module"] for item in config["product_entitlements"]},
+            {"content_engine"},
+        )
+        self.assertTrue(config["disabled_by_default"])
 
     def test_acceptance_matrix_commands_are_release_blocking(self) -> None:
         matrix = json.loads((ROOT / "acceptance/matrix.json").read_text())

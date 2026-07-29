@@ -1,0 +1,43 @@
+{
+  "schema_version": "2.0",
+  "business_name": "Fleet",
+  "base_domain": "madebyfleet.com",
+  "internal_pilot": {
+    "tenant_id": "tenant_fleet",
+    "brand_id": "brand_fleet",
+    "paperclip_company_id": "d7e2e389-c7ad-486e-87ca-482e4ec6216d",
+    "paperclip_company_name": "Fleet DMA",
+    "agency_director_actor_id": "17ebea2f-4b8e-4188-bbf0-40ffd4e1e2b8",
+    "created_at": "2026-07-29T12:00:00Z"
+  },
+  "hostname_bindings": [
+    {
+      "binding_id": "hostname_fleet_portal",
+      "brand_slug": "fleet",
+      "hostname": "fleet.madebyfleet.com"
+    }
+  ],
+  "product_entitlements": [
+    {
+      "entitlement_id": "entitlement_fleet_content_engine",
+      "module": "content_engine",
+      "limits": {}
+    }
+  ],
+  "available_modules": [
+    "content_engine",
+    "brand_twin",
+    "ai_market_observatory",
+    "brand_agent",
+    "controlled_actions",
+    "client_portal",
+    "measurement",
+    "agentic_commerce"
+  ],
+  "disabled_by_default": true,
+  "authority_database": "/var/lib/agency-os/fleet-tenancy.sqlite3",
+  "paperclip_programme": {
+    "goal_title": "Fleet Generation 2 — unified brand operating platform",
+    "root_issue_title": "FL2-00 — Generation 2 programme control"
+  }
+}

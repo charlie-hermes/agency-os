@@ -439,10 +439,33 @@ governed DecisionPacket workshop.
 
 - Status: live production. Core and Social workflows, two-brand isolation,
   12 checksum-bound Hermes role bundles, authenticated Paperclip and Buzz,
-  provider handoffs, and the read-only operator portal are active and verified.
-- Evidence: 144 repository tests passed; all 12 roles passed fresh-session and
+  provider handoffs, the read-only operator portal, and Fleet Generation 2
+  foundation Gates G2.0/G2.1 are active and verified.
+- Generation 2 foundation: Fleet DMA is bound to `brand_fleet`; Content Engine
+  is enabled; later modules are disabled; protected tenancy, hostname,
+  entitlement and foundational data contracts pass isolation and restart tests.
+- Evidence: 161 repository tests passed; all 12 roles passed fresh-session and
   role-boundary checks; the live Core, Social and isolation workflows passed;
   the secret audit passed; and the VM reported zero failed systemd units.
 - Real provider accounts remain manual handoffs until the owner supplies each
   account, scoped credential and destination.
 - VM backup and disaster recovery remain outside this plan.
+
+## Generation 2 approved direction
+
+On 2026-07-29 the owner approved an additive evolution of Agency OS for Fleet.
+Automated Content Production remains a first-class product module. A Living
+Brand Twin, AI Market Observatory, governed Brand Agent, controlled action
+layer, causal measurement and future client portal will be added as modules in
+the same platform.
+
+Fleet is the client-facing business, `Fleet DMA` is its current internal
+Paperclip company and `madebyfleet.com` is reserved for the future portal.
+Future client brands receive isolated `brand_id` values and Paperclip companies;
+Paperclip companies are not split by Fleet product.
+
+The implementation sequence, authority boundaries, delivery gates, portal
+architecture and enterprise definition of done are specified in
+`docs/fleet-unified-platform-enterprise-plan.md`. Accepted foundation decisions
+are in `docs/fleet-generation2-decisions.md`; completion evidence is in
+`docs/fleet-g2-foundation-evidence.md`.
