@@ -22,7 +22,8 @@ from agency_os.fleet_brand_runtime import (
     initialise_fleet_brand_intelligence, load_fleet_brand_config,
 )
 from agency_os.fleet_closed_loop import (
-    build_remediation_proposal, remediation_approval_package, run_fleet_closed_loop,
+    build_remediation_proposal, remediation_approval_package,
+    remediation_binding_from_paperclip, run_fleet_closed_loop,
 )
 from agency_os.fleet_observatory import run_fleet_observatory
 from agency_os.gateway import MockPublisher
@@ -107,16 +108,11 @@ def main() -> None:
     brand_config = load_fleet_brand_config(brand_config_path)
     tenant_config = json.loads(tenant_config_path.read_text(encoding="utf-8"))
     result_path = Path("/var/lib/paperclip-appliance/fleet-g2-brand-intelligence.json")
+    previous = None
     if result_path.is_file():
-        previous = json.loads(result_path.read_text(encoding="utf-8"))
-        if previous.get("status") == "pass" and previous.get("agency_os_commit") == commit:
-            verify_foundation(
-                tenant_config_path, Path(tenant_config["authority_database"]),
-                Path("/etc/paperclip/company-id"),
-            )
-            verify_live_intelligence(Path(brand_config["database"]))
-            print("FLEET G2.2-G2.4: PASS")
-            return
+        candidate = json.loads(result_path.read_text(encoding="utf-8"))
+        if candidate.get("status") == "pass":
+            previous = candidate
     issues = brand_config["paperclip_issues"]
     base_url = f"http://{lock['PAPERCLIP_GATEWAY']}:{lock['PAPERCLIP_PORT']}"
     binding = PaperclipBrandBinding(company_id, "brand_fleet")
@@ -186,6 +182,63 @@ def main() -> None:
     paperclip = PaperclipLifecycleAdapter(
         PaperclipHTTPTransport(base_url=base_url, bearer_token=token), binding,
     )
+    if previous is not None:
+        closed = previous.get("closed_loop")
+        if not isinstance(closed, dict) or not (
+            closed.get("status") == "pass"
+            and closed.get("brand_id") == "brand_fleet"
+            and closed.get("paperclip_task_count") == 8
+            and closed.get("paperclip_tasks_done") is True
+            and closed.get("publisher_calls") == 1
+            and closed.get("external_writes") is False
+        ):
+            raise SystemExit("previous Fleet closed-loop proof is not safe to re-attest")
+        for field in (
+            "remediation_approval_id", "publication_approval_id",
+            "manifest_checksum", "receipt_checksum",
+        ):
+            if not isinstance(closed.get(field), str) or not closed[field]:
+                raise SystemExit(f"previous Fleet proof is missing {field}")
+        remediation_binding = remediation_binding_from_paperclip(
+            remediation_approval, remediation_package, approved_by="human_owner",
+        )
+        if remediation_binding.paperclip_approval_id != closed["remediation_approval_id"]:
+            raise SystemExit("Fleet remediation approval changed")
+        publication = paperclip.get_approval(closed["publication_approval_id"])
+        publication_tasks = paperclip.get_approval_issues(closed["publication_approval_id"])
+        if (
+            publication.get("status") != "approved"
+            or len(publication_tasks) != 8
+            or not all(item.get("status") == "done" for item in publication_tasks)
+        ):
+            raise SystemExit("Fleet publication proof is no longer complete")
+        verify_foundation(
+            tenant_config_path, Path(tenant_config["authority_database"]),
+            Path("/etc/paperclip/company-id"),
+        )
+        verify_live_intelligence(Path(brand_config["database"]))
+        proof_origin = (
+            previous.get("proof_origin_agency_os_commit")
+            or previous.get("agency_os_commit")
+        )
+        if not isinstance(proof_origin, str) or len(proof_origin) != 40:
+            raise SystemExit("Fleet proof origin commit is invalid")
+        evidence = {
+            "schema_version": "2.0", "status": "pass",
+            "verified_at": datetime.now(timezone.utc).isoformat(),
+            "agency_os_commit": commit,
+            "proof_origin_agency_os_commit": proof_origin,
+            "reattested_existing_proof": True,
+            "company_id": company_id, "brand_id": "brand_fleet",
+            "enabled_modules": tenancy["enabled_modules"],
+            "brand_twin": intelligence, "observatory": observatory,
+            "closed_loop": closed,
+            "paperclip_authenticated": True, "buzz_authenticated": True,
+            "provider_external_writes": False,
+        }
+        atomic_json(result_path, evidence)
+        print("FLEET G2.2-G2.4: PASS (RE-ATTESTED)")
+        return
     buzz = TypedBuzzAdapter(
         BuzzCliTransport(
             relay_url=relay, private_key_provider=lambda: private_key,
