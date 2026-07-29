@@ -62,7 +62,23 @@ _RESERVED_SLUGS = frozenset({"admin", "api", "app", "auth", "paperclip", "www"})
 _READ_ROLES = frozenset(
     {"agency-director", "platform-assurance-reviewer", "brand-agent-service"}
 )
-_SCHEMA_VERSION = 2
+_SCHEMA_VERSION = 3
+_TENANT_LIFECYCLE = frozenset(
+    {
+        "provisioning", "launch_ready", "assurance", "active",
+        "failed_pre_activation", "suspended", "offboarding", "offboarded",
+    }
+)
+_LIFECYCLE_TRANSITIONS = {
+    "provisioning": frozenset({"launch_ready", "failed_pre_activation"}),
+    "launch_ready": frozenset({"assurance", "failed_pre_activation"}),
+    "assurance": frozenset({"active", "failed_pre_activation"}),
+    "active": frozenset({"suspended", "offboarding"}),
+    "suspended": frozenset({"active", "offboarding"}),
+    "offboarding": frozenset({"offboarded"}),
+    "failed_pre_activation": frozenset({"provisioning"}),
+    "offboarded": frozenset(),
+}
 
 _BRAND_TENANT_FIELDS = frozenset(
     {
@@ -443,7 +459,7 @@ class FleetTenantAuthority:
         return True
 
     def portal_read_model(self, principal: Principal, hostname: str) -> dict[str, Any]:
-        """Return the safe server-built routing projection for the future portal."""
+        """Return a client-safe, server-built portal routing projection."""
 
         if not self.module_enabled(principal, "client_portal"):
             self._audit(principal, "portal_read_model", str(hostname), "DENY_ENTITLEMENT")
@@ -456,10 +472,226 @@ class FleetTenantAuthority:
             "brand_id": principal.brand_id,
             "tenant_id": tenant["tenant_id"],
             "company_name": tenant["company_name"],
-            "paperclip_company_id": tenant["paperclip_company_id"],
             "hostname": binding["hostname"],
             "brand_slug": binding["brand_slug"],
             "modules": modules,
+        }
+
+    def admit_account_brand(
+        self,
+        principal: Principal,
+        *,
+        customer_account_id: str,
+        account_name: str,
+        client_brand_id: str,
+        client_brand_name: str,
+        tenant_id: str,
+        workos_organization_id: str,
+        lifecycle_state: str = "provisioning",
+    ) -> dict[str, Any]:
+        """Bind account, identity and client-brand concepts to a tenant."""
+
+        self._authorize_mutation(
+            principal, "admit_account_brand", client_brand_id,
+            principal.brand_id, principal.actor_id,
+        )
+        values = (
+            customer_account_id, account_name, client_brand_id,
+            client_brand_name, tenant_id, workos_organization_id,
+        )
+        if any(not isinstance(value, str) or not value.strip() for value in values):
+            self._audit(principal, "admit_account_brand", client_brand_id, "DENY_CONTRACT")
+            raise ContractError("account and brand identifiers must be non-empty strings")
+        if not customer_account_id.startswith("account_"):
+            raise ContractError("customer_account_id must use the account_ prefix")
+        if not client_brand_id.startswith("client_brand_"):
+            raise ContractError("client_brand_id must use the client_brand_ prefix")
+        if lifecycle_state not in _TENANT_LIFECYCLE:
+            raise ContractError("unknown tenant lifecycle state")
+
+        connection = self._connect()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            tenant = connection.execute(
+                "SELECT brand_id FROM brand_tenants WHERE tenant_id = ?", (tenant_id,),
+            ).fetchone()
+            if tenant is None or tenant[0] != principal.brand_id:
+                raise FleetTenancyAuthorizationError(
+                    "account admission requires the principal's immutable tenant binding"
+                )
+            now = utc_now()
+            existing = connection.execute(
+                """
+                SELECT a.account_name, a.workos_organization_id,
+                       b.client_brand_name, b.customer_account_id,
+                       b.tenant_id, b.brand_id, b.lifecycle_state
+                FROM customer_accounts a
+                JOIN client_brands b ON b.customer_account_id = a.customer_account_id
+                WHERE a.customer_account_id = ? AND b.client_brand_id = ?
+                """,
+                (customer_account_id, client_brand_id),
+            ).fetchone()
+            expected = (
+                account_name, workos_organization_id, client_brand_name,
+                customer_account_id, tenant_id, principal.brand_id, lifecycle_state,
+            )
+            if existing is not None:
+                if tuple(existing) != expected:
+                    raise ContractError("account or client brand binding is immutable")
+                outcome = "ALLOW_IDEMPOTENT"
+            else:
+                connection.execute(
+                    """
+                    INSERT INTO customer_accounts (
+                        customer_account_id, account_name, workos_organization_id,
+                        state, created_at, updated_at
+                    ) VALUES (?, ?, ?, 'active', ?, ?)
+                    """,
+                    (customer_account_id, account_name, workos_organization_id, now, now),
+                )
+                connection.execute(
+                    """
+                    INSERT INTO client_brands (
+                        client_brand_id, customer_account_id, client_brand_name,
+                        tenant_id, brand_id, lifecycle_state, lifecycle_version,
+                        created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)
+                    """,
+                    (
+                        client_brand_id, customer_account_id, client_brand_name,
+                        tenant_id, principal.brand_id, lifecycle_state, now, now,
+                    ),
+                )
+                outcome = "ALLOW"
+            self._insert_audit(
+                connection, principal, "admit_account_brand", client_brand_id, outcome,
+            )
+            connection.commit()
+        except (ContractError, FleetTenancyAuthorizationError):
+            _rollback(connection)
+            self._audit(principal, "admit_account_brand", client_brand_id, "DENY_WRITE")
+            raise
+        except sqlite3.IntegrityError as exc:
+            _rollback(connection)
+            self._audit(
+                principal, "admit_account_brand", client_brand_id,
+                "DENY_IMMUTABLE_CONFLICT",
+            )
+            raise ContractError(
+                "account, identity organisation, brand or tenant is already bound"
+            ) from exc
+        except sqlite3.Error as exc:
+            _rollback(connection)
+            raise FleetTenancyError("could not admit customer account and client brand") from exc
+        finally:
+            connection.close()
+        return self.account_brand_projection(principal)
+
+    def transition_tenant_lifecycle(
+        self,
+        principal: Principal,
+        *,
+        client_brand_id: str,
+        expected_version: int,
+        next_state: str,
+    ) -> dict[str, Any]:
+        """Apply an explicit, optimistic lifecycle transition."""
+
+        self._authorize_mutation(
+            principal, "transition_tenant_lifecycle", client_brand_id,
+            principal.brand_id, principal.actor_id,
+        )
+        if next_state not in _TENANT_LIFECYCLE:
+            raise ContractError("unknown tenant lifecycle state")
+        if not isinstance(expected_version, int) or expected_version < 1:
+            raise ContractError("expected lifecycle version must be a positive integer")
+        connection = self._connect()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                """
+                SELECT lifecycle_state, lifecycle_version FROM client_brands
+                WHERE client_brand_id = ? AND brand_id = ?
+                """,
+                (client_brand_id, principal.brand_id),
+            ).fetchone()
+            if row is None:
+                raise KeyError(client_brand_id)
+            current_state, current_version = str(row[0]), int(row[1])
+            if current_version != expected_version:
+                raise ContractError("tenant lifecycle version conflict")
+            if next_state not in _LIFECYCLE_TRANSITIONS[current_state]:
+                raise ContractError(
+                    f"tenant lifecycle cannot move from {current_state} to {next_state}"
+                )
+            connection.execute(
+                """
+                UPDATE client_brands
+                SET lifecycle_state = ?, lifecycle_version = ?, updated_at = ?
+                WHERE client_brand_id = ? AND brand_id = ?
+                """,
+                (
+                    next_state, current_version + 1, utc_now(),
+                    client_brand_id, principal.brand_id,
+                ),
+            )
+            self._insert_audit(
+                connection, principal, "transition_tenant_lifecycle", client_brand_id,
+                f"ALLOW_{current_state.upper()}_TO_{next_state.upper()}",
+            )
+            connection.commit()
+        except KeyError:
+            _rollback(connection)
+            self._audit(
+                principal, "transition_tenant_lifecycle", client_brand_id,
+                "DENY_NOT_FOUND",
+            )
+            raise
+        except ContractError:
+            _rollback(connection)
+            self._audit(
+                principal, "transition_tenant_lifecycle", client_brand_id,
+                "DENY_TRANSITION",
+            )
+            raise
+        except sqlite3.Error as exc:
+            _rollback(connection)
+            raise FleetTenancyError("could not transition tenant lifecycle") from exc
+        finally:
+            connection.close()
+        return self.account_brand_projection(principal)
+
+    def account_brand_projection(self, principal: Principal) -> dict[str, Any]:
+        """Return the safe account/brand/tenant projection for one principal."""
+
+        _require_reader(principal)
+        row = self._fetch_one(
+            """
+            SELECT a.customer_account_id, a.account_name,
+                   b.client_brand_id, b.client_brand_name, b.tenant_id,
+                   b.lifecycle_state, b.lifecycle_version
+            FROM customer_accounts a
+            JOIN client_brands b ON b.customer_account_id = a.customer_account_id
+            WHERE b.brand_id = ?
+            """,
+            (principal.brand_id,),
+        )
+        if row is None:
+            self._audit(
+                principal, "account_brand_projection", principal.brand_id,
+                "NOT_FOUND_OR_WRONG_TENANT",
+            )
+            raise KeyError(principal.brand_id)
+        self._audit(principal, "account_brand_projection", str(row[2]), "ALLOW")
+        return {
+            "customer_account_id": row[0],
+            "account_name": row[1],
+            "client_brand_id": row[2],
+            "client_brand_name": row[3],
+            "tenant_id": row[4],
+            "brand_id": principal.brand_id,
+            "lifecycle_state": row[5],
+            "lifecycle_version": row[6],
         }
 
     def audit_events(self, principal: Principal) -> list[dict[str, Any]]:
@@ -742,18 +974,19 @@ class FleetTenantAuthority:
             current_version = None if row is None else int(row[0])
             if current_version is not None and current_version > _SCHEMA_VERSION:
                 raise FleetTenancyError("tenant authority schema is newer than this runtime")
-            if current_version not in (None, 1, _SCHEMA_VERSION):
+            if current_version not in (None, 1, 2, _SCHEMA_VERSION):
                 raise FleetTenancyError("tenant authority schema has no supported migration path")
 
             self._create_schema_v2(connection)
             if current_version == 1:
                 self._migrate_v1_to_v2(connection)
+            self._create_schema_v3(connection)
             connection.execute(
                 "INSERT INTO schema_metadata (id, version) VALUES (1, ?) "
                 "ON CONFLICT(id) DO UPDATE SET version = excluded.version",
                 (_SCHEMA_VERSION,),
             )
-            self._validate_schema_v2(connection)
+            self._validate_schema_v3(connection)
             connection.commit()
         except (ContractError, FleetTenancyError):
             _rollback(connection)
@@ -879,7 +1112,91 @@ class FleetTenantAuthority:
         connection.execute("DROP TABLE product_entitlements_v1")
 
     @staticmethod
-    def _validate_schema_v2(connection: sqlite3.Connection) -> None:
+    def _create_schema_v3(connection: sqlite3.Connection) -> None:
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS customer_accounts (
+                customer_account_id TEXT PRIMARY KEY,
+                account_name TEXT NOT NULL,
+                workos_organization_id TEXT NOT NULL UNIQUE,
+                state TEXT NOT NULL CHECK (state IN ('active', 'suspended')),
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS client_brands (
+                client_brand_id TEXT PRIMARY KEY,
+                customer_account_id TEXT NOT NULL,
+                client_brand_name TEXT NOT NULL,
+                tenant_id TEXT NOT NULL UNIQUE,
+                brand_id TEXT NOT NULL UNIQUE,
+                lifecycle_state TEXT NOT NULL CHECK (
+                    lifecycle_state IN (
+                        'provisioning', 'launch_ready', 'assurance', 'active',
+                        'failed_pre_activation', 'suspended', 'offboarding',
+                        'offboarded'
+                    )
+                ),
+                lifecycle_version INTEGER NOT NULL CHECK (lifecycle_version >= 1),
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (customer_account_id)
+                    REFERENCES customer_accounts(customer_account_id),
+                FOREIGN KEY (brand_id) REFERENCES brand_tenants(brand_id),
+                FOREIGN KEY (tenant_id) REFERENCES brand_tenants(tenant_id)
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS hostname_tombstones (
+                hostname TEXT PRIMARY KEY,
+                former_brand_id TEXT NOT NULL,
+                retired_at TEXT NOT NULL,
+                reason TEXT NOT NULL
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS provisioning_runs (
+                provisioning_run_id TEXT PRIMARY KEY,
+                brand_id TEXT NOT NULL,
+                client_brand_id TEXT NOT NULL,
+                state TEXT NOT NULL CHECK (
+                    state IN ('running', 'blocked', 'completed', 'failed')
+                ),
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (brand_id) REFERENCES brand_tenants(brand_id),
+                FOREIGN KEY (client_brand_id)
+                    REFERENCES client_brands(client_brand_id)
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS provisioning_steps (
+                provisioning_run_id TEXT NOT NULL,
+                step_key TEXT NOT NULL,
+                state TEXT NOT NULL CHECK (
+                    state IN ('pending', 'running', 'completed', 'failed',
+                              'compensated')
+                ),
+                evidence_checksum TEXT,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (provisioning_run_id, step_key),
+                FOREIGN KEY (provisioning_run_id)
+                    REFERENCES provisioning_runs(provisioning_run_id)
+            )
+            """
+        )
+
+    @staticmethod
+    def _validate_schema_v3(connection: sqlite3.Connection) -> None:
         expected_columns = {
             "brand_tenants": {
                 "brand_id", "tenant_id", "paperclip_company_id", "record_json",
@@ -896,6 +1213,26 @@ class FleetTenantAuthority:
             "authority_audit": {
                 "sequence", "actor_id", "role_id", "brand_id", "operation",
                 "target_id", "outcome", "recorded_at",
+            },
+            "customer_accounts": {
+                "customer_account_id", "account_name", "workos_organization_id",
+                "state", "created_at", "updated_at",
+            },
+            "client_brands": {
+                "client_brand_id", "customer_account_id", "client_brand_name",
+                "tenant_id", "brand_id", "lifecycle_state",
+                "lifecycle_version", "created_at", "updated_at",
+            },
+            "hostname_tombstones": {
+                "hostname", "former_brand_id", "retired_at", "reason",
+            },
+            "provisioning_runs": {
+                "provisioning_run_id", "brand_id", "client_brand_id", "state",
+                "created_at", "updated_at",
+            },
+            "provisioning_steps": {
+                "provisioning_run_id", "step_key", "state",
+                "evidence_checksum", "updated_at",
             },
         }
         for table, expected in expected_columns.items():

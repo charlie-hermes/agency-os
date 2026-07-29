@@ -702,6 +702,11 @@ receipt; failed model or adapter evaluations block release.
 
 ### Gate G2.6 — private-beta Fleet portal
 
+The detailed, approved implementation contract for this gate is
+`fleet-client-portal-g2.6-enterprise-plan.md`; its threat model is
+`fleet-client-portal-g2.6-threat-model.md`. Those documents govern where this
+earlier high-level gate description is less specific.
+
 Define the Fleet design system and navigation; implement hostname resolution,
 Cloudflare boundary, app authentication, roles, Home, Approvals, Brand Twin,
 Content and AI Presence; route mutations to authorities; add rate limits,

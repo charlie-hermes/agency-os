@@ -66,7 +66,7 @@ class BrandAgentReleaseTests(unittest.TestCase):
             self.assertTrue(criterion["expected_evidence"])
             self.assertNotRegex(criterion["expected_evidence"], r"(?i)weekly|week [0-9]")
 
-    def test_entitlements_enable_only_the_bounded_g2_5_modules(self) -> None:
+    def test_entitlements_preserve_g2_5_and_add_only_the_approved_portal(self) -> None:
         config = json.loads(
             (ROOT / "config/fleet-generation2.json").read_text(encoding="utf-8")
         )
@@ -75,7 +75,7 @@ class BrandAgentReleaseTests(unittest.TestCase):
             set(enabled),
             {
                 "content_engine", "brand_twin", "ai_market_observatory",
-                "brand_agent", "controlled_actions",
+                "brand_agent", "controlled_actions", "client_portal",
             },
         )
         self.assertEqual(
@@ -86,7 +86,8 @@ class BrandAgentReleaseTests(unittest.TestCase):
                 "confirmation_required": True,
             },
         )
-        self.assertNotIn("client_portal", enabled)
+        self.assertEqual(enabled["client_portal"]["limits"]["production_tenants"], 1)
+        self.assertEqual(enabled["client_portal"]["limits"]["production_brand"], "brand_fleet")
         self.assertNotIn("measurement", enabled)
         self.assertNotIn("agentic_commerce", enabled)
 

@@ -464,6 +464,12 @@ Paperclip company and `madebyfleet.com` is reserved for the future portal.
 Future client brands receive isolated `brand_id` values and Paperclip companies;
 Paperclip companies are not split by Fleet product.
 
+The approved private-beta portal implementation contract is
+`fleet-client-portal-g2.6-enterprise-plan.md`, with its security invariants in
+`fleet-client-portal-g2.6-threat-model.md`. G2.6 admits Fleet DMA as the sole
+production portal tenant, keeps Paperclip private and authoritative, and
+defers the first external client to G2.7.
+
 The implementation sequence, authority boundaries, delivery gates, portal
 architecture and enterprise definition of done are specified in
 `docs/fleet-unified-platform-enterprise-plan.md`. Accepted foundation decisions

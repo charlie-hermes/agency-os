@@ -132,7 +132,8 @@ class RepositoryContractTests(unittest.TestCase):
         self.assertEqual(template["scheduling"], "dependency-and-evidence-only")
         self.assertNotIn("week", json.dumps(template).lower())
         issues = {issue["key"]: issue for issue in template["issues"]}
-        self.assertEqual(set(issues), {"FL2-00", "FL2-10", "FL2-20", "FL2-30", "FL2-40", "FL2-50", "FL2-60", "FL2-70", "FL2-80", "FL2-90", "FL2-100"})
+        self.assertEqual(set(issues), {"FL2-00", "FL2-10", "FL2-20", "FL2-30", "FL2-40", "FL2-50", "FL2-60", "FL2-70", "FL2-80", "FL2-80A", "FL2-80B", "FL2-80C", "FL2-80D", "FL2-90", "FL2-100"})
+        self.assertEqual(issues["FL2-90"]["depends_on"], ["FL2-80D"])
         self.assertEqual(issues["FL2-00"]["parent"], None)
         for key, issue in issues.items():
             for dependency in issue["depends_on"]:
@@ -168,8 +169,12 @@ class RepositoryContractTests(unittest.TestCase):
                 "ai_market_observatory",
                 "brand_agent",
                 "controlled_actions",
+                "client_portal",
             },
         )
+        self.assertEqual(config["customer_account"]["client_brand_id"], "client_brand_fleet")
+        self.assertEqual(config["portal"]["client_hostname"], "fleet.madebyfleet.com")
+        self.assertEqual(config["commercial"]["internal_order_value"], 0)
         self.assertTrue(config["disabled_by_default"])
         entitlement = config["product_entitlements"][0]
         self.assertEqual(entitlement["version"], 1)
@@ -197,7 +202,35 @@ class RepositoryContractTests(unittest.TestCase):
         self.assertIn("/proc/$$/exe", verifier)
         self.assertIn('hasattr(socket, "SO_PEERCRED")', verifier)
         self.assertIn("runs-on: ubuntu-latest", workflow)
+        self.assertIn('node-version: "22.23.1"', workflow)
+        self.assertIn("npm ci --prefix fleet-portal", workflow)
         self.assertIn("run: ./scripts/verify", workflow)
+        self.assertIn("npm --prefix fleet-portal run build", verifier)
+        self.assertNotIn("npm --prefix fleet-portal run test:browser", verifier)
+        self.assertIn("npm --prefix fleet-portal run test:browser", workflow)
+
+    def test_g26_portal_release_contract_is_complete(self) -> None:
+        required = {
+            "docs/fleet-client-portal-g2.6-enterprise-plan.md",
+            "docs/fleet-client-portal-g2.6-threat-model.md",
+            "acceptance/fleet-client-portal-g2.6.json",
+            "agency_os/fleet_portal.py",
+            "agency_os/fleet_portal_authority_host.py",
+            "agency_os/fleet_portal_command_worker.py",
+            "agency_os/fleet_ingest_worker.py",
+            "fleet-portal/app/(portal)/page.tsx",
+            "fleet-portal/app/(portal)/launch/page.tsx",
+            "fleet-portal/app/(portal)/decisions/page.tsx",
+            "fleet-portal/app/(portal)/brand/page.tsx",
+            "fleet-portal/app/(portal)/content/page.tsx",
+            "fleet-portal/app/(portal)/ai-presence/page.tsx",
+            "fleet-portal/app/(portal)/settings/page.tsx",
+            "fleet-portal/app/admin/[[...section]]/page.tsx",
+        }
+        self.assertEqual({path for path in required if not (ROOT / path).is_file()}, set())
+        plan = (ROOT / "docs/fleet-client-portal-g2.6-enterprise-plan.md").read_text()
+        self.assertIn("G2.6 production admits Fleet DMA only", plan)
+        self.assertIn("first external client's real Paperclip company remains", plan)
 
 
 if __name__ == "__main__":

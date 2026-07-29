@@ -10,6 +10,15 @@
     "agency_director_actor_id": "17ebea2f-4b8e-4188-bbf0-40ffd4e1e2b8",
     "created_at": "2026-07-29T12:00:00Z"
   },
+  "customer_account": {
+    "customer_account_id": "account_fleet",
+    "account_name": "Fleet",
+    "client_brand_id": "client_brand_fleet",
+    "client_brand_name": "Fleet",
+    "workos_organization_id_env": "FLEET_WORKOS_ORGANIZATION_ID",
+    "test_workos_organization_id": "org_fleet_g26_acceptance",
+    "lifecycle_state": "active"
+  },
   "hostname_bindings": [
     {
       "binding_id": "hostname_fleet_portal",
@@ -78,6 +87,21 @@
         "external_write": false,
         "confirmation_required": true
       }
+    },
+    {
+      "entitlement_id": "entitlement_fleet_client_portal",
+      "module": "client_portal",
+      "version": 1,
+      "issued_at": "2026-07-29T16:00:00Z",
+      "effective_at": "2026-07-29T16:00:00Z",
+      "expires_at": null,
+      "supersedes_entitlement_id": null,
+      "limits": {
+        "production_tenants": 1,
+        "production_brand": "brand_fleet",
+        "identity_provider": "workos_authkit",
+        "private_edge": "cloudflare_access"
+      }
     }
   ],
   "available_modules": [
@@ -92,6 +116,30 @@
   ],
   "disabled_by_default": true,
   "authority_database": "/var/lib/agency-os/fleet-tenancy.sqlite3",
+  "portal": {
+    "portal_database": "/var/lib/agency-os/fleet-portal.sqlite3",
+    "client_hostname": "fleet.madebyfleet.com",
+    "admin_hostname": "admin.madebyfleet.com",
+    "auth_hostname": "auth.madebyfleet.com",
+    "web_listen": "127.0.0.1:3190",
+    "authority_socket": "/run/agency-os/fleet-authority.sock",
+    "mutation_kill_switch_env": "FLEET_PORTAL_MUTATIONS_DISABLED",
+    "production_identity_mode": "workos",
+    "access_provider": "cloudflare_access"
+  },
+  "commercial": {
+    "catalogue_version": "1.0",
+    "packages": [
+      "fleet_content_engine",
+      "fleet_ai_brand_readiness",
+      "fleet_content_intelligence",
+      "fleet_brand_os"
+    ],
+    "internal_order_id": "order_fleet_internal_g26",
+    "internal_order_value": 0,
+    "currency": "USD",
+    "billing_provider": null
+  },
   "paperclip_programme": {
     "goal_title": "Fleet Generation 2 — unified brand operating platform",
     "root_issue_title": "FL2-00 — Generation 2 programme control"

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -35,7 +36,12 @@ def load_config(path: Path) -> dict[str, Any]:
     return value
 
 
-def initialise(config: dict[str, Any], database_path: Path) -> dict[str, Any]:
+def initialise(
+    config: dict[str, Any],
+    database_path: Path,
+    *,
+    workos_organization_id: str | None = None,
+) -> dict[str, Any]:
     pilot = config["internal_pilot"]
     director = Principal(
         actor_id=pilot["agency_director_actor_id"],
@@ -79,6 +85,18 @@ def initialise(config: dict[str, Any], database_path: Path) -> dict[str, Any]:
 
     authority = FleetTenantAuthority(database_path)
     authority.initialize_bundle(director, tenant, hostnames, entitlements)
+    account = config["customer_account"]
+    organisation = workos_organization_id or account["test_workos_organization_id"]
+    account_projection = authority.admit_account_brand(
+        director,
+        customer_account_id=account["customer_account_id"],
+        account_name=account["account_name"],
+        client_brand_id=account["client_brand_id"],
+        client_brand_name=account["client_brand_name"],
+        tenant_id=pilot["tenant_id"],
+        workos_organization_id=organisation,
+        lifecycle_state=account["lifecycle_state"],
+    )
     enabled_modules = {record["module"] for record in entitlements}
     return {
         "schema_version": authority.schema_version(),
@@ -88,6 +106,7 @@ def initialise(config: dict[str, Any], database_path: Path) -> dict[str, Any]:
         "hostnames": sorted(record["hostname"] for record in hostnames),
         "enabled_modules": sorted(enabled_modules),
         "disabled_modules": sorted(PRODUCT_MODULES.difference(enabled_modules)),
+        "account": account_projection,
     }
 
 
@@ -109,7 +128,18 @@ def main() -> None:
         if observed_company_id != expected_company_id:
             raise SystemExit("live Paperclip company ID does not match the Fleet binding")
 
-    result = initialise(config, database_path)
+    production_identity: str | None = None
+    if database_path.resolve() == production_database:
+        env_name = config["customer_account"]["workos_organization_id_env"]
+        production_identity = os.environ.get(env_name)
+        if not production_identity:
+            raise SystemExit(f"production initialization requires {env_name}")
+
+    result = initialise(
+        config,
+        database_path,
+        workos_organization_id=production_identity,
+    )
     print(json.dumps(result, sort_keys=True, indent=2))
 
 

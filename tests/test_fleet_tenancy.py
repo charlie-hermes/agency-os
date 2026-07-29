@@ -187,7 +187,7 @@ class FleetTenantAuthorityTests(unittest.TestCase):
         self.authority.grant_entitlement(self.director, portal)
         projection = self.authority.portal_read_model(self.reviewer, self.hostname["hostname"])
         self.assertEqual(projection["brand_id"], "brand_fleet")
-        self.assertEqual(projection["paperclip_company_id"], FLEET_COMPANY_ID)
+        self.assertNotIn("paperclip_company_id", projection)
         self.assertTrue(projection["modules"]["content_engine"])
         self.assertFalse(projection["modules"]["brand_twin"])
         self.assertEqual(set(projection["modules"]), PRODUCT_MODULES)
@@ -221,7 +221,77 @@ class FleetTenantAuthorityTests(unittest.TestCase):
 
     def test_database_is_owner_only_and_has_migration_metadata(self) -> None:
         self.assertEqual(stat.S_IMODE(self.database_path.stat().st_mode), 0o600)
-        self.assertEqual(self.authority.schema_version(), 2)
+        self.assertEqual(self.authority.schema_version(), 3)
+
+    def test_account_brand_model_is_immutable_and_client_safe(self) -> None:
+        self._register_fleet()
+        projection = self.authority.admit_account_brand(
+            self.director,
+            customer_account_id="account_fleet",
+            account_name="Fleet",
+            client_brand_id="client_brand_fleet",
+            client_brand_name="Fleet",
+            tenant_id="tenant_fleet",
+            workos_organization_id="org_fleet_test",
+        )
+        self.assertEqual(projection["brand_id"], "brand_fleet")
+        self.assertEqual(projection["lifecycle_state"], "provisioning")
+        self.assertNotIn("paperclip_company_id", projection)
+        self.assertEqual(
+            self.authority.admit_account_brand(
+                self.director,
+                customer_account_id="account_fleet",
+                account_name="Fleet",
+                client_brand_id="client_brand_fleet",
+                client_brand_name="Fleet",
+                tenant_id="tenant_fleet",
+                workos_organization_id="org_fleet_test",
+            ),
+            projection,
+        )
+        with self.assertRaises(ContractError):
+            self.authority.admit_account_brand(
+                self.director,
+                customer_account_id="account_fleet",
+                account_name="Renamed in place",
+                client_brand_id="client_brand_fleet",
+                client_brand_name="Fleet",
+                tenant_id="tenant_fleet",
+                workos_organization_id="org_fleet_test",
+            )
+
+    def test_lifecycle_is_versioned_and_rejects_skips(self) -> None:
+        self._register_fleet()
+        self.authority.admit_account_brand(
+            self.director,
+            customer_account_id="account_fleet",
+            account_name="Fleet",
+            client_brand_id="client_brand_fleet",
+            client_brand_name="Fleet",
+            tenant_id="tenant_fleet",
+            workos_organization_id="org_fleet_test",
+        )
+        launch_ready = self.authority.transition_tenant_lifecycle(
+            self.director,
+            client_brand_id="client_brand_fleet",
+            expected_version=1,
+            next_state="launch_ready",
+        )
+        self.assertEqual(launch_ready["lifecycle_version"], 2)
+        with self.assertRaises(ContractError):
+            self.authority.transition_tenant_lifecycle(
+                self.director,
+                client_brand_id="client_brand_fleet",
+                expected_version=2,
+                next_state="active",
+            )
+        with self.assertRaises(ContractError):
+            self.authority.transition_tenant_lifecycle(
+                self.director,
+                client_brand_id="client_brand_fleet",
+                expected_version=1,
+                next_state="assurance",
+            )
 
     def test_future_schema_version_is_rejected(self) -> None:
         connection = sqlite3.connect(self.database_path)
@@ -451,7 +521,7 @@ class FleetTenantAuthorityTests(unittest.TestCase):
             connection.close()
 
             migrated = FleetTenantAuthority(database_path)
-            self.assertEqual(migrated.schema_version(), 2)
+            self.assertEqual(migrated.schema_version(), 3)
             self.assertTrue(migrated.module_enabled(self.reviewer, "content_engine"))
             connection = sqlite3.connect(database_path)
             row = connection.execute(

@@ -44,6 +44,13 @@ The repository does not report an external service as connected without a real
 account, scoped credential, destination, and acceptance check. Until those are
 supplied, provider work remains an honest, operator-completed manual handoff.
 
+Gate G2.6 implements Fleet's first private client and administration portal for
+the Fleet DMA internal pilot. Its exact product, tenancy, identity, command,
+source-admission, security and acceptance contract is in
+`docs/fleet-client-portal-g2.6-enterprise-plan.md`. WorkOS and Cloudflare remain
+external deployment dependencies: the repository never substitutes test
+identity for them in production.
+
 ## Repository map
 
 - `roles/` — the 12 reviewed `SOUL.md` / `AGENTS.md` role pairs and their source
@@ -92,6 +99,15 @@ supplied, provider work remains an honest, operator-completed manual handoff.
   tenancy, hostname, module, schema, storage and compatibility decisions.
 - `docs/fleet-g2-foundation-evidence.md` — live Fleet DMA binding, Paperclip
   programme and executable completion evidence for G2.0/G2.1.
+- `docs/fleet-client-portal-g2.6-enterprise-plan.md` and
+  `docs/fleet-client-portal-g2.6-threat-model.md` — the approved G2.6 product,
+  runtime, permission, security, rollout and rollback contract.
+- `fleet-portal/` — the Next.js 16 Fleet client and administration experience;
+  it holds no Paperclip credential or protected authority database access.
+- `agency_os/fleet_portal.py`, `agency_os/fleet_portal_authority_host.py`,
+  `agency_os/fleet_portal_command_worker.py` and
+  `agency_os/fleet_ingest_worker.py` — protected portal context, command,
+  catalogue, Unix-socket and no-network intake boundaries.
 - `agency_os/fleet_tenancy.py` — protected durable authority for immutable
   brand/company, portal-hostname and product-entitlement bindings.
 - `schemas/fleet-generation2.schema.json` — foundational Brand Twin,
@@ -120,6 +136,7 @@ activate a virtual environment first if the package is not already available.
 python3 -m venv .venv
 . .venv/bin/activate
 python -m pip install --requirement requirements-test.txt
+npm ci --prefix fleet-portal --ignore-scripts --no-audit --no-fund
 ./scripts/verify
 ```
 

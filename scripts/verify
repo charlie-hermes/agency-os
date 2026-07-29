@@ -19,3 +19,6 @@ python3 -m unittest discover -s tests -v
 python3 -m agency_os.demo
 python3 -m agency_os.core_demo
 python3 -m agency_os.runtime_bundles
+npm --prefix fleet-portal run lint
+npm --prefix fleet-portal run typecheck
+npm --prefix fleet-portal run build
