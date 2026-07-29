@@ -2,8 +2,18 @@
 
 - **Status:** LIVE PRODUCTION
 - **Verified:** 2026-07-29 UTC
-- **Accepted Agency OS release:** `12fde672397e2623ca9a7e0d37b3bbaab4e9dc0a`
-- **Accepted VM integration release:** `36601d0b6ccde25ed9f77aec1feb3c07ad0bf5e8`
+- **Functionally accepted Agency OS release:** `12fde672397e2623ca9a7e0d37b3bbaab4e9dc0a`
+- **Functionally accepted VM integration release:** `36601d0b6ccde25ed9f77aec1feb3c07ad0bf5e8`
+- **Production declaration release:** `d748748eab1412a9bb3de2156d2656f69d021920`
+- **VM release that pinned the declaration:** `bd5ba179cb6682c52f6dcd0d8e763a0c608a3043`
+
+The first two releases are the exact versions that completed the original live
+functional acceptance. The next two recorded the production declaration and
+pinned it on the VM. Later documentation-only releases do not change the
+accepted workflow behavior. The authoritative current installed Agency OS
+commit is the `AGENCY_OS_COMMIT` value in the deployed `appliance.lock` and the
+matching `agency_os_commit` value in the VM production evidence. This file does
+not repeat its own commit because editing that value would create another commit.
 
 ## What passed
 

@@ -10,7 +10,7 @@ Hermes + Paperclip digital marketing agency design.
 Social workflow checks, two-brand isolation, secret audit, service health, and
 repository gates. See `docs/live-production-status.md` for the exact scope.
 
-This fictional reference deliberately does six things:
+This fictional reference deliberately does seven things:
 
 1. preserves the verified 12-role source library and implementation blueprint;
 2. reconciles the role, artifact, approval, learning, security, and operations
