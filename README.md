@@ -20,13 +20,15 @@ This fictional reference deliberately does six things:
 5. implements injectable Paperclip lifecycle and separate board-decision
    transports plus a strict Buzz command allowlist, all pinned to the reviewed
    target-host contract and fail-closed on drift; and
-6. proves the complete Lantern Search Authority Core workflow, including a real
-   reject/revise path and exact Paperclip board approval before sandbox
-   publication; the receipt binds that approval's ID and evidence checksum before
-   measurement, learning and closure across eight checksum-bound Core roles.
+6. proves the complete Core and optional Social Amplifier workflows, including
+   a real reject/revise path, exact Paperclip approval, protected sandbox
+   publication, two-brand isolation, and measurement across all 12 roles; and
+7. supplies a read-only Paperclip operator portal plus explicit manual handoffs
+   for CMS, analytics, Search Console, SEO data, social, creative, and CRM work.
 
-It does **not** claim Hermes target activation, make authenticated target-service
-mutations, connect real client data, call a real provider, or publish externally.
+The repository does not report an external service as connected without a real
+account, scoped credential, destination, and acceptance check. Until those are
+supplied, provider work remains an honest, operator-completed manual handoff.
 
 ## Repository map
 
@@ -55,13 +57,19 @@ mutations, connect real client data, call a real provider, or publish externally
 - `config/installed-platforms.json` — non-secret, read-only target-host version,
   executable/unit checksum, service, health, exact API and Buzz command evidence.
 - `scripts/verify-installed-platforms` — explicit read-only live drift check.
-- `config/runtime-bundles.json` — exact `AGENTS.md`/`SOUL.md` checksums for the
-  eight Core runtime bundle candidates; fresh-process checksum verification is
-  distinct from still-pending Hermes activation.
+- `config/runtime-bundles.json` — exact `AGENTS.md`/`SOUL.md` checksums for all
+  12 Agency OS runtime bundles; fresh-process verification is separate from live
+  Hermes activation evidence.
 - `agency_os/integrations.py` — private Paperclip HTTP and installed Buzz CLI
   transports behind tenant-scoped lifecycle, board and collaboration adapters.
 - `agency_os/core_workflow.py` — injectable, transport-opaque Core orchestration
   and campaign-ID-scoped Paperclip operator projection.
+- `agency_os/social_workflow.py` — optional, approval-gated social branch from
+  the approved canonical Core asset.
+- `agency_os/operator_portal.py` — read-only portfolio, brand, campaign,
+  approval, calendar, performance, and administration views over Paperclip.
+- `agency_os/provider_handoffs.py` and `config/providers.json` — safe provider
+  status and manual handoff records without embedded secrets.
 - `docs/delivery-rebaseline.md` — product-first Gate 5–7 scope decision.
 - `fixtures/` — fictional tenant input.
 - `acceptance/matrix.json` — release criteria mapped to executable evidence.
@@ -87,7 +95,7 @@ python3 -m agency_os.demo
 
 The demonstration writes only to in-memory stores and a local mock destination.
 
-Run the complete Core proof and verify all eight role bundles:
+Run the complete Core proof and verify all 12 role bundles:
 
 ```bash
 python3 -m agency_os.core_demo

@@ -1,4 +1,4 @@
-"""Checksum-bound Core role bundles verified in a fresh process."""
+"""Checksum-bound Agency OS role bundles verified in a fresh process."""
 
 from __future__ import annotations
 
@@ -8,11 +8,25 @@ import json
 from pathlib import Path
 from typing import Any
 
-from .core_workflow import CORE_RUNTIME_ROLES
 
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CATALOG = ROOT / "config/runtime-bundles.json"
+ALL_RUNTIME_ROLES = (
+    "agency-director",
+    "technical-implementation-specialist",
+    "platform-assurance-reviewer",
+    "brand-brief-steward",
+    "search-content-strategist",
+    "content-producer",
+    "search-answer-optimiser",
+    "visual-creative-specialist",
+    "editorial-integrity-qa",
+    "social-amplifier",
+    "publishing-operator",
+    "growth-intelligence-analyst",
+)
+
 
 
 class RuntimeBundleError(RuntimeError):
@@ -41,7 +55,7 @@ def verify_bundle_catalog(path: Path = DEFAULT_CATALOG) -> dict[str, Any]:
     if not isinstance(entries, list):
         raise RuntimeBundleError("runtime bundle catalogue has no roles")
     observed_roles = tuple(item.get("role_id") for item in entries)
-    if observed_roles != CORE_RUNTIME_ROLES:
+    if observed_roles != ALL_RUNTIME_ROLES:
         raise RuntimeBundleError("runtime bundle roles or order changed")
     loaded = []
     for entry in entries:
@@ -51,7 +65,7 @@ def verify_bundle_catalog(path: Path = DEFAULT_CATALOG) -> dict[str, Any]:
                 "agents": _profile(entry["agents_path"], entry["agents_sha256"]),
                 "soul": _profile(entry["soul_path"], entry["soul_sha256"]),
                 "bundle_verification_status": "checksum_verified_in_fresh_process",
-                "target_runtime_status": "pending_hermes_runtime",
+                "target_runtime_status": catalog.get("target_runtime_evidence"),
             }
         )
     return {
@@ -72,7 +86,7 @@ def main() -> None:
     if args.role:
         result["roles"] = [item for item in result["roles"] if item["role_id"] == args.role]
         if not result["roles"]:
-            raise SystemExit("unknown Core runtime role")
+            raise SystemExit("unknown Agency OS runtime role")
         result["bundle_count"] = 1
     print(json.dumps(result, sort_keys=True))
 

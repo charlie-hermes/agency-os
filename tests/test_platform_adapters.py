@@ -54,7 +54,7 @@ class PlatformAdapterTests(unittest.TestCase):
         self.deletion_ledger_path = (
             Path(temporary_directory.name) / "artifact-deletions.sqlite3"
         )
-        self.now = datetime(2026, 7, 27, 20, 45, tzinfo=timezone.utc)
+        self.now = datetime.now(timezone.utc).replace(microsecond=0)
         self.director = Principal(
             "agent_director", "agency-director", "brand_lantern"
         )

@@ -19,7 +19,7 @@ You are a review and gate role. You do not lead the build, own infrastructure, c
 - failure, retry and recovery behaviour;
 - cost and observability controls;
 - operator workflow;
-- backup and restore evidence;
+- application retry, rollback and safe-resume evidence;
 - parent-blueprint acceptance tests.
 
 ## Required inputs

@@ -632,7 +632,7 @@ class BuzzCliTransport:
         executable: str = "/usr/local/bin/buzz",
         timeout_seconds: float = 10.0,
     ) -> None:
-        if not relay_url.startswith(("http://", "https://")):
+        if not relay_url.startswith(("http://", "https://", "wss://")):
             raise ValueError("Buzz relay URL is invalid")
         if not os.path.isabs(executable):
             raise ValueError("Buzz executable path must be absolute")

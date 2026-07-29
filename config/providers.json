@@ -1,0 +1,13 @@
+{
+  "schema_version": "1.0",
+  "policy": "No external service is reported as connected until a real account, destination, least-privilege grant, and acceptance check exist.",
+  "providers": [
+    {"capability_id":"cms.publish","service_class":"cms","mode":"manual_handoff","status":"available","external_write":false,"operator_action":"Publish the approved package in the chosen CMS and paste the resulting URL and timestamp into Paperclip."},
+    {"capability_id":"analytics.read","service_class":"analytics","mode":"manual_handoff","status":"available","external_write":false,"operator_action":"Export the approved date range and attach the non-secret report to the Growth task."},
+    {"capability_id":"search_console.read","service_class":"search_console","mode":"manual_handoff","status":"available","external_write":false,"operator_action":"Export the approved property and date range and attach it to the Growth task."},
+    {"capability_id":"seo_data.read","service_class":"seo_data","mode":"manual_handoff","status":"available","external_write":false,"operator_action":"Export the requested keyword data with provider name, date, geography, and method."},
+    {"capability_id":"social.publish","service_class":"social","mode":"manual_handoff","status":"available","external_write":false,"operator_action":"Publish only the approved social manifest in the named account, then record the post URL and timestamp."},
+    {"capability_id":"creative.generate","service_class":"creative","mode":"manual_handoff","status":"available","external_write":false,"operator_action":"Create or export the approved visual, preserve provenance, and attach its reference and checksum."},
+    {"capability_id":"crm.read","service_class":"crm","mode":"manual_handoff","status":"available","external_write":false,"operator_action":"Export only the approved fields and date range, then attach the sanitized result to Paperclip."}
+  ]
+}

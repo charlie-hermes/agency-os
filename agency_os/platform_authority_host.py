@@ -661,7 +661,7 @@ class _PlatformAuthorityHost:
         self._closed = False
         self._process.start()
         control_child.close()
-        if not self._control_parent.poll(3):
+        if not self._control_parent.poll(10):
             self.close()
             raise PlatformAuthorityUnavailable(
                 "Platform Authority host did not start"
