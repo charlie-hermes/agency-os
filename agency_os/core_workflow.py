@@ -85,6 +85,7 @@ def run_core_workflow(
     asset_id: str = "asset_guide",
     brand_name: str = "Lantern Garden Co.",
     product_tier: str = "search_authority_core",
+    cost_agent_id: str | None = "00000000-0000-4000-8000-000000000008",
 ) -> CoreWorkflowResult:
     """Run onboarding through learning with a real reject/revise branch."""
 
@@ -286,14 +287,15 @@ def run_core_workflow(
         payload={"proposal": "Collect a later fictional outcome snapshot before changing content.", "evidence_refs": ["performance_guide_v1"], "authority": "proposal_only"},
         source_artifact_ids=["performance_guide_v1"], status="draft",
     )
-    paperclip.record_cost(
-        {
-            "agentId": "00000000-0000-4000-8000-000000000008",
-            "provider": "fictional_fixture", "model": "no-model",
-            "costCents": 0,
-            "occurredAt": datetime.now(timezone.utc).isoformat(),
-        }
-    )
+    if cost_agent_id is not None:
+        paperclip.record_cost(
+            {
+                "agentId": cost_agent_id,
+                "provider": "fictional_fixture", "model": "no-model",
+                "costCents": 0,
+                "occurredAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            }
+        )
 
     closure_order = (*CORE_RUNTIME_ROLES[1:], CORE_RUNTIME_ROLES[0])
     for role_id in closure_order:
