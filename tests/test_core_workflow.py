@@ -153,6 +153,41 @@ class CoreWorkflowTests(unittest.TestCase):
             all("[camp_two]" in task["title"] for task in second.tasks_by_role.values())
         )
 
+    def test_cost_events_use_the_live_agent_and_can_be_skipped_for_isolation(self) -> None:
+        transport, lifecycle, board, buzz, publisher = _dependencies()
+
+        def approve(requested, _manifest):
+            return board.decide_approval(
+                requested["id"],
+                decision="approve",
+                decision_note="Human approved the exact fictional package.",
+            )
+
+        live_agent_id = "00000000-0000-4000-8000-000000000099"
+        run_core_workflow(
+            paperclip=lifecycle,
+            buzz=buzz,
+            approval_authority=approve,
+            publisher=publisher,
+            campaign_id="camp_cost",
+            asset_id="asset_cost",
+            cost_agent_id=live_agent_id,
+        )
+        self.assertEqual(len(transport.cost_events), 1)
+        self.assertEqual(transport.cost_events[0]["agentId"], live_agent_id)
+        self.assertTrue(transport.cost_events[0]["occurredAt"].endswith("Z"))
+
+        run_core_workflow(
+            paperclip=lifecycle,
+            buzz=buzz,
+            approval_authority=approve,
+            publisher=publisher,
+            campaign_id="camp_isolation",
+            asset_id="asset_isolation",
+            cost_agent_id=None,
+        )
+        self.assertEqual(len(transport.cost_events), 1)
+
     def test_operator_projection_is_read_only_and_paperclip_derived(self) -> None:
         projection = self.result.operator_projection
         self.assertEqual(projection["authority"], "paperclip")
