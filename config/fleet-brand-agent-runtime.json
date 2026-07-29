@@ -1,0 +1,22 @@
+{
+  "schema_version": "1.0",
+  "brand_id": "brand_fleet",
+  "policy_path": "/opt/agency-os/current/config/fleet-brand-agent.json",
+  "tenancy_database": "/var/lib/agency-os/fleet-tenancy.sqlite3",
+  "intelligence_database": "/var/lib/agency-os/fleet-brand-intelligence.sqlite3",
+  "audit_database": "/var/lib/agency-os/fleet-brand-agent.sqlite3",
+  "paperclip_base_url": "http://172.30.0.1:3100",
+  "paperclip_company_id": "d7e2e389-c7ad-486e-87ca-482e4ec6216d",
+  "paperclip_parent_issue_id": "e262dc27-eb95-4c13-b8e2-64597b456ef6",
+  "paperclip_token_env": "PAPERCLIP_BOARD_API_KEY",
+  "api_key_env": "FLEET_BRAND_AGENT_API_KEY",
+  "action_secret_env": "FLEET_BRAND_AGENT_ACTION_SECRET",
+  "allowed_hosts": [
+    "127.0.0.1",
+    "localhost"
+  ],
+  "allowed_origins": [
+    "http://127.0.0.1:3181",
+    "http://localhost:3181"
+  ]
+}

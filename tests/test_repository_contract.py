@@ -162,7 +162,13 @@ class RepositoryContractTests(unittest.TestCase):
         self.assertEqual(config["internal_pilot"]["paperclip_company_name"], "Fleet DMA")
         self.assertEqual(
             {item["module"] for item in config["product_entitlements"]},
-            {"content_engine", "brand_twin", "ai_market_observatory"},
+            {
+                "content_engine",
+                "brand_twin",
+                "ai_market_observatory",
+                "brand_agent",
+                "controlled_actions",
+            },
         )
         self.assertTrue(config["disabled_by_default"])
         entitlement = config["product_entitlements"][0]
