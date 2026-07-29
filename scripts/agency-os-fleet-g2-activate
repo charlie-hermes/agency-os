@@ -30,7 +30,7 @@ from agency_os.gateway import MockPublisher
 from agency_os.integrations import (
     BuzzCliTransport, PaperclipBoardApprovalAdapter, PaperclipBoardHTTPTransport,
     PaperclipBrandBinding, PaperclipHTTPTransport, PaperclipLifecycleAdapter,
-    TypedBuzzAdapter,
+    TypedBuzzAdapter, _task_metadata,
 )
 from agency_os.store import Principal
 from scripts.initialize_fleet_tenant import initialise as initialise_tenant
@@ -205,11 +205,18 @@ def main() -> None:
         if remediation_binding.paperclip_approval_id != closed["remediation_approval_id"]:
             raise SystemExit("Fleet remediation approval changed")
         publication = paperclip.get_approval(closed["publication_approval_id"])
-        publication_tasks = paperclip.get_approval_issues(closed["publication_approval_id"])
+        approval_tasks = paperclip.get_approval_issues(closed["publication_approval_id"])
+        campaign_tasks = [
+            item for item in paperclip.list_tasks()
+            if _task_metadata(item).get("campaign_id")
+            == "campaign_fleet_explainer_v1"
+        ]
         if (
             publication.get("status") != "approved"
-            or len(publication_tasks) != 8
-            or not all(item.get("status") == "done" for item in publication_tasks)
+            or len(approval_tasks) != 1
+            or approval_tasks[0].get("status") != "done"
+            or len(campaign_tasks) != 8
+            or not all(item.get("status") == "done" for item in campaign_tasks)
         ):
             raise SystemExit("Fleet publication proof is no longer complete")
         verify_foundation(
