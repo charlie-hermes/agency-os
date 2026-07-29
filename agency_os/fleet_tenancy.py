@@ -59,7 +59,9 @@ _BRAND_ID = re.compile(r"^brand_[a-z0-9](?:[a-z0-9_-]{0,62}[a-z0-9])?$")
 _SLUG = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
 _LIMIT_KEY = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 _RESERVED_SLUGS = frozenset({"admin", "api", "app", "auth", "paperclip", "www"})
-_READ_ROLES = frozenset({"agency-director", "platform-assurance-reviewer"})
+_READ_ROLES = frozenset(
+    {"agency-director", "platform-assurance-reviewer", "brand-agent-service"}
+)
 _SCHEMA_VERSION = 2
 
 _BRAND_TENANT_FIELDS = frozenset(

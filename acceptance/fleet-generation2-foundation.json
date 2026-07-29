@@ -89,7 +89,7 @@
       "owner": "platform-assurance-reviewer",
       "release_blocker": true,
       "command": "python3 -m unittest tests.test_repository_contract.RepositoryContractTests.test_fleet_generation2_manifest_is_bound_to_live_internal_company",
-      "expected_evidence": "Fleet DMA binding is exact and only Content Engine starts entitled"
+      "expected_evidence": "Fleet DMA binding is exact and only reviewed modules are entitled"
     },
     {
       "id": "G2-CONTENT-REGRESSION-001",

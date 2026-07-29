@@ -50,6 +50,34 @@
         "launch_missions": 20,
         "registered_missions": 50
       }
+    },
+    {
+      "entitlement_id": "entitlement_fleet_brand_agent",
+      "module": "brand_agent",
+      "version": 1,
+      "issued_at": "2026-07-29T14:00:00Z",
+      "effective_at": "2026-07-29T14:00:00Z",
+      "expires_at": null,
+      "supersedes_entitlement_id": null,
+      "limits": {
+        "composer": "evidence-bound-deterministic-v1",
+        "public_claims": 7,
+        "transport": "private_loopback"
+      }
+    },
+    {
+      "entitlement_id": "entitlement_fleet_controlled_actions",
+      "module": "controlled_actions",
+      "version": 1,
+      "issued_at": "2026-07-29T14:00:00Z",
+      "effective_at": "2026-07-29T14:00:00Z",
+      "expires_at": null,
+      "supersedes_entitlement_id": null,
+      "limits": {
+        "action": "request_human_follow_up",
+        "external_write": false,
+        "confirmation_required": true
+      }
     }
   ],
   "available_modules": [

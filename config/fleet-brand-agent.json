@@ -1,0 +1,17 @@
+{
+  "schema_version": "1.0",
+  "brand_id": "brand_fleet",
+  "public_claim_ids": [
+    "claim_fleet_business_name",
+    "claim_fleet_unified_product",
+    "claim_content_engine_first_class",
+    "claim_paperclip_authority",
+    "claim_fleet_base_domain",
+    "claim_agency_os_live",
+    "claim_real_providers_unconnected"
+  ],
+  "max_question_chars": 1200,
+  "max_answer_claims": 3,
+  "transcript_retention_days": 30,
+  "composer_version": "evidence-bound-deterministic-v1"
+}

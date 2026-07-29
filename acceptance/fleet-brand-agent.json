@@ -1,0 +1,93 @@
+{
+  "schema_version": "1.0",
+  "candidate_gate": "G2.5",
+  "paperclip_issue": "PAP-159",
+  "delivery_control": "dependency-and-evidence-only",
+  "release_command": "./scripts/verify",
+  "criteria": [
+    {
+      "id": "G2-BA-GROUNDING-001",
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "command": "python3 -m unittest tests.test_brand_agent.BrandAgentTests.test_answers_only_from_public_approved_claims_with_exact_citations",
+      "expected_evidence": "every answer is built from an allowlisted active approved claim and carries claim, evidence, source, and profile checksums"
+    },
+    {
+      "id": "G2-BA-REFUSAL-001",
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "command": "python3 -m unittest tests.test_brand_agent.BrandAgentTests.test_unknown_private_and_injection_questions_fail_closed",
+      "expected_evidence": "unsupported, protected, cross-tenant, and prompt-injection requests are refused without citations or disclosure"
+    },
+    {
+      "id": "G2-BA-ENTITLEMENT-001",
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "command": "python3 -m unittest tests.test_brand_agent.BrandAgentTests.test_entitlement_suspension_stops_answers_without_affecting_twin",
+      "expected_evidence": "Brand Agent suspension stops the service without disabling the Brand Twin"
+    },
+    {
+      "id": "G2-BA-PUBLIC-PROJECTION-001",
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "command": "python3 -m unittest tests.test_brand_agent.BrandAgentTests.test_public_profile_excludes_internal_company_claim",
+      "expected_evidence": "internal Paperclip company identity is excluded even though the underlying claim is approved"
+    },
+    {
+      "id": "G2-BA-TRANSCRIPT-001",
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "command": "python3 -m unittest tests.test_brand_agent.BrandAgentTests.test_transcript_modes_require_consent_and_minimise_by_default",
+      "expected_evidence": "text retention requires consent; metadata mode stores hashes only; off stores nothing"
+    },
+    {
+      "id": "G2-BA-ACTION-001",
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "command": "python3 -m unittest tests.test_brand_agent.BrandAgentTests.test_confirmed_follow_up_is_idempotent_cancellable_and_never_external",
+      "expected_evidence": "one confirmed Paperclip-only follow-up is idempotent, receipted, cancellable, and never an external write"
+    },
+    {
+      "id": "G2-BA-ACTION-TAMPER-001",
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "command": "python3 -m unittest tests.test_brand_agent.BrandAgentTests.test_action_tamper_and_idempotency_collision_fail_closed",
+      "expected_evidence": "confirmation checksum tampering and idempotency rebinding are denied"
+    },
+    {
+      "id": "G2-BA-MCP-001",
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "command": "python3 -m unittest tests.test_brand_agent.BrandAgentTests.test_mcp_resources_tools_headers_and_errors_are_strict",
+      "expected_evidence": "versioned stateless MCP resources and tools are deterministic and validate mirrored HTTP headers"
+    },
+    {
+      "id": "G2-BA-WEB-001",
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "command": "python3 -m unittest tests.test_brand_agent_host.BrandAgentHostTests.test_health_and_private_web_component_are_loopback_safe",
+      "expected_evidence": "private web component is no-store, framed-denied, CSP-bound, and reports no external model"
+    },
+    {
+      "id": "G2-BA-HTTP-AUTH-001",
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "command": "python3 -m unittest tests.test_brand_agent_host.BrandAgentHostTests.test_api_requires_authentication_exact_host_and_origin",
+      "expected_evidence": "API rejects missing authentication, unapproved origins, and unapproved hosts"
+    },
+    {
+      "id": "G2-BA-REGRESSION-001",
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "command": "python3 -m unittest tests.test_core_workflow.CoreWorkflowTests.test_complete_core_flow_has_real_revision_and_authoritative_closure",
+      "expected_evidence": "the existing complete content workflow remains production-capable"
+    },
+    {
+      "id": "G2-BA-FULL-GATE-001",
+      "owner": "platform-assurance-reviewer",
+      "release_blocker": true,
+      "command": "./scripts/verify",
+      "expected_evidence": "the complete Agency OS repository and twelve runtime bundles pass"
+    }
+  ]
+}

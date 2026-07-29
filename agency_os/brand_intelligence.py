@@ -122,7 +122,7 @@ _WRITES = {
 _READERS = frozenset(
     {"agency-director", "platform-assurance-reviewer", "brand-brief-steward",
      "search-content-strategist", "content-producer", "editorial-integrity-qa",
-     "growth-intelligence-analyst"}
+     "growth-intelligence-analyst", "brand-agent-service"}
 )
 _APPROVAL_TYPES = frozenset({"brand_claim", "remediation_proposal"})
 
