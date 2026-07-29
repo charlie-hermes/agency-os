@@ -207,6 +207,33 @@ class IntegrationTests(unittest.TestCase):
         with self.assertRaises(ContractError):
             adapter.post_context(channel["id"], {"brand_id": "brand_other"})
 
+    def test_buzz_adapter_normalizes_installed_cli_response_fields(self) -> None:
+        class InstalledShapeTransport:
+            def run(self, arguments):
+                if arguments[:2] == ["channels", "create"]:
+                    return {
+                        "accepted": True,
+                        "channel_id": "9ab0deb8-5c89-498c-8d8b-50a92809163c",
+                        "event_id": "a" * 64,
+                        "message": "created",
+                    }
+                return {
+                    "accepted": True,
+                    "event_id": "b" * 64,
+                    "message": "sent",
+                }
+
+        adapter = TypedBuzzAdapter(InstalledShapeTransport(), "brand_lantern")
+        channel = adapter.create_context_channel(
+            campaign_id="camp", purpose="one decision", ttl_seconds=60
+        )
+        message = adapter.post_context(
+            channel["id"], {"brand_id": "brand_lantern", "campaign_id": "camp"}
+        )
+        self.assertEqual(channel["id"], channel["channel_id"])
+        self.assertEqual(channel["visibility"], "private")
+        self.assertEqual(message["id"], message["event_id"])
+
     def test_buzz_cli_keeps_identity_out_of_arguments_and_errors(self) -> None:
         seen = {}
 
