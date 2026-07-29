@@ -53,6 +53,8 @@ class PreparedVerticalSlice:
     capability_registry: CapabilityRegistry
     capability: dict[str, Any]
     prepared_at: datetime
+    credential_endpoint: str
+    credential_value: str
 
 
 def _fictional_publish_worker(control: Any) -> None:
@@ -77,16 +79,33 @@ def prepare_fictional_article(
     *,
     issue_id: str = "00000000-0000-4000-8000-000000000107",
     publisher: MockPublisher | None = None,
+    brand_id: str = "brand_lantern",
+    campaign_id: str = "camp_summer",
+    asset_id: str = "asset_guide",
+    brand_name: str = "Lantern Garden Co.",
+    credential_endpoint: str = "mock://cms/lantern",
+    credential_value: str = "fictional-credential-lantern",
+    public_fields: dict[str, Any] | None = None,
+    content_description: str = "A fictional five-step balcony garden checklist.",
 ) -> PreparedVerticalSlice:
     """Build the exact publication candidate without performing a write."""
 
-    brand_id = "brand_lantern"
-    campaign_id = "camp_summer"
-    asset_id = "asset_guide"
+    if not all((brand_id, campaign_id, asset_id, brand_name)):
+        raise ValueError("fictional article identity is incomplete")
     store = TenantStore()
     records: dict[str, dict[str, Any]] = {}
     publisher = publisher or MockPublisher()
 
+    public_fields = public_fields or {
+        "title": "Five checks before starting a balcony garden",
+        "body": [
+            "Check the light, wind, space, water access, and building rules.",
+            "Use the fictional worksheet to record each answer.",
+        ],
+        "cta": "Download the fictional worksheet.",
+    }
+    if not {"title", "body", "cta"}.issubset(public_fields):
+        raise ValueError("fictional public fields are incomplete")
     principals = {
         "steward": Principal("agent_steward", "brand-brief-steward", brand_id),
         "strategist": Principal(
@@ -138,7 +157,7 @@ def prepare_fictional_article(
         issue_id=issue_id,
         created_by={"actor_type": "agent", "actor_id": "agent_steward"},
         payload={
-            "brand_name": "Lantern Garden Co.",
+            "brand_name": brand_name,
             "approved_claims": ["The guide contains five fictional checklist steps."],
             "prohibited_claims": ["guaranteed results"],
         },
@@ -167,14 +186,6 @@ def prepare_fictional_article(
     store.put(principals["strategist"], brief)
     records["brief"] = brief
 
-    public_fields = {
-        "title": "Five checks before starting a balcony garden",
-        "body": [
-            "Check the light, wind, space, water access, and building rules.",
-            "Use the fictional worksheet to record each answer.",
-        ],
-        "cta": "Download the fictional worksheet.",
-    }
     draft = make_envelope(
         artifact_type="draft_asset_package",
         artifact_id="draft_guide_v1",
@@ -213,7 +224,7 @@ def prepare_fictional_article(
             **draft["payload"],
             "metadata": {
                 "title": public_fields["title"],
-                "description": "A fictional five-step balcony garden checklist.",
+                "description": content_description,
             },
             "internal_links": [],
             "structured_data": None,
@@ -305,6 +316,8 @@ def prepare_fictional_article(
         capability_registry=capability_registry,
         capability=capability,
         prepared_at=now,
+        credential_endpoint=credential_endpoint,
+        credential_value=credential_value,
     )
 
 
@@ -352,7 +365,11 @@ def dispatch_prepared_article(
             enrollment=enrollment,
             capability_id=capability["capability_id"],
             capability_registry=capability_registry,
-            credential_broker=fictional_credential_broker(capability),
+            credential_broker=fictional_credential_broker(
+                capability,
+                endpoint=prepared.credential_endpoint,
+                credential_value=prepared.credential_value,
+            ),
             publisher=publisher,
             approval_store=store,
             approval_authorities={brand_id: {"brand_owner": ["human_owner"]}},

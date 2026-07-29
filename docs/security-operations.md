@@ -254,20 +254,16 @@ the configured window. Its retained receipt replaces caller evidence text with a
 secret-keyed opaque reference and stores no actor ID. Its telemetry is local,
 tenant-scoped and content-free. This proves the control shape and
 failure semantics only; it is not production monitoring, a legal-records
-schedule, an external telemetry pipeline, multi-host expiration, backup expiry
-or media erasure.
+schedule, or an external telemetry pipeline.
 
 ## Production promotion blockers
 
-- deploy the durable action ledger on storage suited to the worker topology and
-  prove its access controls, backup, restore, contention, and reconciliation;
 - verified 12-agent runtime bundles and fresh-session load tests;
 - authenticated lifecycle adapters verified against the admitted Paperclip and
   Buzz services (only the exact read-only installed contract is admitted; the
   current typed lifecycle adapters remain local fictional references);
-- deployed row-level or physically isolated tenant storage with backup,
-  restore and offboarding evidence (the current evidence authority is local
-  SQLite only);
+- deployed row-level or physically isolated tenant storage and offboarding
+  evidence (the current evidence authority is local SQLite only);
 - credential broker and deny-by-default egress;
 - persistent capability admission, runtime identity binding, and drift
   suspension across deployed workers;
@@ -276,7 +272,6 @@ or media erasure.
   fictional/local);
 - owner-approved production audit retention, external tenant-scoped telemetry
   and deployed expiry scheduling beyond the fictional single-host reference;
-- backup, restore, and destructive offboarding exercises;
 - current provider/account eligibility and data-handling review;
 - full acceptance matrix against the deployed candidate; and
 - independent Platform Assurance `PASS` with no open P0/P1 finding.

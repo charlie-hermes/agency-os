@@ -167,18 +167,18 @@ class CoreWorkflowTests(unittest.TestCase):
                 self.assertEqual(publisher.calls, 0)
 
 
-    def test_all_eight_role_bundles_are_checksum_verified_in_a_fresh_process(self) -> None:
+    def test_all_twelve_role_bundles_are_checksum_verified_in_a_fresh_process(self) -> None:
         completed = subprocess.run(
             [sys.executable, "-m", "agency_os.runtime_bundles"],
             check=True, capture_output=True, text=True,
         )
         evidence = json.loads(completed.stdout)
-        self.assertEqual(evidence["bundle_count"], 8)
+        self.assertEqual(evidence["bundle_count"], 12)
         self.assertEqual(
             {item["bundle_verification_status"] for item in evidence["roles"]},
             {"checksum_verified_in_fresh_process"},
         )
-        self.assertEqual(evidence["target_runtime_evidence"], "pending_runtime_installation")
+        self.assertEqual(evidence["target_runtime_evidence"], "pending_live_activation")
 
 
 if __name__ == "__main__":

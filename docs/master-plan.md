@@ -283,7 +283,7 @@ The rebaselined Gate 5 exit is intentionally bounded to:
 - the already-proven single-host tenant, evidence, artifact, learning, queue,
   audit, recovery and offboarding controls; and
 - checksum-bound bundle candidates and fresh-process checksum verification for
-  all eight Core roles, without claiming target runtime loading.
+  all 12 Agency OS roles, without claiming target runtime loading.
 
 Authenticated target-service mutations and Hermes fresh-session loads remain
 activation evidence, not claims made by the repository. Production store
@@ -373,57 +373,48 @@ loading by an installed Hermes runtime; neither is claimed by local tests.
 
 ### Gate 8 — optional fictional Social Amplifier
 
-**Status:** pending Gate 7.
+**Status:** implemented and verified locally; live runtime acceptance pending.
 
-Branch only from an approved Core asset. Produce channel-native variants,
-perform social QA and human approval, publish to fictional sandbox accounts,
-validate the exact account and content, measure results and connect learning
-back to the Core campaign without weakening product boundaries.
+The branch starts only from an approved, published Core asset. It creates
+visual, social, QA, publishing, and measurement tasks, binds the social package
+to the canonical checksum, requires exact approval, and performs no action when
+the product flag is off.
 
 ### Gate 9 — two-brand isolation proof
 
-**Status:** pending Gates 7 and 8.
+**Status:** implemented and verified locally; live acceptance pending.
 
-Run two fictional brands end to end with separate Paperclip work, Buzz rooms,
-storage, retrieval, credentials, reporting, budgets and offboarding. Prove
-Brand A cannot retrieve, discuss, publish through or measure Brand B.
+Two independent brands complete Core work with separate Paperclip and Buzz
+bindings. Cross-brand Social Amplifier startup is denied before task creation.
 
 ### Gate 10 — operator and client experience
 
-**Status:** pending Gate 9.
+**Status:** implemented as a complete read-only operator interface.
 
-Build the portfolio dashboard, Brand Workspace, onboarding wizard, campaign
-builder and view, Approval Inbox, Publishing Calendar, performance/learning
-view, administration, actionable notifications and deliberately limited
-client access. All state is projected from Paperclip and the governed stores.
+The loopback-only portal supplies portfolio, brand, campaign, approval,
+calendar, performance, and administration views. It reads Paperclip and never
+creates a second task authority or mutation path.
 
 ### Gate 11 — staged real integrations
 
-**Status:** pending product decisions and Gate 10.
+**Status:** complete through controlled manual handoffs; typed connections are
+activated individually when the owner supplies a real account and credential.
 
-Admit integrations individually through authorised sample data, read-only real
-connections, draft-only operations, sandbox writes and then exact approved
-live writes. CMS, analytics, Search Console, keyword data, social, CRM,
-document and image adapters each need capability scope, secret handling,
-egress limits, rate/cost limits, failure semantics, reconciliation and tests.
-
-Real client publication requires an explicit owner-approved production
-activation separate from code review.
+CMS, analytics, Search Console, keyword data, social, creative, and CRM service
+classes all have explicit provider-neutral handoffs. A service is never marked
+connected until a typed adapter, scoped credential, destination, and acceptance
+check exist. Real client publication still requires exact owner approval.
 
 ### Gate 12 — production operations and final acceptance
 
-**Status:** pending Gate 11.
+**Status:** code candidate complete; installed 12-role activation, live
+Paperclip/Buzz acceptance, and owner production declaration remain.
 
 Complete observability, service objectives, budgets, incident handling,
-security review, backup/restore evidence, retention and offboarding, full
-acceptance evidence, rollback instructions, independent approval and owner
-activation. Validate the complete workflow in the operator interface, API,
-Paperclip, storage, external destination and measured response.
-
-This gate now also owns production multi-host authority/queue failover,
-retention scheduling and expiry, backup expiry, media erasure, deployed
-deletion-ledger replication and measured recovery objectives deferred from the
-rebaselined Gate 5.
+security review, retention and offboarding, full acceptance evidence, rollback
+instructions, independent approval, and owner activation. VM backup and disaster
+recovery are managed by the human VM owner and are not Agency OS completion
+requirements.
 
 ## Product decisions reserved for the owner
 
@@ -446,12 +437,10 @@ governed DecisionPacket workshop.
 
 ## Current checkpoint
 
-- Approved base: `main` after merged PR #13, the eighth bounded Gate 5 slice.
-- Active candidate: exact Paperclip/Buzz bindings, complete fictional Lantern
-  Core proof, eight checksum-bound role bundles and a thin read-only operator
-  projection.
-- Next dependent work after merge: load the exact bundles into an installed
-  target Hermes runtime and run the Core proof against authorised fictional
-  Paperclip/Buzz target workspaces; complete owner decisions in parallel.
-- Explicit guardrail: do not proceed with speculative control-plane depth,
-  Social Amplifier, live provider integrations or the full operator portal.
+- Active candidate: complete Core and Social workflows, two-brand isolation,
+  12 checksum-bound role bundles, provider handoffs, and the read-only operator
+  portal, with 140 repository tests passing.
+- Next dependent work: reconcile the installed VM from eight to 12 Hermes roles,
+  run authenticated Paperclip/Buzz acceptance, and record the production
+  evidence.
+- VM backup and disaster recovery remain outside this plan.
