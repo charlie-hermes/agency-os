@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import copy
+import json
 import sqlite3
 import stat
 import tempfile
 import unittest
 from pathlib import Path
 
-from agency_os.contracts import ContractError, finalize_record, verify_record
+from agency_os.contracts import ContractError, canonical_bytes, finalize_record, verify_record
 from agency_os.fleet_tenancy import (
     PRODUCT_MODULES,
     FleetTenancyAuthorizationError,
@@ -22,7 +23,7 @@ from agency_os.store import Principal
 
 FLEET_COMPANY_ID = "d7e2e389-c7ad-486e-87ca-482e4ec6216d"
 OTHER_COMPANY_ID = "63d47cf2-df2d-4fbb-88e7-d8db70bddcec"
-FIXED_TIME = "2026-07-29T12:00:00Z"
+FIXED_TIME = "2026-07-28T12:00:00Z"
 
 
 class FleetTenantAuthorityTests(unittest.TestCase):
@@ -176,6 +177,14 @@ class FleetTenantAuthorityTests(unittest.TestCase):
 
     def test_portal_projection_is_server_built_and_safe(self) -> None:
         self._register_full_fleet()
+        portal = make_product_entitlement(
+            entitlement_id="entitlement_fleet_portal",
+            brand_id="brand_fleet",
+            module="client_portal",
+            issued_by=self.director.actor_id,
+            issued_at=FIXED_TIME,
+        )
+        self.authority.grant_entitlement(self.director, portal)
         projection = self.authority.portal_read_model(self.reviewer, self.hostname["hostname"])
         self.assertEqual(projection["brand_id"], "brand_fleet")
         self.assertEqual(projection["paperclip_company_id"], FLEET_COMPANY_ID)
@@ -212,7 +221,7 @@ class FleetTenantAuthorityTests(unittest.TestCase):
 
     def test_database_is_owner_only_and_has_migration_metadata(self) -> None:
         self.assertEqual(stat.S_IMODE(self.database_path.stat().st_mode), 0o600)
-        self.assertEqual(self.authority.schema_version(), 1)
+        self.assertEqual(self.authority.schema_version(), 2)
 
     def test_future_schema_version_is_rejected(self) -> None:
         connection = sqlite3.connect(self.database_path)
@@ -268,6 +277,193 @@ class FleetTenantAuthorityTests(unittest.TestCase):
                 issued_by=self.director.actor_id,
                 issued_at=FIXED_TIME,
             )
+
+    def test_unknown_runtime_fields_are_rejected(self) -> None:
+        unexpected = copy.deepcopy(self.tenant)
+        unexpected["internal_notes"] = "must not cross the public authority boundary"
+        unexpected = finalize_record(unexpected)
+        with self.assertRaises(ContractError):
+            self.authority.register_tenant(self.director, unexpected)
+
+    def test_every_denied_mutation_is_audited(self) -> None:
+        reviewer_tenant = copy.deepcopy(self.tenant)
+        reviewer_tenant["created_by"] = self.reviewer.actor_id
+        reviewer_tenant = finalize_record(reviewer_tenant)
+        with self.assertRaises(FleetTenancyAuthorizationError):
+            self.authority.register_tenant(self.reviewer, reviewer_tenant)
+
+        wrong_actor = copy.deepcopy(self.tenant)
+        wrong_actor["created_by"] = "different_actor"
+        wrong_actor = finalize_record(wrong_actor)
+        with self.assertRaises(FleetTenancyAuthorizationError):
+            self.authority.register_tenant(self.director, wrong_actor)
+
+        with self.assertRaises(FleetTenancyAuthorizationError):
+            self.authority.register_tenant(self.other_director, self.tenant)
+        fleet_outcomes = {event["outcome"] for event in self.authority.audit_events(self.reviewer)}
+        other_outcomes = {event["outcome"] for event in self.authority.audit_events(self.other_director)}
+        self.assertIn("DENY_ROLE", fleet_outcomes)
+        self.assertIn("DENY_ACTOR", fleet_outcomes)
+        self.assertIn("DENY_TENANT", other_outcomes)
+
+    def test_atomic_bundle_rolls_back_every_binding_after_late_failure(self) -> None:
+        self._register_fleet()
+        invalid_version = make_product_entitlement(
+            entitlement_id="entitlement_fleet_content_v2",
+            brand_id="brand_fleet",
+            module="content_engine",
+            version=2,
+            supersedes_entitlement_id="missing_v1",
+            issued_by=self.director.actor_id,
+            issued_at=FIXED_TIME,
+        )
+        with self.assertRaises(ContractError):
+            self.authority.initialize_bundle(
+                self.director, self.tenant, [self.hostname], [invalid_version],
+            )
+        with self.assertRaises(KeyError):
+            self.authority.authorize_hostname(self.reviewer, self.hostname["hostname"])
+        self.assertFalse(self.authority.module_enabled(self.reviewer, "content_engine"))
+        outcomes = [event["outcome"] for event in self.authority.audit_events(self.reviewer)]
+        self.assertIn("DENY_ATOMIC", outcomes)
+
+    def test_entitlement_versions_suspend_replace_and_reject_gaps(self) -> None:
+        self._register_fleet()
+        self.authority.grant_entitlement(self.director, self.content_entitlement)
+        self.authority.suspend_entitlement(self.director, "content_engine")
+        self.assertFalse(self.authority.module_enabled(self.reviewer, "content_engine"))
+
+        replacement = make_product_entitlement(
+            entitlement_id="entitlement_fleet_content_v2",
+            brand_id="brand_fleet",
+            module="content_engine",
+            version=2,
+            supersedes_entitlement_id=self.content_entitlement["entitlement_id"],
+            limits={"maximum_active_campaigns": 10},
+            issued_by=self.director.actor_id,
+            issued_at=FIXED_TIME,
+        )
+        self.authority.grant_entitlement(self.director, replacement)
+        self.assertTrue(self.authority.module_enabled(self.reviewer, "content_engine"))
+
+        gap = make_product_entitlement(
+            entitlement_id="entitlement_fleet_content_v4",
+            brand_id="brand_fleet",
+            module="content_engine",
+            version=4,
+            supersedes_entitlement_id=replacement["entitlement_id"],
+            issued_by=self.director.actor_id,
+            issued_at=FIXED_TIME,
+        )
+        with self.assertRaises(ContractError):
+            self.authority.grant_entitlement(self.director, gap)
+
+    def test_future_and_expired_entitlements_fail_closed(self) -> None:
+        self._register_fleet()
+        future = make_product_entitlement(
+            entitlement_id="entitlement_fleet_twin_future",
+            brand_id="brand_fleet",
+            module="brand_twin",
+            issued_by=self.director.actor_id,
+            issued_at=FIXED_TIME,
+            effective_at="2099-01-01T00:00:00Z",
+        )
+        self.authority.grant_entitlement(self.director, future)
+        self.assertFalse(self.authority.module_enabled(self.reviewer, "brand_twin"))
+
+        expired = make_product_entitlement(
+            entitlement_id="entitlement_fleet_measurement_expired",
+            brand_id="brand_fleet",
+            module="measurement",
+            issued_by=self.director.actor_id,
+            issued_at="2020-01-01T00:00:00Z",
+            effective_at="2020-01-01T00:00:00Z",
+            expires_at="2021-01-01T00:00:00Z",
+        )
+        self.authority.grant_entitlement(self.director, expired)
+        self.assertFalse(self.authority.module_enabled(self.reviewer, "measurement"))
+
+    def test_portal_projection_requires_its_own_entitlement(self) -> None:
+        self._register_full_fleet()
+        with self.assertRaises(FleetTenancyAuthorizationError):
+            self.authority.portal_read_model(self.reviewer, self.hostname["hostname"])
+        outcomes = [event["outcome"] for event in self.authority.audit_events(self.reviewer)]
+        self.assertIn("DENY_ENTITLEMENT", outcomes)
+
+    def test_v1_database_is_really_migrated_to_v2(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            database_path = Path(temporary_directory) / "legacy.sqlite3"
+            database_path.touch(mode=0o600)
+            database_path.chmod(0o600)
+            old_entitlement = copy.deepcopy(self.content_entitlement)
+            for field in (
+                "version", "effective_at", "expires_at", "supersedes_entitlement_id",
+            ):
+                old_entitlement.pop(field)
+            old_entitlement = finalize_record(old_entitlement)
+            connection = sqlite3.connect(database_path)
+            connection.executescript(
+                """
+                CREATE TABLE schema_metadata (id INTEGER PRIMARY KEY CHECK (id = 1), version INTEGER NOT NULL);
+                INSERT INTO schema_metadata VALUES (1, 1);
+                CREATE TABLE brand_tenants (
+                    brand_id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL UNIQUE,
+                    paperclip_company_id TEXT NOT NULL UNIQUE, record_json TEXT NOT NULL,
+                    state TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+                );
+                CREATE TABLE portal_hostnames (
+                    hostname TEXT PRIMARY KEY, brand_id TEXT NOT NULL,
+                    binding_id TEXT NOT NULL UNIQUE, record_json TEXT NOT NULL,
+                    state TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+                    FOREIGN KEY (brand_id) REFERENCES brand_tenants(brand_id)
+                );
+                CREATE TABLE product_entitlements (
+                    brand_id TEXT NOT NULL, module TEXT NOT NULL,
+                    entitlement_id TEXT NOT NULL UNIQUE, record_json TEXT NOT NULL,
+                    state TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+                    PRIMARY KEY (brand_id, module),
+                    FOREIGN KEY (brand_id) REFERENCES brand_tenants(brand_id)
+                );
+                CREATE TABLE authority_audit (
+                    sequence INTEGER PRIMARY KEY AUTOINCREMENT, actor_id TEXT NOT NULL,
+                    role_id TEXT NOT NULL, brand_id TEXT NOT NULL, operation TEXT NOT NULL,
+                    target_id TEXT NOT NULL, outcome TEXT NOT NULL, recorded_at TEXT NOT NULL
+                );
+                """
+            )
+            connection.execute(
+                "INSERT INTO brand_tenants VALUES (?, ?, ?, ?, 'active', ?, ?)",
+                (
+                    self.tenant["brand_id"], self.tenant["tenant_id"],
+                    self.tenant["paperclip_company_id"],
+                    canonical_bytes(self.tenant).decode("utf-8"), FIXED_TIME, FIXED_TIME,
+                ),
+            )
+            connection.execute(
+                "INSERT INTO product_entitlements VALUES (?, ?, ?, ?, 'active', ?, ?)",
+                (
+                    old_entitlement["brand_id"], old_entitlement["module"],
+                    old_entitlement["entitlement_id"],
+                    canonical_bytes(old_entitlement).decode("utf-8"), FIXED_TIME, FIXED_TIME,
+                ),
+            )
+            connection.commit()
+            connection.close()
+
+            migrated = FleetTenantAuthority(database_path)
+            self.assertEqual(migrated.schema_version(), 2)
+            self.assertTrue(migrated.module_enabled(self.reviewer, "content_engine"))
+            connection = sqlite3.connect(database_path)
+            row = connection.execute(
+                "SELECT version, record_json FROM product_entitlements"
+            ).fetchone()
+            connection.close()
+            self.assertEqual(row[0], 1)
+            record = json.loads(row[1])
+            self.assertEqual(record["effective_at"], "1970-01-01T00:00:00Z")
+            self.assertIsNone(record["supersedes_entitlement_id"])
+            outcomes = [event["operation"] for event in migrated.audit_events(self.reviewer)]
+            self.assertIn("migrate_entitlement_v1_to_v2", outcomes)
 
     def test_checksum_tampering_is_rejected(self) -> None:
         tampered = copy.deepcopy(self.tenant)

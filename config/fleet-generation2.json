@@ -21,6 +21,11 @@
     {
       "entitlement_id": "entitlement_fleet_content_engine",
       "module": "content_engine",
+      "version": 1,
+      "issued_at": "2026-07-29T12:00:00Z",
+      "effective_at": "1970-01-01T00:00:00Z",
+      "expires_at": null,
+      "supersedes_entitlement_id": null,
       "limits": {}
     }
   ],

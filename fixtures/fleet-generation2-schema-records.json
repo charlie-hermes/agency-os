@@ -1,0 +1,429 @@
+{
+  "schema_version": "2.0",
+  "records": [
+    {
+      "schema_version": "2.0",
+      "artifact_type": "brand_tenant",
+      "tenant_id": "tenant_fleet",
+      "brand_id": "brand_fleet",
+      "paperclip_company_id": "d7e2e389-c7ad-486e-87ca-482e4ec6216d",
+      "company_name": "Fleet DMA",
+      "status": "active",
+      "created_by": "director_fleet",
+      "created_at": "2026-07-29T12:00:00Z",
+      "content_checksum": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    {
+      "schema_version": "2.0",
+      "artifact_type": "portal_hostname_binding",
+      "binding_id": "hostname_fleet",
+      "brand_id": "brand_fleet",
+      "brand_slug": "fleet",
+      "hostname": "fleet.madebyfleet.com",
+      "base_domain": "madebyfleet.com",
+      "status": "active",
+      "created_by": "director_fleet",
+      "created_at": "2026-07-29T12:00:00Z",
+      "content_checksum": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    {
+      "schema_version": "2.0",
+      "artifact_type": "product_entitlement",
+      "entitlement_id": "entitlement_fleet_content_v1",
+      "brand_id": "brand_fleet",
+      "module": "content_engine",
+      "version": 1,
+      "limits": {},
+      "status": "active",
+      "issued_by": "director_fleet",
+      "issued_at": "2026-07-29T12:00:00Z",
+      "effective_at": "2026-07-29T12:00:00Z",
+      "expires_at": null,
+      "supersedes_entitlement_id": null,
+      "content_checksum": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    {
+      "schema_version": "2.0",
+      "brand_id": "brand_fleet",
+      "created_at": "2026-07-29T12:00:00Z",
+      "effective_at": "2026-07-29T12:00:00Z",
+      "created_by": "director_fleet",
+      "provenance": [
+        {
+          "source_id": "source_fleet_primary",
+          "source_version": 1,
+          "source_checksum": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+          "locator": "fixture://fleet"
+        }
+      ],
+      "content_checksum": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "artifact_type": "brand_source",
+      "source_id": "source_fleet_primary",
+      "source_class": "first_party",
+      "authority": "authoritative",
+      "locator": "fixture://fleet",
+      "version": 1,
+      "status": "active",
+      "owner_id": "director_fleet",
+      "observed_at": "2026-07-29T12:00:00Z",
+      "expires_at": null
+    },
+    {
+      "schema_version": "2.0",
+      "brand_id": "brand_fleet",
+      "created_at": "2026-07-29T12:00:00Z",
+      "effective_at": "2026-07-29T12:00:00Z",
+      "created_by": "director_fleet",
+      "provenance": [
+        {
+          "source_id": "source_fleet_primary",
+          "source_version": 1,
+          "source_checksum": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+          "locator": "fixture://fleet"
+        }
+      ],
+      "content_checksum": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "artifact_type": "brand_entity",
+      "entity_id": "entity_fleet",
+      "entity_type": "brand",
+      "canonical_name": "Fleet",
+      "aliases": [
+        "Made by Fleet"
+      ],
+      "version": 1,
+      "status": "active",
+      "evidence_refs": [
+        {
+          "source_id": "source_fleet_primary",
+          "source_version": 1,
+          "source_checksum": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+          "locator": "fixture://fleet"
+        }
+      ]
+    },
+    {
+      "schema_version": "2.0",
+      "brand_id": "brand_fleet",
+      "created_at": "2026-07-29T12:00:00Z",
+      "effective_at": "2026-07-29T12:00:00Z",
+      "created_by": "director_fleet",
+      "provenance": [
+        {
+          "source_id": "source_fleet_primary",
+          "source_version": 1,
+          "source_checksum": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+          "locator": "fixture://fleet"
+        }
+      ],
+      "content_checksum": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "artifact_type": "brand_claim",
+      "claim_id": "claim_fleet",
+      "subject_entity_id": "entity_fleet",
+      "predicate": "provides",
+      "object": "AI brand operations",
+      "version": 1,
+      "status": "active",
+      "approval_state": "approved",
+      "owner_id": "director_fleet",
+      "evidence_refs": [
+        {
+          "source_id": "source_fleet_primary",
+          "source_version": 1,
+          "source_checksum": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+          "locator": "fixture://fleet"
+        }
+      ],
+      "valid_from": "2026-07-29T12:00:00Z",
+      "valid_until": null
+    },
+    {
+      "schema_version": "2.0",
+      "brand_id": "brand_fleet",
+      "created_at": "2026-07-29T12:00:00Z",
+      "effective_at": "2026-07-29T12:00:00Z",
+      "created_by": "director_fleet",
+      "provenance": [
+        {
+          "source_id": "source_fleet_primary",
+          "source_version": 1,
+          "source_checksum": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+          "locator": "fixture://fleet"
+        }
+      ],
+      "content_checksum": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "artifact_type": "claim_evidence",
+      "evidence_id": "evidence_fleet",
+      "claim_id": "claim_fleet",
+      "source_ref": {
+        "source_id": "source_fleet_primary",
+        "source_version": 1,
+        "source_checksum": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "locator": "fixture://fleet"
+      },
+      "extract": "Approved fixture evidence",
+      "confidence": 1.0,
+      "observed_at": "2026-07-29T12:00:00Z",
+      "version": 1,
+      "status": "active"
+    },
+    {
+      "schema_version": "2.0",
+      "brand_id": "brand_fleet",
+      "created_at": "2026-07-29T12:00:00Z",
+      "effective_at": "2026-07-29T12:00:00Z",
+      "created_by": "director_fleet",
+      "provenance": [
+        {
+          "source_id": "source_fleet_primary",
+          "source_version": 1,
+          "source_checksum": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+          "locator": "fixture://fleet"
+        }
+      ],
+      "content_checksum": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "artifact_type": "brand_policy",
+      "policy_id": "policy_fleet_voice",
+      "policy_type": "voice",
+      "rule": {
+        "tone": "clear"
+      },
+      "version": 1,
+      "status": "active",
+      "owner_id": "director_fleet",
+      "approval_ref": "PAP-152"
+    },
+    {
+      "schema_version": "2.0",
+      "brand_id": "brand_fleet",
+      "created_at": "2026-07-29T12:00:00Z",
+      "effective_at": "2026-07-29T12:00:00Z",
+      "created_by": "director_fleet",
+      "provenance": [
+        {
+          "source_id": "source_fleet_primary",
+          "source_version": 1,
+          "source_checksum": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+          "locator": "fixture://fleet"
+        }
+      ],
+      "content_checksum": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "artifact_type": "brand_capability",
+      "brand_capability_id": "capability_fleet_content",
+      "capability": "content_production",
+      "allowed_actions": [
+        "draft"
+      ],
+      "constraints": {},
+      "version": 1,
+      "status": "active"
+    },
+    {
+      "schema_version": "2.0",
+      "brand_id": "brand_fleet",
+      "created_at": "2026-07-29T12:00:00Z",
+      "effective_at": "2026-07-29T12:00:00Z",
+      "created_by": "director_fleet",
+      "provenance": [
+        {
+          "source_id": "source_fleet_primary",
+          "source_version": 1,
+          "source_checksum": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+          "locator": "fixture://fleet"
+        }
+      ],
+      "content_checksum": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "artifact_type": "customer_mission",
+      "mission_id": "mission_fleet",
+      "audience": "brand leader",
+      "intent": "understand Fleet",
+      "success_definition": {
+        "answer": "accurate"
+      },
+      "variants": [
+        "What is Fleet?"
+      ],
+      "version": 1,
+      "status": "active"
+    },
+    {
+      "schema_version": "2.0",
+      "brand_id": "brand_fleet",
+      "created_at": "2026-07-29T12:00:00Z",
+      "effective_at": "2026-07-29T12:00:00Z",
+      "created_by": "director_fleet",
+      "provenance": [
+        {
+          "source_id": "source_fleet_primary",
+          "source_version": 1,
+          "source_checksum": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+          "locator": "fixture://fleet"
+        }
+      ],
+      "content_checksum": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "artifact_type": "observation_run",
+      "run_id": "run_fleet",
+      "mission_ids": [
+        "mission_fleet"
+      ],
+      "adapter": "fixture",
+      "adapter_version": "1",
+      "model": "fixture-model",
+      "model_version": "1",
+      "started_at": "2026-07-29T12:00:00Z",
+      "completed_at": "2026-07-29T12:00:00Z",
+      "status": "complete",
+      "version": 1
+    },
+    {
+      "schema_version": "2.0",
+      "brand_id": "brand_fleet",
+      "created_at": "2026-07-29T12:00:00Z",
+      "effective_at": "2026-07-29T12:00:00Z",
+      "created_by": "director_fleet",
+      "provenance": [
+        {
+          "source_id": "source_fleet_primary",
+          "source_version": 1,
+          "source_checksum": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+          "locator": "fixture://fleet"
+        }
+      ],
+      "content_checksum": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "artifact_type": "observation",
+      "observation_id": "observation_fleet",
+      "run_id": "run_fleet",
+      "mission_id": "mission_fleet",
+      "variant": "What is Fleet?",
+      "response": "Fleet is an AI brand operating platform.",
+      "citations": [
+        "fixture://fleet"
+      ],
+      "evaluations": {
+        "accurate": true
+      },
+      "observed_at": "2026-07-29T12:00:00Z",
+      "version": 1,
+      "status": "active"
+    },
+    {
+      "schema_version": "2.0",
+      "brand_id": "brand_fleet",
+      "created_at": "2026-07-29T12:00:00Z",
+      "effective_at": "2026-07-29T12:00:00Z",
+      "created_by": "director_fleet",
+      "provenance": [
+        {
+          "source_id": "source_fleet_primary",
+          "source_version": 1,
+          "source_checksum": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+          "locator": "fixture://fleet"
+        }
+      ],
+      "content_checksum": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "artifact_type": "market_finding",
+      "finding_id": "finding_fleet",
+      "mission_ids": [
+        "mission_fleet"
+      ],
+      "observation_refs": [
+        "observation_fleet"
+      ],
+      "finding": "Fixture finding",
+      "classification": "no_action",
+      "confidence": 1.0,
+      "knowns": [
+        "fixture"
+      ],
+      "inferences": [],
+      "unknowns": [],
+      "paperclip_issue_id": "PAP-154",
+      "version": 1,
+      "status": "active"
+    },
+    {
+      "schema_version": "2.0",
+      "brand_id": "brand_fleet",
+      "created_at": "2026-07-29T12:00:00Z",
+      "effective_at": "2026-07-29T12:00:00Z",
+      "created_by": "director_fleet",
+      "provenance": [
+        {
+          "source_id": "source_fleet_primary",
+          "source_version": 1,
+          "source_checksum": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+          "locator": "fixture://fleet"
+        }
+      ],
+      "content_checksum": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "artifact_type": "remediation_proposal",
+      "proposal_id": "proposal_fleet",
+      "finding_id": "finding_fleet",
+      "proposed_change": {},
+      "expected_effect": "No change required",
+      "risk": "low",
+      "approval_state": "proposed",
+      "paperclip_issue_id": "PAP-154",
+      "version": 1,
+      "status": "active"
+    },
+    {
+      "schema_version": "2.0",
+      "brand_id": "brand_fleet",
+      "created_at": "2026-07-29T12:00:00Z",
+      "effective_at": "2026-07-29T12:00:00Z",
+      "created_by": "director_fleet",
+      "provenance": [
+        {
+          "source_id": "source_fleet_primary",
+          "source_version": 1,
+          "source_checksum": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+          "locator": "fixture://fleet"
+        }
+      ],
+      "content_checksum": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "artifact_type": "experiment",
+      "experiment_id": "experiment_fleet",
+      "proposal_id": "proposal_fleet",
+      "hypothesis": "No change is required",
+      "baseline_refs": [
+        "observation_fleet"
+      ],
+      "treatment": {},
+      "evaluation_plan": {},
+      "status": "planned",
+      "version": 1
+    },
+    {
+      "schema_version": "2.0",
+      "brand_id": "brand_fleet",
+      "created_at": "2026-07-29T12:00:00Z",
+      "effective_at": "2026-07-29T12:00:00Z",
+      "created_by": "director_fleet",
+      "provenance": [
+        {
+          "source_id": "source_fleet_primary",
+          "source_version": 1,
+          "source_checksum": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+          "locator": "fixture://fleet"
+        }
+      ],
+      "content_checksum": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "artifact_type": "outcome_event",
+      "outcome_id": "outcome_fleet",
+      "experiment_id": "experiment_fleet",
+      "metric": "fixture_score",
+      "value": 1.0,
+      "unit": "score",
+      "source_ref": {
+        "source_id": "source_fleet_primary",
+        "source_version": 1,
+        "source_checksum": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "locator": "fixture://fleet"
+      },
+      "observed_at": "2026-07-29T12:00:00Z",
+      "causal_status": "observed",
+      "version": 1,
+      "status": "active"
+    }
+  ]
+}

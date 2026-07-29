@@ -165,6 +165,21 @@ OS does not make external backup mounts or key escrow a G2.0/G2.1 completion
 condition. This does not weaken tenant isolation, record integrity, approval or
 runtime fail-closed controls.
 
+## Decision 11 — correction assurance is part of the foundation
+
+The G2 foundation uses a strict root JSON Schema and closed objects, and tests
+positive and negative instances for every record type. Runtime validation must
+match the schema's unknown-field rejection. Initial setup is atomic. Every
+denied authority mutation is audited. Entitlements are append-only versions
+with explicit supersession and effective windows. The portal read model requires
+its own entitlement.
+
+A database version change must include a real migration test, not only refusal
+of a future version. Production setup requires the exact Paperclip company UUID
+pin. Gate closure requires reviewed merge provenance and live, durable,
+checksum-bound appliance evidence; a direct commit or a static completion note
+is insufficient.
+
 ## Failure behaviour
 
 The authority fails closed when:

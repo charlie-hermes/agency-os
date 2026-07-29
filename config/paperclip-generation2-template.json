@@ -1,0 +1,192 @@
+{
+  "template_version": "1.0",
+  "template_id": "fleet-generation2-programme",
+  "authority": "Paperclip",
+  "scheduling": "dependency-and-evidence-only",
+  "goal": {
+    "title": "Fleet Generation 2 \u2014 unified brand operating platform"
+  },
+  "project": {
+    "name": "Fleet Generation 2",
+    "status": "planned"
+  },
+  "defaults": {
+    "status": "backlog",
+    "work_mode": "standard",
+    "release_requires_independent_review": true
+  },
+  "issues": [
+    {
+      "key": "FL2-00",
+      "gate": "G2.0",
+      "title": "Generation 2 programme control",
+      "parent": null,
+      "depends_on": [],
+      "priority": "high",
+      "acceptance": [
+        "baseline_commit",
+        "live_company_binding",
+        "full_regression",
+        "independent_review"
+      ]
+    },
+    {
+      "key": "FL2-10",
+      "gate": "G2.1",
+      "title": "Tenant, hostname, and product entitlements",
+      "parent": "FL2-00",
+      "depends_on": [
+        "FL2-00"
+      ],
+      "priority": "high",
+      "acceptance": [
+        "strict_schema",
+        "migration",
+        "tenant_isolation",
+        "entitlement_lifecycle",
+        "denial_audit",
+        "live_database"
+      ]
+    },
+    {
+      "key": "FL2-20",
+      "gate": "G2.1",
+      "title": "Brand Twin and Observatory foundation contracts",
+      "parent": "FL2-00",
+      "depends_on": [
+        "FL2-00"
+      ],
+      "priority": "high",
+      "acceptance": [
+        "positive_fixtures",
+        "negative_fixtures",
+        "content_regression",
+        "independent_review"
+      ]
+    },
+    {
+      "key": "FL2-30",
+      "gate": "G2.2",
+      "title": "Fleet Living Brand Twin",
+      "parent": "FL2-00",
+      "depends_on": [
+        "FL2-10",
+        "FL2-20"
+      ],
+      "priority": "high",
+      "acceptance": [
+        "approved_sources",
+        "claim_provenance",
+        "twin_read_model"
+      ]
+    },
+    {
+      "key": "FL2-40",
+      "gate": "G2.2",
+      "title": "Customer mission registry",
+      "parent": "FL2-00",
+      "depends_on": [
+        "FL2-30"
+      ],
+      "priority": "high",
+      "acceptance": [
+        "mission_contracts",
+        "variant_evidence",
+        "brand_isolation"
+      ]
+    },
+    {
+      "key": "FL2-50",
+      "gate": "G2.3",
+      "title": "AI Market Observatory",
+      "parent": "FL2-00",
+      "depends_on": [
+        "FL2-30",
+        "FL2-40"
+      ],
+      "priority": "high",
+      "acceptance": [
+        "repeatable_observation",
+        "finding_evidence",
+        "honest_uncertainty"
+      ]
+    },
+    {
+      "key": "FL2-60",
+      "gate": "G2.4",
+      "title": "Closed-loop Content Engine proof",
+      "parent": "FL2-00",
+      "depends_on": [
+        "FL2-50"
+      ],
+      "priority": "high",
+      "acceptance": [
+        "approved_finding",
+        "complete_content_workflow",
+        "controlled_destination",
+        "repeat_observation"
+      ]
+    },
+    {
+      "key": "FL2-70",
+      "gate": "G2.5",
+      "title": "Governed Fleet Brand Agent",
+      "parent": "FL2-00",
+      "depends_on": [
+        "FL2-60"
+      ],
+      "priority": "medium",
+      "acceptance": [
+        "bounded_capability",
+        "approval_boundary",
+        "action_receipt"
+      ]
+    },
+    {
+      "key": "FL2-80",
+      "gate": "G2.6",
+      "title": "Private multi-tenant client portal",
+      "parent": "FL2-00",
+      "depends_on": [
+        "FL2-70"
+      ],
+      "priority": "medium",
+      "acceptance": [
+        "client_portal_entitlement",
+        "server_built_projection",
+        "tenant_isolation",
+        "private_access"
+      ]
+    },
+    {
+      "key": "FL2-90",
+      "gate": "G2.7",
+      "title": "First external client pilot",
+      "parent": "FL2-00",
+      "depends_on": [
+        "FL2-80"
+      ],
+      "priority": "medium",
+      "acceptance": [
+        "owner_approval",
+        "client_binding",
+        "real_outcome_evidence"
+      ]
+    },
+    {
+      "key": "FL2-100",
+      "gate": "G2.8",
+      "title": "Scale and agentic commerce decision",
+      "parent": "FL2-00",
+      "depends_on": [
+        "FL2-90"
+      ],
+      "priority": "low",
+      "acceptance": [
+        "bounded_need",
+        "owner_decision",
+        "risk_review"
+      ]
+    }
+  ]
+}
