@@ -1,0 +1,281 @@
+{
+    "schema_version": "2.0",
+    "brand_id": "brand_fleet",
+    "database": "/var/lib/agency-os/fleet-brand-intelligence.sqlite3",
+    "created_at": "2026-07-29T00:00:00Z",
+    "actors": {
+        "director": "17ebea2f-4b8e-4188-bbf0-40ffd4e1e2b8",
+        "steward": "fleet-brand-brief-steward",
+        "analyst": "fleet-growth-intelligence-analyst"
+    },
+    "sources": [
+        {
+            "source_id": "source_fleet_enterprise_plan",
+            "source_class": "first_party_approved_plan",
+            "authority": "human_owner_approved",
+            "locator": "repo://docs/fleet-unified-platform-enterprise-plan.md"
+        },
+        {
+            "source_id": "source_fleet_generation2_decisions",
+            "source_class": "first_party_approved_decisions",
+            "authority": "human_owner_approved",
+            "locator": "repo://docs/fleet-generation2-decisions.md"
+        },
+        {
+            "source_id": "source_agency_os_live_status",
+            "source_class": "first_party_verified_status",
+            "authority": "repository_and_appliance_evidence",
+            "locator": "repo://docs/live-production-status.md"
+        }
+    ],
+    "entities": [
+        [
+            "entity_fleet",
+            "business",
+            "Fleet",
+            [
+                "Made by Fleet"
+            ]
+        ],
+        [
+            "entity_fleet_product",
+            "product",
+            "Fleet unified brand operating platform",
+            [
+                "Fleet platform"
+            ]
+        ],
+        [
+            "entity_content_engine",
+            "module",
+            "Fleet Content Engine",
+            [
+                "Content Engine"
+            ]
+        ],
+        [
+            "entity_brand_twin",
+            "module",
+            "Fleet Living Brand Twin",
+            [
+                "Brand Twin"
+            ]
+        ],
+        [
+            "entity_observatory",
+            "module",
+            "Fleet AI Market Observatory",
+            [
+                "AI Market Observatory"
+            ]
+        ],
+        [
+            "entity_fleet_dma",
+            "internal_tenant",
+            "Fleet DMA",
+            []
+        ],
+        [
+            "entity_paperclip",
+            "authority",
+            "Paperclip",
+            []
+        ],
+        [
+            "entity_madebyfleet_domain",
+            "domain",
+            "madebyfleet.com",
+            []
+        ]
+    ],
+    "claims": [
+        {
+            "claim_id": "claim_fleet_business_name",
+            "subject_entity_id": "entity_fleet",
+            "predicate": "business_name",
+            "object": "Fleet",
+            "source_id": "source_fleet_generation2_decisions",
+            "extract": "Fleet is the business and client-facing brand."
+        },
+        {
+            "claim_id": "claim_fleet_unified_product",
+            "subject_entity_id": "entity_fleet_product",
+            "predicate": "product_model",
+            "object": "One unified, modular product for content production and AI brand operations",
+            "source_id": "source_fleet_generation2_decisions",
+            "extract": "Fleet will sell one unified product with independently enabled modules."
+        },
+        {
+            "claim_id": "claim_content_engine_first_class",
+            "subject_entity_id": "entity_content_engine",
+            "predicate": "purpose",
+            "object": "Governed automated content production is a first-class Fleet capability",
+            "source_id": "source_fleet_generation2_decisions",
+            "extract": "Automated content production remains a first-class module."
+        },
+        {
+            "claim_id": "claim_paperclip_authority",
+            "subject_entity_id": "entity_paperclip",
+            "predicate": "authoritative_for",
+            "object": [
+                "goals",
+                "projects",
+                "tasks",
+                "dependencies",
+                "assignments",
+                "approvals",
+                "budgets",
+                "activity trail"
+            ],
+            "source_id": "source_fleet_generation2_decisions",
+            "extract": "Paperclip remains authoritative for work and approval state."
+        },
+        {
+            "claim_id": "claim_fleet_internal_tenant",
+            "subject_entity_id": "entity_fleet_dma",
+            "predicate": "paperclip_company_id",
+            "object": "d7e2e389-c7ad-486e-87ca-482e4ec6216d",
+            "source_id": "source_fleet_generation2_decisions",
+            "extract": "Fleet DMA is Fleet's internal Paperclip company and first internal tenant."
+        },
+        {
+            "claim_id": "claim_fleet_base_domain",
+            "subject_entity_id": "entity_madebyfleet_domain",
+            "predicate": "base_domain",
+            "object": "madebyfleet.com",
+            "source_id": "source_fleet_enterprise_plan",
+            "extract": "Fleet's client experience is planned under madebyfleet.com."
+        },
+        {
+            "claim_id": "claim_agency_os_live",
+            "subject_entity_id": "entity_fleet_product",
+            "predicate": "current_runtime_status",
+            "object": "The Agency OS runtime is live and its controlled workflows use mock publication unless a real provider is explicitly commissioned",
+            "source_id": "source_agency_os_live_status",
+            "extract": "The installed Hermes, Paperclip, Buzz and controlled workflow runtime is live production."
+        },
+        {
+            "claim_id": "claim_real_providers_unconnected",
+            "subject_entity_id": "entity_fleet_product",
+            "predicate": "real_provider_state",
+            "object": "External CMS, analytics, search, social, creative and CRM accounts are not currently asserted as connected",
+            "source_id": "source_agency_os_live_status",
+            "extract": "Provider accounts remain honest manual handoffs until separately commissioned and verified."
+        }
+    ],
+    "policies": [
+        [
+            "policy_approved_truth_only",
+            "claim_use",
+            "Only active, approved, evidence-backed claims may ground production content."
+        ],
+        [
+            "policy_unknown_stays_unknown",
+            "uncertainty",
+            "Missing or unverified information must be reported as unknown, never guessed."
+        ],
+        [
+            "policy_observation_not_truth",
+            "evidence_boundary",
+            "External search or AI observations never become approved Brand Twin truth automatically."
+        ],
+        [
+            "policy_no_unsupported_causality",
+            "measurement",
+            "Observed change must not be described as caused by Fleet work without appropriate experimental evidence."
+        ],
+        [
+            "policy_exact_approval_for_writes",
+            "external_action",
+            "Every external write requires approval of the exact immutable manifest and a scoped capability."
+        ],
+        [
+            "policy_plain_english",
+            "communication",
+            "Client-facing explanations must use plain English and clearly separate facts, inferences and unknowns."
+        ]
+    ],
+    "mission_groups": [
+        {
+            "audience": "brand leader",
+            "intents": [
+                "understand what an AI-ready brand operating system is",
+                "compare an AI brand operating system with a traditional agency",
+                "find a governed way to automate brand content",
+                "understand how approved brand truth can guide AI content",
+                "assess whether a brand is ready for AI agents",
+                "find a partner for AI-era brand operations",
+                "understand how AI systems perceive a brand",
+                "identify gaps in a brand's public AI presence",
+                "connect content production with AI discoverability",
+                "retain human approval in an agent-run marketing system"
+            ]
+        },
+        {
+            "audience": "chief marketing officer",
+            "intents": [
+                "modernise marketing operations with governed AI agents",
+                "improve brand consistency across automated content",
+                "measure whether AI assistants understand the brand",
+                "create an evidence-backed digital brand twin",
+                "reduce unsupported claims in AI-generated marketing",
+                "turn market intelligence into approved content action",
+                "evaluate a unified content and brand intelligence platform",
+                "understand the governance needed for agentic marketing",
+                "find a safe path from AI experiments to production",
+                "explain AI brand readiness to executive stakeholders"
+            ]
+        },
+        {
+            "audience": "content leader",
+            "intents": [
+                "scale content without losing brand accuracy",
+                "ground every content claim in approved evidence",
+                "automate research drafting editing QA and approval",
+                "create content that answers real customer missions",
+                "find content gaps from repeatable search evidence",
+                "keep a versioned record of brand sources and claims",
+                "prevent inactive facts from entering new content",
+                "connect content briefs to approved brand policy",
+                "produce a controlled preview before publication",
+                "retest discoverability after a content change"
+            ]
+        },
+        {
+            "audience": "marketing operations leader",
+            "intents": [
+                "coordinate specialist AI roles through one work authority",
+                "keep AI task and approval history auditable",
+                "separate client data in an agent platform",
+                "enable product modules independently for each brand",
+                "manage AI work by dependencies and evidence",
+                "control credentials and external publishing permissions",
+                "introduce AI agents without creating shadow workflows",
+                "preserve immutable evidence for automated decisions",
+                "connect agent discussions back to authoritative tasks",
+                "operate an AI marketing system with clear human control"
+            ]
+        },
+        {
+            "audience": "agency decision maker",
+            "intents": [
+                "offer automated content and AI brand readiness together",
+                "differentiate an AI-native agency from conventional automation",
+                "show clients a closed loop from insight to action",
+                "build a reusable brand intelligence foundation",
+                "use customer missions instead of vanity keyword lists",
+                "demonstrate honest uncertainty in AI market research",
+                "prove a governed multi-agent content workflow",
+                "prepare brands for agent-mediated discovery",
+                "design a modular AI brand service",
+                "evaluate Fleet as an AI-native brand operating partner"
+            ]
+        }
+    ],
+    "paperclip_issues": {
+        "brand_twin": "ff0b8150-03b0-47d3-958c-578b887c85a6",
+        "mission_registry": "7192a50f-8b91-486f-aa13-0cc53e6d5c35",
+        "observatory": "6f1b98b6-7b4f-4d67-bf76-680a807686c2",
+        "closed_loop": "b256f7b2-a4cf-488d-af90-d2aa66f8e895"
+    }
+}

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import multiprocessing
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -85,6 +86,14 @@ def prepare_fictional_article(
     brand_name: str = "Lantern Garden Co.",
     credential_endpoint: str = "mock://cms/lantern",
     credential_value: str = "fictional-credential-lantern",
+    article_objective: str = "Help fictional apartment gardeners choose a first project.",
+    audience: str = "Apartment gardeners",
+    information_gain: str = "A five-step decision checklist.",
+    cta: str = "Download the fictional worksheet.",
+    supported_claim_text: str = "The guide contains five checklist steps.",
+    destination_ref: str = "mock_cms:lantern",
+    internal_note: str = "Fictional fixture; no real client or claim.",
+    brand_grounding: dict[str, Any] | None = None,
     public_fields: dict[str, Any] | None = None,
     content_description: str = "A fictional five-step balcony garden checklist.",
 ) -> PreparedVerticalSlice:
@@ -158,8 +167,12 @@ def prepare_fictional_article(
         created_by={"actor_type": "agent", "actor_id": "agent_steward"},
         payload={
             "brand_name": brand_name,
-            "approved_claims": ["The guide contains five fictional checklist steps."],
+            "approved_claims": [supported_claim_text],
             "prohibited_claims": ["guaranteed results"],
+            **(
+                {"generation2_grounding": copy.deepcopy(brand_grounding)}
+                if brand_grounding is not None else {}
+            ),
         },
         status="approved",
     )
@@ -176,10 +189,14 @@ def prepare_fictional_article(
         created_by={"actor_type": "agent", "actor_id": "agent_strategist"},
         source_artifact_ids=[brand["artifact_id"]],
         payload={
-            "objective": "Help fictional apartment gardeners choose a first project.",
-            "audience": "Apartment gardeners",
-            "information_gain": "A five-step decision checklist.",
-            "cta": "Download the fictional worksheet.",
+            "objective": article_objective,
+            "audience": audience,
+            "information_gain": information_gain,
+            "cta": cta,
+            **(
+                {"brand_grounding_checksum": brand_grounding["content_checksum"]}
+                if brand_grounding is not None else {}
+            ),
         },
         status="approved",
     )
@@ -197,15 +214,30 @@ def prepare_fictional_article(
         source_artifact_ids=[brief["artifact_id"]],
         payload={
             "public_fields": public_fields,
-            "internal_notes": ["Fictional fixture; no real client or claim."],
-            "claim_register": [
-                {
-                    "claim_id": "claim_1",
-                    "text": "The guide contains five checklist steps.",
-                    "source_ref": brand["artifact_id"],
-                }
-            ],
-            "source_register": [brand["artifact_id"]],
+            "internal_notes": [internal_note],
+            "claim_register": (
+                [
+                    {
+                        "claim_id": claim["claim_id"],
+                        "text": copy.deepcopy(claim["object"]),
+                        "source_ref": brand_grounding["profile_checksum"],
+                    }
+                    for claim in brand_grounding["claims"]
+                ]
+                if brand_grounding is not None
+                else [
+                    {
+                        "claim_id": "claim_1",
+                        "text": supported_claim_text,
+                        "source_ref": brand["artifact_id"],
+                    }
+                ]
+            ),
+            "source_register": (
+                [brand["artifact_id"], brand_grounding["profile_checksum"]]
+                if brand_grounding is not None
+                else [brand["artifact_id"]]
+            ),
         },
     )
     store.put(principals["producer"], draft)
@@ -282,7 +314,7 @@ def prepare_fictional_article(
     manifest = make_publication_manifest(
         manifest_id="manifest_guide_v1",
         qa_package=qa_package,
-        destination_ref="mock_cms:lantern",
+        destination_ref=destination_ref,
         environment="sandbox",
         operation="publish",
         schedule_window=window,
@@ -297,7 +329,7 @@ def prepare_fictional_article(
         brand_id=brand_id,
         actor_id=principals["publisher"].actor_id,
         role_id=principals["publisher"].role_id,
-        destination_ref="mock_cms:lantern",
+        destination_ref=destination_ref,
         environment="sandbox",
         operation="publish",
         action_class="external_write",

@@ -32,7 +32,7 @@ class FleetInitializerTests(unittest.TestCase):
             second = initialise(self.config, database_path)
             self.assertEqual(first, second)
             self.assertEqual(first["schema_version"], 2)
-            self.assertEqual(first["enabled_modules"], ["content_engine"])
+            self.assertEqual(first["enabled_modules"], ["ai_market_observatory", "brand_twin", "content_engine"])
 
     def test_late_entitlement_failure_leaves_no_partial_tenant_or_hostname(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -67,7 +67,7 @@ class FleetInitializerTests(unittest.TestCase):
             before = connection.execute("SELECT COUNT(*) FROM authority_audit").fetchone()[0]
             connection.close()
             result = verify_foundation(config_path, database_path, company_pin)
-            self.assertEqual(result["enabled_modules"], ["content_engine"])
+            self.assertEqual(result["enabled_modules"], ["ai_market_observatory", "brand_twin", "content_engine"])
             connection = sqlite3.connect(database_path)
             after = connection.execute("SELECT COUNT(*) FROM authority_audit").fetchone()[0]
             connection.execute(

@@ -5,7 +5,7 @@ import subprocess
 import sys
 import unittest
 
-from agency_os.contracts import verify_record
+from agency_os.contracts import finalize_record, verify_record
 from agency_os.core_demo import run_fictional_core_workflow
 from agency_os.core_workflow import CORE_RUNTIME_ROLES, CoreApprovalDenied, run_core_workflow
 from agency_os.fictional_platforms import (
@@ -264,6 +264,68 @@ class CoreWorkflowTests(unittest.TestCase):
                 self.assertEqual(observed_calls, [0])
                 self.assertEqual(publisher.calls, 0)
 
+
+    def test_approved_brand_twin_grounding_reaches_the_publication_graph(self) -> None:
+        transport, lifecycle, board, buzz, publisher = _dependencies()
+        grounding = finalize_record(
+            {
+                "schema_version": "2.0",
+                "artifact_type": "content_grounding",
+                "brand_id": "brand_lantern",
+                "profile_checksum": "sha256:" + "1" * 64,
+                "claim_ids": ["claim_governed_content"],
+                "claims": [{"claim_id": "claim_governed_content", "object": "Governed content automation"}],
+                "policies": [],
+                "conflicts": [],
+                "evidence_gaps": [],
+            }
+        )
+
+        def approve(requested, _manifest):
+            return board.decide_approval(
+                requested["id"], decision="approve",
+                decision_note="Owner approved the exact grounded preview.",
+            )
+
+        publisher = MockPublisher(
+            destination_ref="mock_preview:fleet",
+            endpoint="mock://preview/fleet",
+            expected_credential="fictional-credential-lantern",
+        )
+
+        result = run_core_workflow(
+            paperclip=lifecycle, buzz=buzz, approval_authority=approve,
+            publisher=publisher, campaign_id="camp_grounded", asset_id="asset_grounded",
+            brand_grounding=grounding,
+            content_scenario={
+                "topic": "governed AI content operations explainer",
+                "audience": "brand leaders",
+                "objective": "Explain how approved brand truth grounds automated content.",
+                "information_gain": "A clear governed operating model.",
+                "cta": "Request a Fleet readiness review.",
+                "supported_claim_text": "Fleet combines approved brand truth with governed content automation.",
+                "destination_ref": "mock_preview:fleet",
+                "credential_endpoint": "mock://preview/fleet",
+                "public_fields": {
+                    "title": "Governed AI content operations",
+                    "body": ["Approved brand evidence grounds every supported claim."],
+                    "cta": "Request a Fleet readiness review.",
+                },
+            },
+        )
+        self.assertEqual(
+            result.records["brand_profile"]["payload"]["generation2_grounding_checksum"],
+            grounding["content_checksum"],
+        )
+        self.assertEqual(
+            result.records["published_draft"]["payload"]["claim_register"][0]["claim_id"],
+            "claim_governed_content",
+        )
+        self.assertEqual(
+            result.records["published_manifest"]["destination_ref"], "mock_preview:fleet"
+        )
+        self.assertEqual(publisher.calls, 1)
+        self.assertFalse(result.external_writes)
 
     def test_all_twelve_role_bundles_are_checksum_verified_in_a_fresh_process(self) -> None:
         completed = subprocess.run(
