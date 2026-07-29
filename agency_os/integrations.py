@@ -469,13 +469,19 @@ class PaperclipLifecycleAdapter:
             payload["requestedByAgentId"] = _require_uuid(
                 requested_by_agent_id, "Paperclip requester"
             )
-        return _approval_binding(
+        approval = _approval_binding(
             self.transport.request(
                 "POST", f"/api/companies/{self.company_id}/approvals", payload
             ),
             self.binding,
             "Paperclip approval",
         )
+        readback_ids = approval.get("issueIds")
+        if readback_ids is None:
+            approval["issueIds"] = list(validated_issue_ids)
+        elif readback_ids != validated_issue_ids:
+            raise IntegrationError("Paperclip approval issue binding changed")
+        return approval
 
     def get_approval(self, approval_id: str) -> dict[str, Any]:
         approval_id = _require_uuid(approval_id, "Paperclip approval_id")
