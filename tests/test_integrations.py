@@ -158,6 +158,24 @@ class IntegrationTests(unittest.TestCase):
             [item["id"] for item in adapter.get_approval_issues(approval["id"])],
             [task["id"]],
         )
+        class OmitIssueIdsOnApprovalRead:
+            def request(self, method, path, payload=None):
+                value = transport.request(method, path, payload)
+                if method == "GET" and path == f"/api/approvals/{approval['id']}":
+                    value = dict(value)
+                    value.pop("issueIds", None)
+                return value
+
+        omitted_adapter = PaperclipLifecycleAdapter(
+            OmitIssueIdsOnApprovalRead(), binding
+        )
+        self.assertEqual(
+            [
+                item["id"]
+                for item in omitted_adapter.get_approval_issues(approval["id"])
+            ],
+            [task["id"]],
+        )
         other_campaign = adapter.create_task(
             title="Other campaign", campaign_id="camp_other", stage="qa",
             acceptance_criteria=["separate"], idempotency_key="proof-other",
