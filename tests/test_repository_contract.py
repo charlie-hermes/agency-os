@@ -228,6 +228,10 @@ class RepositoryContractTests(unittest.TestCase):
             "fleet-portal/app/admin/[[...section]]/page.tsx",
         }
         self.assertEqual({path for path in required if not (ROOT / path).is_file()}, set())
+        environment = (ROOT / "fleet-portal/.env.example").read_text()
+        self.assertIn("NEXT_PUBLIC_WORKOS_REDIRECT_URI=", environment)
+        self.assertIn("FLEET_OWNER_WORKOS_SUBJECT=", environment)
+        self.assertNotIn("\nWORKOS_REDIRECT_URI=", "\n" + environment)
         plan = (ROOT / "docs/fleet-client-portal-g2.6-enterprise-plan.md").read_text()
         self.assertIn("G2.6 production admits Fleet DMA only", plan)
         self.assertIn("first external client's real Paperclip company remains", plan)
