@@ -493,9 +493,16 @@ class PaperclipLifecycleAdapter:
         if not isinstance(response, list):
             raise IntegrationError("Paperclip approval issue list is invalid")
         issues = [self._task(item) for item in response]
-        expected = set(approval.get("issueIds", []))
-        if {item["id"] for item in issues} != expected:
-            raise IntegrationError("Paperclip approval issues changed")
+        readback_ids = approval.get("issueIds")
+        if readback_ids is not None:
+            if not isinstance(readback_ids, list):
+                raise IntegrationError("Paperclip approval issue binding is invalid")
+            expected = {
+                _require_uuid(item, "Paperclip approval issue_id")
+                for item in readback_ids
+            }
+            if {item["id"] for item in issues} != expected:
+                raise IntegrationError("Paperclip approval issues changed")
         return issues
 
     def record_cost(self, payload: Mapping[str, Any]) -> dict[str, Any]:
