@@ -344,7 +344,7 @@ packet, using cited research when a choice is actually due.
 
 ### Gate 7 — complete fictional Search Authority Core slice
 
-**Status:** candidate complete; pending merge and target-runtime activation evidence.
+**Status:** complete and verified on the live Hermes, Paperclip and Buzz system.
 
 Run one article or landing page through live Paperclip work:
 
@@ -367,13 +367,13 @@ board approval before one protected mock publication, and a receipt that binds
 the Paperclip approval ID and evidence checksum. Rejected, pending and altered
 approvals all leave the publisher call count at zero. Measurement, optimisation,
 learning and closure cover eight role-owned Paperclip tasks through a
-transport-opaque engine and campaign-scoped operator projection. The remaining
-activation evidence is authenticated target-service execution and fresh-session
-loading by an installed Hermes runtime; neither is claimed by local tests.
+transport-opaque engine and campaign-scoped operator projection. Activation
+evidence was completed on 2026-07-29 with authenticated Paperclip and Buzz plus
+fresh-session loading by every installed Hermes role.
 
 ### Gate 8 — optional fictional Social Amplifier
 
-**Status:** implemented and verified locally; live runtime acceptance pending.
+**Status:** complete and verified on the live system.
 
 The branch starts only from an approved, published Core asset. It creates
 visual, social, QA, publishing, and measurement tasks, binds the social package
@@ -382,7 +382,7 @@ the product flag is off.
 
 ### Gate 9 — two-brand isolation proof
 
-**Status:** implemented and verified locally; live acceptance pending.
+**Status:** complete and verified on the live system.
 
 Two independent brands complete Core work with separate Paperclip and Buzz
 bindings. Cross-brand Social Amplifier startup is denied before task creation.
@@ -407,8 +407,8 @@ check exist. Real client publication still requires exact owner approval.
 
 ### Gate 12 — production operations and final acceptance
 
-**Status:** code candidate complete; installed 12-role activation, live
-Paperclip/Buzz acceptance, and owner production declaration remain.
+**Status:** complete. The owner approved production activation and the installed
+system passed its full live production verifier on 2026-07-29.
 
 Complete observability, service objectives, budgets, incident handling,
 security review, retention and offboarding, full acceptance evidence, rollback
@@ -437,10 +437,12 @@ governed DecisionPacket workshop.
 
 ## Current checkpoint
 
-- Active candidate: complete Core and Social workflows, two-brand isolation,
-  12 checksum-bound role bundles, provider handoffs, and the read-only operator
-  portal, with 140 repository tests passing.
-- Next dependent work: reconcile the installed VM from eight to 12 Hermes roles,
-  run authenticated Paperclip/Buzz acceptance, and record the production
-  evidence.
+- Status: live production. Core and Social workflows, two-brand isolation,
+  12 checksum-bound Hermes role bundles, authenticated Paperclip and Buzz,
+  provider handoffs, and the read-only operator portal are active and verified.
+- Evidence: 144 repository tests passed; all 12 roles passed fresh-session and
+  role-boundary checks; the live Core, Social and isolation workflows passed;
+  the secret audit passed; and the VM reported zero failed systemd units.
+- Real provider accounts remain manual handoffs until the owner supplies each
+  account, scoped credential and destination.
 - VM backup and disaster recovery remain outside this plan.

@@ -276,7 +276,7 @@ class CoreWorkflowTests(unittest.TestCase):
             {item["bundle_verification_status"] for item in evidence["roles"]},
             {"checksum_verified_in_fresh_process"},
         )
-        self.assertEqual(evidence["target_runtime_evidence"], "pending_live_activation")
+        self.assertEqual(evidence["target_runtime_evidence"], "live_production_verified")
 
 
 if __name__ == "__main__":

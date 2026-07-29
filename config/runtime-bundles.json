@@ -1,7 +1,7 @@
 {
   "schema_version": "1.0",
   "target_runtime": "hermes",
-  "target_runtime_evidence": "pending_live_activation",
+  "target_runtime_evidence": "live_production_verified",
   "bundle_verification_status": "checksum_verified",
   "roles": [
     {"role_id":"agency-director","agents_path":"roles/agency-director/AGENTS.md","agents_sha256":"2352bff7d10bf630fffd2e7cc8a14b0404f0776d3739d70a46d09fbc3f7894ae","soul_path":"roles/agency-director/SOUL.md","soul_sha256":"c1409a8701f56b7ef957558ec18d6bd49f9999218dafffa4baaa2e1814bfb395"},
