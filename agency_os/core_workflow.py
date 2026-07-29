@@ -195,7 +195,15 @@ def run_core_workflow(
     )
 
     producer_task = tasks_by_role["content-producer"]
-    paperclip.update_task(producer_task["id"], status="in_progress", comment=f"QA REVISE binds {records['rejected_draft']['content_checksum']}; remove unsupported guarantee.")
+    paperclip.update_task(
+        producer_task["id"],
+        status="todo",
+        comment=(
+            f"QA REVISE binds {records['rejected_draft']['content_checksum']}; "
+            "return this unassigned task to the revision queue and remove the "
+            "unsupported guarantee."
+        ),
+    )
     channel = buzz.create_context_channel(campaign_id=campaign_id, purpose="Resolve QA finding UNSUPPORTED_CLAIM", ttl_seconds=900)
     buzz.post_context(channel["id"], {"brand_id": brand_id, "campaign_id": campaign_id, "paperclip_issue_id": producer_task["id"], "decision_needed": "revision disposition", "exit_condition": "evidence-safe wording agreed"})
     decision = buzz.post_decision(channel["id"], paperclip_issue_id=producer_task["id"], decision="Remove the guarantee; retain only the supported five-check decision aid.", evidence_refs=["qa_revise_v0", "source_observation_v1"])

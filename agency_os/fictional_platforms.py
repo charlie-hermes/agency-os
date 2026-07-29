@@ -103,6 +103,13 @@ class InMemoryPaperclipTransport:
             if len(parts) == 2 and method == "PATCH":
                 assert body is not None
                 if "status" in body:
+                    if (
+                        body["status"] == "in_progress"
+                        and issue["assigneeAgentId"] is None
+                    ):
+                        raise IntegrationError(
+                            "Paperclip in_progress tasks require an assignee"
+                        )
                     issue["status"] = body["status"]
                 issue["version"] += 1
                 if body.get("comment"):
