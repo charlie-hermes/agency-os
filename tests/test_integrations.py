@@ -161,7 +161,13 @@ class IntegrationTests(unittest.TestCase):
         class OmitIssueIdsOnApprovalRead:
             def request(self, method, path, payload=None):
                 value = transport.request(method, path, payload)
-                if method == "GET" and path == f"/api/approvals/{approval['id']}":
+                if (
+                    method == "GET"
+                    and path == f"/api/approvals/{approval['id']}"
+                ) or (
+                    method == "POST"
+                    and path == f"/api/companies/{COMPANY_ID}/approvals"
+                ):
                     value = dict(value)
                     value.pop("issueIds", None)
                 return value
@@ -169,6 +175,11 @@ class IntegrationTests(unittest.TestCase):
         omitted_adapter = PaperclipLifecycleAdapter(
             OmitIssueIdsOnApprovalRead(), binding
         )
+        normalized = omitted_adapter.request_approval(
+            issue_ids=[task["id"]],
+            manifest=manifest,
+        )
+        self.assertEqual(normalized["issueIds"], [task["id"]])
         self.assertEqual(
             [
                 item["id"]
