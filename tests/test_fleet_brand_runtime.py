@@ -72,10 +72,10 @@ class FleetBrandRuntimeTests(unittest.TestCase):
                 self.assertFalse(target.exists())
 
     def test_source_bytes_and_approval_package_are_checksum_bound(self) -> None:
-        self.assertEqual(len(self.package["claim_checksums"]), 8)
-        self.assertEqual(len(self.package["policy_checksums"]), 6)
+        self.assertEqual(len(self.package["claims"]), 8)
+        self.assertEqual(len(self.package["policies"]), 6)
         changed = copy.deepcopy(self.package)
-        changed["claim_checksums"]["claim_fleet_business_name"] = "sha256:" + "0" * 64
+        changed["claims"][0]["checksum"] = "sha256:" + "0" * 64
         approval = copy.deepcopy(self.approval)
         approval["payload"] = changed
         with self.assertRaises(ContractError):

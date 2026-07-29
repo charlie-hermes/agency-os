@@ -146,12 +146,14 @@ def claim_approval_package(records: Mapping[str, Any]) -> dict[str, Any]:
         "schema_version": "2.0",
         "artifact_type": "brand_twin_claim_approval_package",
         "brand_id": "brand_fleet",
-        "claim_checksums": {
-            item["claim_id"]: item["content_checksum"] for item in records["claims"]
-        },
-        "policy_checksums": {
-            item["policy_id"]: item["content_checksum"] for item in records["policies"]
-        },
+        "claims": [
+            {"claim_id": item["claim_id"], "checksum": item["content_checksum"]}
+            for item in records["claims"]
+        ],
+        "policies": [
+            {"policy_id": item["policy_id"], "checksum": item["content_checksum"]}
+            for item in records["policies"]
+        ],
     }
 
 
