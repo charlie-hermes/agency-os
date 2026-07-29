@@ -3,6 +3,13 @@
 Agency OS is a contract-first, tenant-isolated reference implementation of the
 Hermes + Paperclip digital marketing agency design.
 
+## Production status
+
+**LIVE PRODUCTION — verified 2026-07-29.** The installed system passed the full
+12-role Hermes acceptance, authenticated Paperclip and Buzz workflows, Core and
+Social workflow checks, two-brand isolation, secret audit, service health, and
+repository gates. See `docs/live-production-status.md` for the exact scope.
+
 This fictional reference deliberately does six things:
 
 1. preserves the verified 12-role source library and implementation blueprint;
