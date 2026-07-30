@@ -199,6 +199,7 @@ class InMemoryPaperclipBoardTransport:
         *,
         decision: str,
         decision_note: str,
+        idempotency_key: str | None = None,
     ) -> Any:
         if decision not in {"approve", "reject"} or not decision_note:
             raise IntegrationError("Paperclip board operation is not admitted")
@@ -206,6 +207,11 @@ class InMemoryPaperclipBoardTransport:
         body = {"decisionNote": decision_note}
         self.calls.append(("POST", path, body))
         return self._authority.request("POST", path, body)
+
+    def get(self, approval_id: str) -> Any:
+        path = f"/api/approvals/{approval_id}"
+        self.calls.append(("GET", path, None))
+        return self._authority.request("GET", path)
 
 
 class InMemoryBuzzTransport:

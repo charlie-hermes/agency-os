@@ -2,3 +2,10 @@ __pycache__/
 *.py[cod]
 .coverage
 .pytest_cache/
+fleet-portal/node_modules/
+fleet-portal/.next/
+fleet-portal/tsconfig.tsbuildinfo
+fleet-portal/.env*
+!fleet-portal/.env.example
+fleet-portal/test-results/
+fleet-portal/playwright-report/

@@ -1,0 +1,21 @@
+{
+  "schema_version": "1.0",
+  "candidate_gates": ["G2.6A", "G2.6B", "G2.6C", "G2.6D"],
+  "paperclip_root_issue": "FL2-80",
+  "delivery_control": "dependency-and-evidence-only",
+  "criteria": [
+    {"id":"G26-PLAN-001","owner":"platform-assurance-reviewer","release_blocker":true,"command":"test -s docs/fleet-client-portal-g2.6-enterprise-plan.md && test -s docs/fleet-client-portal-g2.6-threat-model.md","expected_evidence":"approved enterprise contract and threat model are durable"},
+    {"id":"G26-MIGRATION-001","owner":"platform-assurance-reviewer","release_blocker":true,"command":"python3 -m unittest tests.test_fleet_tenancy.FleetTenantAuthorityTests.test_database_is_owner_only_and_has_migration_metadata","expected_evidence":"the protected tenant authority runs schema v3"},
+    {"id":"G26-ACCOUNT-001","owner":"platform-assurance-reviewer","release_blocker":true,"command":"python3 -m unittest tests.test_fleet_tenancy.FleetTenantAuthorityTests.test_account_brand_model_is_immutable_and_client_safe","expected_evidence":"account, client brand and tenant are immutable and client projections exclude Paperclip identity"},
+    {"id":"G26-HOST-IDENTITY-001","owner":"platform-assurance-reviewer","release_blocker":true,"command":"python3 -m unittest tests.test_fleet_portal.FleetPortalAuthorityTests.test_context_is_derived_from_session_and_exact_host","expected_evidence":"identity and exact host derive the context on the server"},
+    {"id":"G26-ISOLATION-001","owner":"platform-assurance-reviewer","release_blocker":true,"command":"python3 -m unittest tests.test_fleet_portal.FleetPortalAuthorityTests.test_two_tenants_with_same_resource_labels_remain_isolated","expected_evidence":"two same-label tenants remain isolated across the portal store"},
+    {"id":"G26-UPLOAD-001","owner":"platform-assurance-reviewer","release_blocker":true,"command":"python3 -m unittest tests.test_fleet_portal.FleetPortalAuthorityTests.test_upload_admission_checks_content_limits_and_malware","expected_evidence":"upload content, type, size and malware controls fail closed"},
+    {"id":"G26-SSRF-001","owner":"platform-assurance-reviewer","release_blocker":true,"command":"python3 -m unittest tests.test_fleet_portal.FleetPortalAuthorityTests.test_url_admission_blocks_ssrf_and_credentials","expected_evidence":"URL admission rejects credentials, unsafe schemes, ports, IPv4 and IPv6"},
+    {"id":"G26-INGEST-001","owner":"platform-assurance-reviewer","release_blocker":true,"command":"python3 -m unittest tests.test_fleet_portal_workers.FleetPortalWorkerTests.test_clean_text_source_becomes_review_required_not_approved","expected_evidence":"clean extraction becomes review-required and cannot self-approve"},
+    {"id":"G26-JOURNEY-001","owner":"platform-assurance-reviewer","release_blocker":true,"command":"python3 -m unittest tests.test_fleet_portal.FleetPortalAuthorityTests.test_source_candidate_command_and_catalogue_journey","expected_evidence":"source, candidate, command, receipt and catalogue are durable and checksummed"},
+    {"id":"G26-PAPERCLIP-001","owner":"platform-assurance-reviewer","release_blocker":true,"command":"python3 -m unittest tests.test_fleet_portal_workers.FleetPortalWorkerTests.test_worker_records_paperclip_then_completes_projection","expected_evidence":"the restricted worker records Paperclip authority before portal completion"},
+    {"id":"G26-UNKNOWN-001","owner":"platform-assurance-reviewer","release_blocker":true,"command":"python3 -m unittest tests.test_fleet_portal_workers.FleetPortalWorkerTests.test_uncertain_paperclip_outcome_is_never_reported_as_success","expected_evidence":"an uncertain Paperclip outcome remains unknown"},
+    {"id":"G26-FRONTEND-001","owner":"platform-assurance-reviewer","release_blocker":true,"command":"npm --prefix fleet-portal run lint && npm --prefix fleet-portal run typecheck && npm --prefix fleet-portal run build && npm --prefix fleet-portal run test:browser","expected_evidence":"the portal lints, type-checks, builds and passes desktop/mobile WCAG browser acceptance"},
+    {"id":"G26-REGRESSION-001","owner":"platform-assurance-reviewer","release_blocker":true,"command":"./scripts/verify","expected_evidence":"all existing Agency OS and G2.6 release tests remain green"}
+  ]
+}

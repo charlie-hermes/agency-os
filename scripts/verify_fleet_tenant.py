@@ -47,9 +47,9 @@ def verify_foundation(
         version = connection.execute(
             "SELECT version FROM schema_metadata WHERE id = 1"
         ).fetchone()
-        if version != (2,):
-            raise FleetTenancyError("live Fleet authority is not schema version 2")
-        FleetTenantAuthority._validate_schema_v2(connection)
+        if version != (3,):
+            raise FleetTenancyError("live Fleet authority is not schema version 3")
+        FleetTenantAuthority._validate_schema_v3(connection)
 
         tenant_row = connection.execute(
             "SELECT record_json, state FROM brand_tenants WHERE brand_id = ?",
@@ -68,6 +68,26 @@ def verify_foundation(
         )
         if tenant != expected_tenant:
             raise FleetTenancyError("live Fleet tenant record differs from config")
+
+        account = config["customer_account"]
+        account_row = connection.execute(
+            """
+            SELECT a.customer_account_id, a.account_name,
+                   b.client_brand_id, b.client_brand_name, b.tenant_id,
+                   b.brand_id, b.lifecycle_state
+            FROM customer_accounts a
+            JOIN client_brands b ON b.customer_account_id = a.customer_account_id
+            WHERE b.brand_id = ?
+            """,
+            (pilot["brand_id"],),
+        ).fetchone()
+        expected_account = (
+            account["customer_account_id"], account["account_name"],
+            account["client_brand_id"], account["client_brand_name"],
+            pilot["tenant_id"], pilot["brand_id"], account["lifecycle_state"],
+        )
+        if account_row != expected_account:
+            raise FleetTenancyError("live Fleet account and client-brand binding differs from config")
 
         expected_hostnames = {
             binding["hostname"]: make_portal_hostname_binding(
@@ -133,7 +153,7 @@ def verify_foundation(
 
     return {
         "status": "pass",
-        "schema_version": 2,
+        "schema_version": 3,
         "brand_id": pilot["brand_id"],
         "tenant_id": pilot["tenant_id"],
         "paperclip_company_id": company_id,
