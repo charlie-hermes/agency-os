@@ -45,7 +45,7 @@ export async function requirePortalContext(options?: { mutation?: boolean }): Pr
   if (!organizationId || !expectedOrganization || organizationId !== expectedOrganization) {
     throw new Error("Your WorkOS organisation is not admitted to this Fleet tenant.");
   }
-  await verifyCloudflareAccess(requestHeaders.get("cf-access-jwt-assertion"));
+  await verifyCloudflareAccess(requestHeaders.get("cf-access-jwt-assertion"), "portal");
   const actualOrigin = requestHeaders.get("origin");
   const origin = options?.mutation ? actualOrigin : `https://${hostname}`;
   if (origin !== `https://${hostname}`) throw new Error("The request origin is not admitted.");
@@ -67,7 +67,7 @@ export async function requireFleetAdministrator(): Promise<{ userId: string; hos
   const adminHost = process.env.FLEET_PORTAL_ADMIN_HOST ?? "admin.madebyfleet.com";
   if (hostname !== adminHost) notFound();
   const { user, organizationId } = await withAuth({ ensureSignedIn: true });
-  await verifyCloudflareAccess(requestHeaders.get("cf-access-jwt-assertion"));
+  await verifyCloudflareAccess(requestHeaders.get("cf-access-jwt-assertion"), "admin");
   if (organizationId !== process.env.FLEET_WORKOS_ORGANIZATION_ID) {
     throw new Error("The Fleet administration organisation is not admitted.");
   }
@@ -76,4 +76,22 @@ export async function requireFleetAdministrator(): Promise<{ userId: string; hos
   );
   if (!administrators.has(user.id)) throw new Error("Fleet administrator access is required.");
   return { userId: user.id, hostname };
+}
+
+export async function requireInvitationIdentity(): Promise<{
+  userId: string; email: string; organizationId: string; hostname: string; origin: string;
+}> {
+  const requestHeaders = await headers();
+  const hostname = exactHost(requestHeaders.get("host"));
+  const clientHost = process.env.FLEET_PORTAL_CLIENT_HOST ?? "fleet.madebyfleet.com";
+  if (hostname !== clientHost) notFound();
+  const { user, organizationId } = await withAuth({ ensureSignedIn: true });
+  if (!organizationId || organizationId !== process.env.FLEET_WORKOS_ORGANIZATION_ID) {
+    throw new Error("Your WorkOS organisation is not admitted to this invitation.");
+  }
+  await verifyCloudflareAccess(requestHeaders.get("cf-access-jwt-assertion"), "portal");
+  const origin = requestHeaders.get("origin");
+  if (origin !== `https://${hostname}`) throw new Error("The invitation origin is not admitted.");
+  if (!user.email) throw new Error("Your WorkOS identity has no verified invitation email.");
+  return { userId: user.id, email: user.email, organizationId, hostname, origin };
 }

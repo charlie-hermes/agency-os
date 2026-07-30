@@ -11,6 +11,7 @@ import copy
 import ipaddress
 import json
 import os
+import re
 import subprocess
 import urllib.error
 import urllib.parse
@@ -42,7 +43,10 @@ class PaperclipBoardTransport(Protocol):
         *,
         decision: str,
         decision_note: str,
+        idempotency_key: str | None = None,
     ) -> Any: ...
+
+    def get(self, approval_id: str) -> Any: ...
 
 
 class BuzzTransport(Protocol):
@@ -255,21 +259,24 @@ class PaperclipBoardHTTPTransport:
         *,
         decision: str,
         decision_note: str,
+        idempotency_key: str | None = None,
     ) -> Any:
         if decision not in {"approve", "reject"} or not decision_note:
             raise ContractError("Paperclip approval decision is invalid")
         approval_id = _require_uuid(approval_id, "Paperclip approval_id")
         path = f"/api/approvals/{approval_id}/{decision}"
         body = canonical_bytes({"decisionNote": decision_note})
+        headers = {
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self._bearer_token}",
+        }
+        if idempotency_key is not None:
+            if not re.fullmatch(r"[A-Za-z0-9._:-]{8,200}", idempotency_key):
+                raise ContractError("Paperclip idempotency key is invalid")
+            headers["Idempotency-Key"] = idempotency_key
         request = urllib.request.Request(
-            f"{self._base_url}{path}",
-            data=body,
-            method="POST",
-            headers={
-                "Accept": "application/json",
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {self._bearer_token}",
-            },
+            f"{self._base_url}{path}", data=body, method="POST", headers=headers,
         )
         try:
             with self._opener(request, timeout=self._timeout_seconds) as response:
@@ -282,6 +289,27 @@ class PaperclipBoardHTTPTransport:
             raise IntegrationError(
                 "Paperclip board response is not valid JSON"
             ) from exc
+
+
+    def get(self, approval_id: str) -> Any:
+        approval_id = _require_uuid(approval_id, "Paperclip approval_id")
+        request = urllib.request.Request(
+            f"{self._base_url}/api/approvals/{approval_id}",
+            method="GET",
+            headers={
+                "Accept": "application/json",
+                "Authorization": f"Bearer {self._bearer_token}",
+            },
+        )
+        try:
+            with self._opener(request, timeout=self._timeout_seconds) as response:
+                raw = response.read()
+        except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError) as exc:
+            raise IntegrationError("Paperclip board readback failed") from exc
+        try:
+            return json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise IntegrationError("Paperclip board readback is not valid JSON") from exc
 
 
 @dataclass(frozen=True)
@@ -578,6 +606,7 @@ class PaperclipBoardApprovalAdapter:
         *,
         decision: str,
         decision_note: str,
+        idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         if decision not in {"approve", "reject"} or not decision_note:
             raise ContractError("Paperclip approval decision is invalid")
@@ -587,9 +616,18 @@ class PaperclipBoardApprovalAdapter:
                 approval_id,
                 decision=decision,
                 decision_note=decision_note,
+                idempotency_key=idempotency_key,
             ),
             self.binding,
             "Paperclip approval decision",
+        )
+
+
+    def get_approval(self, approval_id: str) -> dict[str, Any]:
+        approval_id = _require_uuid(approval_id, "Paperclip approval_id")
+        return _approval_binding(
+            self.transport.get(approval_id), self.binding,
+            "Paperclip approval readback",
         )
 
 

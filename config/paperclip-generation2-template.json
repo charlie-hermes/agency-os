@@ -54,7 +54,7 @@
       "title": "Brand Twin and Observatory foundation contracts",
       "parent": "FL2-00",
       "depends_on": [
-        "FL2-00"
+        "FL2-10"
       ],
       "priority": "high",
       "acceptance": [
@@ -70,7 +70,6 @@
       "title": "Fleet Living Brand Twin",
       "parent": "FL2-00",
       "depends_on": [
-        "FL2-10",
         "FL2-20"
       ],
       "priority": "high",
@@ -86,7 +85,7 @@
       "title": "Customer mission registry",
       "parent": "FL2-00",
       "depends_on": [
-        "FL2-30"
+        "FL2-20"
       ],
       "priority": "high",
       "acceptance": [
@@ -101,7 +100,6 @@
       "title": "AI Market Observatory",
       "parent": "FL2-00",
       "depends_on": [
-        "FL2-30",
         "FL2-40"
       ],
       "priority": "high",
@@ -117,6 +115,7 @@
       "title": "Closed-loop Content Engine proof",
       "parent": "FL2-00",
       "depends_on": [
+        "FL2-30",
         "FL2-50"
       ],
       "priority": "high",
@@ -133,7 +132,8 @@
       "title": "Governed Fleet Brand Agent",
       "parent": "FL2-00",
       "depends_on": [
-        "FL2-60"
+        "FL2-10",
+        "FL2-30"
       ],
       "priority": "medium",
       "acceptance": [
@@ -148,6 +148,7 @@
       "title": "Fleet client portal programme control",
       "parent": "FL2-00",
       "depends_on": [
+        "FL2-10",
         "FL2-70"
       ],
       "priority": "medium",
@@ -162,11 +163,17 @@
       "gate": "G2.6A",
       "title": "Portal product, UX and security contract",
       "parent": "FL2-80",
-      "depends_on": ["FL2-70"],
+      "depends_on": [
+        "FL2-70"
+      ],
       "priority": "high",
       "acceptance": [
-        "system_of_record_matrix", "permission_matrix", "threat_model",
-        "responsive_prototype", "owner_acceptance", "assurance_acceptance"
+        "system_of_record_matrix",
+        "permission_matrix",
+        "threat_model",
+        "responsive_prototype",
+        "owner_acceptance",
+        "assurance_acceptance"
       ]
     },
     {
@@ -174,11 +181,17 @@
       "gate": "G2.6B",
       "title": "Identity, tenancy and provisioning foundation",
       "parent": "FL2-80",
-      "depends_on": ["FL2-80A"],
+      "depends_on": [
+        "FL2-80A"
+      ],
       "priority": "high",
       "acceptance": [
-        "v2_to_v3_migration", "workos_boundary", "server_built_projection",
-        "two_tenant_isolation", "lifecycle_compensation", "private_dto"
+        "v2_to_v3_migration",
+        "workos_boundary",
+        "server_built_projection",
+        "two_tenant_isolation",
+        "lifecycle_compensation",
+        "private_dto"
       ]
     },
     {
@@ -186,11 +199,17 @@
       "gate": "G2.6C",
       "title": "Launch Room and authoritative decision journey",
       "parent": "FL2-80",
-      "depends_on": ["FL2-80B"],
+      "depends_on": [
+        "FL2-80B"
+      ],
       "priority": "high",
       "acceptance": [
-        "safe_source_admission", "candidate_fact", "paperclip_decision",
-        "command_reconciliation", "brand_twin_version", "audit_receipt"
+        "safe_source_admission",
+        "candidate_fact",
+        "paperclip_decision",
+        "command_reconciliation",
+        "brand_twin_version",
+        "audit_receipt"
       ]
     },
     {
@@ -198,11 +217,17 @@
       "gate": "G2.6D",
       "title": "Portal product, administration and live operations",
       "parent": "FL2-80",
-      "depends_on": ["FL2-80C"],
+      "depends_on": [
+        "FL2-80C"
+      ],
       "priority": "high",
       "acceptance": [
-        "client_surfaces", "fleet_admin_surfaces", "durable_content_catalogue",
-        "wcag_2_2_aa", "responsive_browser_tests", "live_appliance_evidence"
+        "client_surfaces",
+        "fleet_admin_surfaces",
+        "durable_content_catalogue",
+        "wcag_2_2_aa",
+        "responsive_browser_tests",
+        "live_appliance_evidence"
       ]
     },
     {

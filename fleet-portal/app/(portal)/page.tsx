@@ -1,29 +1,32 @@
 import Link from "next/link";
 import { Metric, PageIntro, SectionHeading, Status } from "@/components/ui";
-import { portalSnapshot } from "@/lib/view-model";
+import { requirePortalContext } from "@/lib/identity";
+import { getPortalProjection } from "@/lib/view-model";
 
-export default function HomePage() {
+export default async function HomePage() {
+  const context = await requirePortalContext();
+  const view = await getPortalProjection(context);
+  const claimCount = view.brand_profile?.claims.length ?? view.brand_twin_claims.length;
+  const pending = view.approval_counts.pending ?? 0;
+  const missions = view.observatory?.complete_run_count ?? 0;
+  const activeModules = Object.values(view.modules).filter(Boolean).length;
   return <>
-    <PageIntro eyebrow="Good afternoon" title="Your brand, moving with intent."
-      description="A clear view of what Fleet understands, what needs your attention, and where the system is creating value." />
+    <PageIntro eyebrow="Fleet workspace" title="Your brand, moving with intent."
+      description="A live view of what Fleet understands, what needs your attention, and what the governed system has completed." />
     <section className="metric-grid" aria-label="Fleet status">
-      <Metric value="Live" label="Operating state" detail="Fleet DMA is the only production portal tenant" tone="green" />
-      <Metric value="0" label="Decisions waiting" detail="Nothing is currently blocking the system" />
-      <Metric value="8" label="Evidence-bound claims" detail="Derived from three approved Fleet sources" />
-      <Metric value="5" label="Mission groups" detail="Controlled AI-market observation coverage" tone="amber" />
+      <Metric value={view.lifecycle_state} label="Operating state" detail="Read from the current tenant authority" tone={view.lifecycle_state === "active" ? "green" : "amber"} />
+      <Metric value={String(pending)} label="Decisions waiting" detail="Current unresolved Paperclip approvals" />
+      <Metric value={String(claimCount)} label="Evidence-bound claims" detail="Current approved Brand Twin projection" />
+      <Metric value={String(missions)} label="Observation runs" detail="Completed Observatory evidence runs" tone="amber" />
     </section>
-    <section className="panel feature-panel">
-      <div><span className="eyebrow accent">Current focus</span><h2>The Fleet product foundation is active.</h2>
-        <p>Content production, Brand Twin intelligence, AI-market observation and the governed Brand Agent now work as one controlled system.</p>
-        <Link className="primary-link" href="/brand">Explore the Brand Twin <span aria-hidden="true">→</span></Link></div>
-      <div className="orbital" aria-hidden="true"><i /><i /><i /><strong>F</strong></div>
-    </section>
-    <SectionHeading kicker="Products" title="Your active Fleet system" />
-    <section className="module-grid">
-      {portalSnapshot.modules.map((module, index) => <article className="module-card" key={module.name}>
-        <span className="module-number">0{index + 1}</span><Status tone="good">{module.state}</Status>
-        <h3>{module.name}</h3><p>{module.detail}</p>
-      </article>)}
-    </section>
+    <section className="panel feature-panel"><div><span className="eyebrow accent">Current system</span><h2>{activeModules} Fleet modules are enabled.</h2>
+      <p>Every number on this page is produced from the protected Fleet authorities. Unknown or unavailable information is shown as such.</p>
+      <Link className="primary-link" href="/brand">Explore the Brand Twin <span aria-hidden="true">→</span></Link></div>
+      <div className="orbital" aria-hidden="true"><i /><i /><i /><strong>F</strong></div></section>
+    <SectionHeading kicker="Products" title="Your enabled Fleet system" />
+    <section className="module-grid">{Object.entries(view.modules).map(([module, enabled], index) => <article className="module-card" key={module}>
+      <span className="module-number">{String(index + 1).padStart(2, "0")}</span><Status tone={enabled ? "good" : "attention"}>{enabled ? "Enabled" : "Unavailable"}</Status>
+      <h3>{module.replaceAll("_", " ")}</h3><p>Technical access is read from the current entitlement authority.</p>
+    </article>)}</section>
   </>;
 }

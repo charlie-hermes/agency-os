@@ -37,7 +37,11 @@ def prepare_sqlite_storage(database_path: Path) -> SQLiteStorageIdentity:
         except OSError as exc:
             raise SQLiteStorageError("could not create SQLite database securely") from exc
         else:
-            os.close(descriptor)
+            try:
+                if os.geteuid() == 0 and parent_stat.st_uid != 0:
+                    os.fchown(descriptor, parent_stat.st_uid, parent_stat.st_gid)
+            finally:
+                os.close(descriptor)
     except OSError as exc:
         raise SQLiteStorageError("could not inspect SQLite database") from exc
 
@@ -63,8 +67,10 @@ def validate_sqlite_storage(
         raise SQLiteStorageError("could not inspect SQLite database") from exc
     if stat.S_ISLNK(database_stat.st_mode) or not stat.S_ISREG(database_stat.st_mode):
         raise SQLiteStorageError("SQLite database must be a non-symlink regular file")
-    if database_stat.st_uid != os.geteuid():
+    if os.geteuid() != 0 and database_stat.st_uid != os.geteuid():
         raise SQLiteStorageError("SQLite database must be owned by the service account")
+    if os.geteuid() == 0 and database_stat.st_uid != parent_stat.st_uid:
+        raise SQLiteStorageError("root may only inspect a database owned with its parent")
     if stat.S_IMODE(database_stat.st_mode) != 0o600:
         raise SQLiteStorageError("SQLite database mode must be 0600")
 
@@ -86,7 +92,7 @@ def _validate_parent(parent_path: Path) -> os.stat_result:
         raise SQLiteStorageError("could not inspect SQLite parent directory") from exc
     if stat.S_ISLNK(parent_stat.st_mode) or not stat.S_ISDIR(parent_stat.st_mode):
         raise SQLiteStorageError("SQLite parent must be a non-symlink directory")
-    if parent_stat.st_uid != os.geteuid():
+    if os.geteuid() != 0 and parent_stat.st_uid != os.geteuid():
         raise SQLiteStorageError("SQLite parent must be owned by the service account")
     if stat.S_IMODE(parent_stat.st_mode) & 0o022:
         raise SQLiteStorageError(

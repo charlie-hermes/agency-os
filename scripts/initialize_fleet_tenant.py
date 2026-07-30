@@ -15,11 +15,13 @@ sys.path.insert(0, str(ROOT))
 
 from agency_os.fleet_tenancy import (
     PRODUCT_MODULES,
+    PROVISIONING_STEPS,
     FleetTenantAuthority,
     make_brand_tenant,
     make_portal_hostname_binding,
     make_product_entitlement,
 )
+from agency_os.contracts import canonical_checksum
 from agency_os.store import Principal
 
 
@@ -95,8 +97,37 @@ def initialise(
         client_brand_name=account["client_brand_name"],
         tenant_id=pilot["tenant_id"],
         workos_organization_id=organisation,
-        lifecycle_state=account["lifecycle_state"],
+        lifecycle_state="provisioning",
     )
+    provisioning_run_id = "provisioning_fleet_g26"
+    provisioning = authority.start_provisioning(
+        director,
+        provisioning_run_id=provisioning_run_id,
+        client_brand_id=account["client_brand_id"],
+    )
+    for step_key in PROVISIONING_STEPS:
+        provisioning = authority.complete_provisioning_step(
+            director,
+            provisioning_run_id=provisioning_run_id,
+            step_key=step_key,
+            evidence_checksum=canonical_checksum({
+                "schema_version": "1.0",
+                "provisioning_run_id": provisioning_run_id,
+                "step_key": step_key,
+                "tenant_id": pilot["tenant_id"],
+                "brand_id": pilot["brand_id"],
+                "configuration_checksum": canonical_checksum(config),
+            }),
+        )
+    account_projection = authority.account_brand_projection(director)
+    if account["lifecycle_state"] == "active" and account_projection["lifecycle_state"] != "active":
+        for next_state in ("launch_ready", "assurance", "active"):
+            account_projection = authority.transition_tenant_lifecycle(
+                director,
+                client_brand_id=account["client_brand_id"],
+                expected_version=account_projection["lifecycle_version"],
+                next_state=next_state,
+            )
     enabled_modules = {record["module"] for record in entitlements}
     return {
         "schema_version": authority.schema_version(),
@@ -107,6 +138,7 @@ def initialise(
         "enabled_modules": sorted(enabled_modules),
         "disabled_modules": sorted(PRODUCT_MODULES.difference(enabled_modules)),
         "account": account_projection,
+        "provisioning": provisioning,
     }
 
 

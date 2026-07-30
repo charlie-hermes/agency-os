@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shutil
 import subprocess
 import time
@@ -77,6 +78,7 @@ def process_source(
     output_directory: Path,
     *,
     scanner: Callable[[Path], None] = scan_with_clamav,
+    current_case_bytes: int = 0,
 ) -> dict[str, Any]:
     metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
     required = {
@@ -85,12 +87,16 @@ def process_source(
     }
     if not isinstance(metadata, dict) or not required.issubset(metadata):
         raise FleetIngestError("source metadata is incomplete")
+    source_id = metadata.get("source_id")
+    if not isinstance(source_id, str) or not re.fullmatch(r"source_[A-Za-z0-9_-]{1,96}", source_id):
+        raise FleetIngestError("source identity is invalid")
     content = source_path.read_bytes()
     scanner(source_path)
     inspection = SourceAdmissionPolicy.inspect_upload(
         filename=metadata["original_filename"],
         declared_content_type=metadata["declared_content_type"],
-        content=content, malware_clean=True,
+        content=content, current_case_bytes=current_case_bytes,
+        malware_clean=True,
     )
     extracted = extract_text(source_path, inspection["detected_type"])
     if not extracted.strip():
@@ -114,6 +120,42 @@ def process_source(
     return record
 
 
+def _existing_case_bytes(spool_root: Path) -> dict[tuple[str, str], int]:
+    totals: dict[tuple[str, str], int] = {}
+    for directory_name in ("processed",):
+        directory = spool_root / directory_name
+        if not directory.exists():
+            continue
+        for metadata_path in directory.glob("*.json"):
+            if metadata_path.name.endswith(".error.json"):
+                continue
+            try:
+                metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+                source_path = Path(str(metadata_path)[:-5])
+                key = (str(metadata["tenant_id"]), str(metadata["brand_id"]))
+                if source_path.is_file() and not source_path.is_symlink():
+                    totals[key] = totals.get(key, 0) + source_path.stat().st_size
+            except (OSError, KeyError, TypeError, json.JSONDecodeError):
+                continue
+    return totals
+
+
+def purge_rejected_uploads(spool_root: Path, *, now: float | None = None) -> int:
+    rejected = spool_root / "rejected"
+    if not rejected.exists():
+        return 0
+    cutoff = (time.time() if now is None else now) - 7 * 24 * 60 * 60
+    removed = 0
+    for path in rejected.iterdir():
+        try:
+            if path.is_file() and not path.is_symlink() and path.stat().st_mtime < cutoff:
+                path.unlink()
+                removed += 1
+        except OSError:
+            continue
+    return removed
+
+
 def process_spool(
     spool_root: Path, *, scanner: Callable[[Path], None] = scan_with_clamav,
 ) -> dict[str, int]:
@@ -126,6 +168,8 @@ def process_spool(
     for directory in (incoming, review, processed, rejected):
         directory.mkdir(mode=0o700, parents=True, exist_ok=True)
     result = {"review_required": 0, "rejected": 0, "incomplete": 0}
+    purge_rejected_uploads(spool_root)
+    case_bytes = _existing_case_bytes(spool_root)
     for source in sorted(incoming.iterdir()):
         if source.name.endswith((".json", ".part")):
             continue
@@ -137,7 +181,15 @@ def process_spool(
             result["rejected"] += 1
             continue
         try:
-            record = process_source(source, metadata, review, scanner=scanner)
+            metadata_value = json.loads(metadata.read_text(encoding="utf-8"))
+            source_id = metadata_value.get("source_id")
+            if not isinstance(source_id, str) or not source.name.startswith(f"{source_id}."):
+                raise FleetIngestError("spooled source filename does not match its metadata")
+            key = (str(metadata_value.get("tenant_id", "")), str(metadata_value.get("brand_id", "")))
+            record = process_source(
+                source, metadata, review, scanner=scanner,
+                current_case_bytes=case_bytes.get(key, 0),
+            )
         except (FleetIngestError, OSError, ValueError, json.JSONDecodeError, zipfile.BadZipFile):
             destination = rejected / source.name
             shutil.move(str(source), destination)
@@ -153,6 +205,7 @@ def process_spool(
         destination = processed / source.name
         shutil.move(str(source), destination)
         shutil.move(str(metadata), Path(f"{destination}.json"))
+        case_bytes[key] = case_bytes.get(key, 0) + destination.stat().st_size
         result[record["state"]] += 1
     return result
 

@@ -21,7 +21,7 @@ export function PortalShell({ context, children }: { context: PortalContext; chi
         <div className="tenant-card">
           <span className="eyebrow">Workspace</span>
           <strong>Fleet</strong>
-          <span className="tenant-state"><i /> Live internal pilot</span>
+          <span className="tenant-state"><i /> Private authorised workspace</span>
         </div>
         <nav aria-label="Primary">
           {navigation.map(([label, href]) => <Link key={href} href={href}>{label}</Link>)}

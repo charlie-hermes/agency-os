@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import io
+import json
 import tempfile
 import unittest
+import zipfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -12,6 +15,37 @@ from agency_os.fleet_portal import (
     PortalRequestContext,
     SourceAdmissionPolicy,
 )
+from agency_os.fleet_tenancy import FleetTenantAuthority
+from agency_os.store import Principal
+from scripts.initialize_fleet_tenant import initialise as initialise_tenant
+from scripts.prepare_fleet_portal_approval import prepare_candidate_approval
+
+
+class _ApprovalLifecycle:
+    brand_id = "brand_fleet"
+    task_id = "4c73dd4e-e72b-4fdc-887e-7786bfe46082"
+    approval_id = "aef6ad0a-b751-44ac-8992-41f0cdfd93e1"
+
+    def __init__(self) -> None:
+        self.requests = 0
+        self.approval = None
+
+    def create_task(self, **_values):
+        return {"id": self.task_id}
+
+    def request_approval(self, *, issue_ids, manifest):
+        self.requests += 1
+        self.approval = {
+            "id": self.approval_id, "status": "pending",
+            "companyId": "d7e2e389-c7ad-486e-87ca-482e4ec6216d",
+            "payload": dict(manifest), "issueIds": list(issue_ids),
+        }
+        return dict(self.approval)
+
+    def get_approval(self, approval_id):
+        if self.approval is None or approval_id != self.approval_id:
+            raise KeyError(approval_id)
+        return dict(self.approval)
 
 
 FUTURE = "2099-01-01T00:00:00Z"
@@ -183,6 +217,161 @@ class FleetPortalAuthorityTests(unittest.TestCase):
                 malware_clean=True,
             )
 
+    def test_upload_reservations_enforce_capacity_before_bytes_are_written(self) -> None:
+        for index in range(5):
+            reservation = self.authority.reserve_source_upload(
+                self.context, source_id=f"source_capacity_{index}",
+                filename=f"source-{index}.txt",
+                size_bytes=SourceAdmissionPolicy.maximum_file_bytes,
+                purpose="Brand evidence",
+            )
+            self.assertEqual(reservation["state"], "reserved")
+        replay = self.authority.reserve_source_upload(
+            self.context, source_id="source_capacity_0", filename="source-0.txt",
+            size_bytes=SourceAdmissionPolicy.maximum_file_bytes,
+            purpose="Brand evidence",
+        )
+        self.assertEqual(replay["state"], "reserved")
+        with self.assertRaisesRegex(FleetPortalError, "capacity"):
+            self.authority.reserve_source_upload(
+                self.context, source_id="source_capacity_over", filename="over.txt",
+                size_bytes=1, purpose="Brand evidence",
+            )
+        self.authority.cancel_source_upload(
+            self.context, source_id="source_capacity_0",
+        )
+        admitted = self.authority.reserve_source_upload(
+            self.context, source_id="source_capacity_replacement", filename="replacement.txt",
+            size_bytes=1, purpose="Brand evidence",
+        )
+        self.assertEqual(admitted["state"], "reserved")
+
+    def test_retention_expires_abandoned_upload_reservations(self) -> None:
+        self.authority.reserve_source_upload(
+            self.context, source_id="source_abandoned", filename="abandoned.txt",
+            size_bytes=10, purpose="Brand evidence",
+        )
+        connection = self.authority._connect()
+        try:
+            connection.execute(
+                "UPDATE upload_reservations SET created_at = ?, updated_at = ? "
+                "WHERE source_id = ?",
+                ("2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z", "source_abandoned"),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+        result = self.authority.enforce_retention(
+            now=datetime(2026, 1, 1, 2, tzinfo=timezone.utc),
+        )
+        self.assertEqual(result["abandoned_upload_reservations"], 1)
+        connection = self.authority._connect()
+        try:
+            state = connection.execute(
+                "SELECT state FROM upload_reservations WHERE source_id = ?",
+                ("source_abandoned",),
+            ).fetchone()[0]
+        finally:
+            connection.close()
+        self.assertEqual(state, "expired")
+
+    def test_upload_case_quota_and_archive_bomb_fail_closed(self) -> None:
+        with self.assertRaises(FleetPortalError):
+            SourceAdmissionPolicy.inspect_upload(
+                filename="over-limit.txt", declared_content_type="text/plain",
+                content=b"ab", current_case_bytes=SourceAdmissionPolicy.maximum_case_bytes - 1,
+                malware_clean=True,
+            )
+        container = io.BytesIO()
+        with zipfile.ZipFile(container, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr("word/document.xml", b"0" * (2 * 1024 * 1024))
+        with self.assertRaisesRegex(FleetPortalError, "compression ratio"):
+            SourceAdmissionPolicy.inspect_upload(
+                filename="bomb.docx",
+                declared_content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                content=container.getvalue(), malware_clean=True,
+            )
+
+    def test_invitation_is_email_bound_atomic_and_revocable(self) -> None:
+        invitation = self.authority.issue_invitation(
+            actor_id="user_fleet", invitation_id="invitation_1",
+            invitation_token="t" * 32, email="new.owner@example.com",
+            workos_organization_id="org_fleet", tenant_id="tenant_fleet",
+            brand_id="brand_fleet", client_role="approver",
+            approval_scopes=("brand_fact",), hostname="fleet.madebyfleet.com",
+        )
+        self.assertEqual(invitation["state"], "pending")
+        with self.assertRaises(FleetPortalAuthorizationError):
+            self.authority.accept_invitation(
+                invitation_id="invitation_1", invitation_token="t" * 32,
+                invited_email="attacker@example.com", verified_hostname="fleet.madebyfleet.com",
+                membership_id="membership_invited",
+                workos_subject="user_invited", workos_organization_id="org_fleet",
+                customer_account_id="account_brand_fleet",
+                client_brand_id="client_brand_fleet", entitlement_version=1,
+            )
+        self.authority.accept_invitation(
+            invitation_id="invitation_1", invitation_token="t" * 32,
+            invited_email="NEW.OWNER@example.com", verified_hostname="fleet.madebyfleet.com",
+            membership_id="membership_invited",
+            workos_subject="user_invited", workos_organization_id="org_fleet",
+            customer_account_id="account_brand_fleet",
+            client_brand_id="client_brand_fleet", entitlement_version=1,
+        )
+        invited = self.authority.resolve_verified_identity(
+            workos_subject="user_invited", workos_organization_id="org_fleet",
+            hostname="fleet.madebyfleet.com", origin="https://fleet.madebyfleet.com",
+            access_identity_verified=True, session_id="workos:invited",
+            correlation_id="correlation_invited",
+        )
+        self.assertEqual(invited.client_role, "approver")
+        self.authority.revoke_membership(
+            membership_id="membership_invited", actor_id="user_fleet",
+        )
+        with self.assertRaises(FleetPortalAuthorizationError):
+            self.authority.resolve_verified_identity(
+                workos_subject="user_invited", workos_organization_id="org_fleet",
+                hostname="fleet.madebyfleet.com", origin="https://fleet.madebyfleet.com",
+                access_identity_verified=True, session_id="workos:invited",
+                correlation_id="correlation_revoked",
+            )
+
+    def test_portal_rechecks_live_lifecycle_and_entitlement(self) -> None:
+        root = Path(self.temporary_directory.name)
+        tenant_database = root / "fleet-tenancy.sqlite3"
+        config = json.loads(
+            (Path(__file__).resolve().parents[1] / "config/fleet-generation2.json").read_text()
+        )
+        initialise_tenant(config, tenant_database)
+        portal = FleetPortalAuthority(
+            root / "authoritative-portal.sqlite3",
+            tenant_authority_path=tenant_database,
+        )
+        portal.register_membership(
+            actor_id="fleet_admin", membership_id="authoritative_owner",
+            workos_subject="authoritative_owner", workos_organization_id="org_fleet_g26_acceptance",
+            customer_account_id="account_fleet", client_brand_id="client_brand_fleet",
+            tenant_id="tenant_fleet", brand_id="brand_fleet", client_role="owner",
+            approval_scopes=("brand_fact",), hostname="fleet.madebyfleet.com",
+            entitlement_version=1,
+        )
+        context = portal.resolve_verified_identity(
+            workos_subject="authoritative_owner",
+            workos_organization_id="org_fleet_g26_acceptance",
+            hostname="fleet.madebyfleet.com", origin="https://fleet.madebyfleet.com",
+            access_identity_verified=True, session_id="workos:authoritative",
+            correlation_id="authoritative_access",
+        )
+        self.assertEqual(portal.portal_projection(context)["lifecycle_state"], "active")
+        tenancy = FleetTenantAuthority(tenant_database)
+        director = Principal(
+            config["internal_pilot"]["agency_director_actor_id"],
+            "agency-director", "brand_fleet",
+        )
+        tenancy.suspend_entitlement(director, "client_portal")
+        with self.assertRaises(FleetPortalAuthorizationError):
+            portal.portal_projection(context)
+
     def test_url_admission_blocks_ssrf_and_credentials(self) -> None:
         self.assertEqual(
             SourceAdmissionPolicy.validate_url_hop(
@@ -277,6 +466,39 @@ class FleetPortalAuthorityTests(unittest.TestCase):
             source_checksum=source["record_checksum"],
         )
         self.assertEqual(self.authority.list_content(self.context)[0]["content_id"], item["content_id"])
+
+    def test_fleet_review_creates_and_replays_one_exact_paperclip_packet(self) -> None:
+        inspection = SourceAdmissionPolicy.inspect_upload(
+            filename="brand.txt", declared_content_type="text/plain",
+            content=b"Fleet is built for the AI economy.", malware_clean=True,
+        )
+        source = self.authority.record_source(
+            self.context, source_id="source_packet", inspection=inspection,
+            purpose="Brand fact", consent_basis="owner supplied",
+            visibility="client_and_fleet", sensitivity="internal",
+        )
+        candidate = self.authority.create_candidate_fact(
+            self.context, candidate_id="candidate_packet", source_id=source["source_id"],
+            source_locator="line 1", statement="Fleet is built for the AI economy.",
+        )
+        self.authority.confirm_candidate(
+            self.context, candidate_id=candidate["candidate_id"],
+            expected_checksum=candidate["candidate_checksum"],
+            statement=candidate["statement"],
+        )
+        lifecycle = _ApprovalLifecycle()
+        checkpoint = Path(self.temporary_directory.name) / "candidate_packet.json"
+        first = prepare_candidate_approval(
+            authority=self.authority, lifecycle=lifecycle,
+            candidate_id="candidate_packet", checkpoint_path=checkpoint,
+        )
+        second = prepare_candidate_approval(
+            authority=self.authority, lifecycle=lifecycle,
+            candidate_id="candidate_packet", checkpoint_path=checkpoint,
+        )
+        self.assertEqual(first, second)
+        self.assertEqual(lifecycle.requests, 1)
+        self.assertEqual(self.authority.list_approvals(self.context)[0]["candidate_id"], "candidate_packet")
 
     def test_two_tenants_with_same_resource_labels_remain_isolated(self) -> None:
         self._membership(

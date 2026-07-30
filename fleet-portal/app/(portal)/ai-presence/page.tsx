@@ -1,13 +1,17 @@
-import { Metric, PageIntro, SectionHeading, Status } from "@/components/ui";
-import { portalSnapshot } from "@/lib/view-model";
+import { EmptyState, Metric, PageIntro, SectionHeading, Status } from "@/components/ui";
+import { requirePortalContext } from "@/lib/identity";
+import { getPortalProjection } from "@/lib/view-model";
 
 export const metadata = { title: "AI presence" };
 
-export default function AIPresencePage() {
-  return <>
-    <PageIntro eyebrow="AI Market Observatory" title="See how AI understands the brand."
-      description="Repeatable customer missions reveal gaps, errors and opportunities without pretending that one test is a permanent ranking." />
-    <section className="metric-grid compact"><Metric value={String(portalSnapshot.aiPresence.missions)} label="Mission groups" detail="Versioned internal observation coverage" /><Metric value="100%" label="Evidence retained" detail="Prompts, observations and evaluation checksums" tone="green" /><Metric value="0" label="Unsupported causal claims" detail="Findings remain honest about uncertainty" /></section>
-    <section className="split-grid"><div className="panel"><SectionHeading kicker="Current finding" title="What the evidence supports" /><p className="large-copy">{portalSnapshot.aiPresence.finding}</p><Status tone="good">Grounded internal result</Status></div><div className="panel"><SectionHeading kicker="Important limit" title="What this does not mean" /><p className="large-copy">{portalSnapshot.aiPresence.limitation}</p><Status>Interpret with context</Status></div></section>
+export default async function AIPresencePage() {
+  const context = await requirePortalContext();
+  const view = await getPortalProjection(context);
+  const observation = view.observatory;
+  return <><PageIntro eyebrow="AI Market Observatory" title="See how AI understands the brand."
+    description="Versioned observations are shown with their limits. Unknown external-AI coverage remains unknown." />
+    {!observation ? <EmptyState title="No Observatory projection is available">The portal could not obtain current approved observation evidence.</EmptyState> : <>
+      <section className="metric-grid compact"><Metric value={String(observation.complete_run_count)} label="Complete runs" detail="Versioned evidence runs" /><Metric value={String(observation.observation_count)} label="Observations" detail="Active retained observations" tone="green" /><Metric value={String(observation.finding_count)} label="Findings" detail="Current active findings" /></section>
+      <section className="panel"><SectionHeading kicker="Evidence boundary" title={`External AI coverage: ${observation.external_ai_coverage}`} />{observation.limitations.map(item => <p className="large-copy" key={item}>{item}</p>)}<Status>Interpret with context</Status></section></>}
   </>;
 }

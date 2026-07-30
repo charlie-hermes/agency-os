@@ -1,6 +1,6 @@
 # Fleet client portal G2.6 enterprise plan
 
-- **Status:** approved for implementation
+- **Status:** implementation complete; live external commissioning pending
 - **Business:** Fleet
 - **Internal pilot:** Fleet DMA
 - **Public experience:** `fleet.madebyfleet.com`
@@ -543,7 +543,27 @@ Rollback never deletes authority history or rebinds a tenant.
 - automatic advertising-budget control;
 - top-level VM backup and key escrow.
 
-## 20. Exit decision
+## 20. Implementation record
+
+The bounded G2.6 product and appliance implementation is complete. The release
+candidate passes the full Agency OS regression suite (236 tests), frontend
+lint and type checks, the production frontend build, and responsive browser
+coverage across client and administration routes.
+
+The implementation includes live authority-backed portal projections, secure
+source admission, candidate review, Paperclip approval handoff and
+reconciliation, immutable Brand Twin materialisation, owner-managed invitations
+and revocation, separate client/admin Cloudflare Access audiences, separate
+service identities and credentials, and fail-closed appliance commissioning.
+
+Live external commissioning is deliberately recorded as pending until real
+WorkOS and Cloudflare values are installed and the appliance verifies the exact
+organisational membership, Access applications and policies, healthy tunnel,
+route configuration, host redirects and local service health. Those values are
+not fabricated. The command worker and public web service remain unavailable
+if that verification does not pass.
+
+## 21. Exit decision
 
 G2.6 is complete only when G2.6A through G2.6D pass, the full existing product
 regression remains green, Fleet DMA is the sole production portal tenant, and

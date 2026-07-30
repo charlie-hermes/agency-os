@@ -8,9 +8,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from agency_os.contracts import ContractError, canonical_bytes, finalize_record, verify_record
+from agency_os.contracts import ContractError, canonical_bytes, canonical_checksum, finalize_record, verify_record
 from agency_os.fleet_tenancy import (
     PRODUCT_MODULES,
+    PROVISIONING_STEPS,
     FleetTenancyAuthorizationError,
     FleetTenancyError,
     FleetTenantAuthority,
@@ -292,6 +293,40 @@ class FleetTenantAuthorityTests(unittest.TestCase):
                 expected_version=1,
                 next_state="assurance",
             )
+
+    def test_active_requires_every_durable_provisioning_step(self) -> None:
+        self._register_fleet()
+        self.authority.admit_account_brand(
+            self.director, customer_account_id="account_fleet", account_name="Fleet",
+            client_brand_id="client_brand_fleet", client_brand_name="Fleet",
+            tenant_id="tenant_fleet", workos_organization_id="org_fleet_test",
+        )
+        projection = self.authority.account_brand_projection(self.director)
+        for next_state in ("launch_ready", "assurance"):
+            projection = self.authority.transition_tenant_lifecycle(
+                self.director, client_brand_id="client_brand_fleet",
+                expected_version=projection["lifecycle_version"], next_state=next_state,
+            )
+        with self.assertRaises(ContractError):
+            self.authority.transition_tenant_lifecycle(
+                self.director, client_brand_id="client_brand_fleet",
+                expected_version=projection["lifecycle_version"], next_state="active",
+            )
+        run = self.authority.start_provisioning(
+            self.director, provisioning_run_id="provisioning_test",
+            client_brand_id="client_brand_fleet",
+        )
+        for step in PROVISIONING_STEPS:
+            run = self.authority.complete_provisioning_step(
+                self.director, provisioning_run_id="provisioning_test", step_key=step,
+                evidence_checksum=canonical_checksum({"step": step, "evidence": "test"}),
+            )
+        self.assertEqual(run["state"], "completed")
+        active = self.authority.transition_tenant_lifecycle(
+            self.director, client_brand_id="client_brand_fleet",
+            expected_version=projection["lifecycle_version"], next_state="active",
+        )
+        self.assertEqual(active["lifecycle_state"], "active")
 
     def test_future_schema_version_is_rejected(self) -> None:
         connection = sqlite3.connect(self.database_path)

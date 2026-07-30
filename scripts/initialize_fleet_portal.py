@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -34,13 +35,15 @@ def main() -> None:
         ),
         hostname=args.hostname, entitlement_version=1,
     )
+    source_path = ROOT / "docs/fleet-generation2-decisions.md"
+    source_checksum = "sha256:" + hashlib.sha256(source_path.read_bytes()).hexdigest()
     item = authority.add_content_item(
         actor_id="fleet_platform_administrator",
         content_id="content_fleet_controlled_g26_1",
         tenant_id="tenant_fleet", brand_id="brand_fleet",
         title="Fleet AI readiness introduction", content_type="article",
         lifecycle_state="controlled_preview",
-        source_checksum="sha256:" + "0" * 64,
+        source_checksum=source_checksum,
     )
     print(json.dumps({
         "status": "admitted", "production_tenants": 1,

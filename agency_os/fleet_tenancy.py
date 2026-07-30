@@ -79,6 +79,23 @@ _LIFECYCLE_TRANSITIONS = {
     "failed_pre_activation": frozenset({"provisioning"}),
     "offboarded": frozenset(),
 }
+PROVISIONING_STEPS = (
+    "customer_account_admitted",
+    "client_brand_created",
+    "tenant_identifiers_issued",
+    "paperclip_company_admitted",
+    "paperclip_company_binding_verified",
+    "hostname_reserved",
+    "workos_organization_bound",
+    "fleet_ownership_assigned",
+    "client_memberships_configured",
+    "commercial_order_admitted",
+    "technical_entitlements_granted",
+    "paperclip_templates_installed",
+    "brand_source_register_opened",
+    "isolation_identity_negative_tests_passed",
+    "assurance_reviewer_approved",
+)
 
 _BRAND_TENANT_FIELDS = frozenset(
     {
@@ -477,6 +494,50 @@ class FleetTenantAuthority:
             "modules": modules,
         }
 
+    def portal_access_projection(
+        self,
+        principal: Principal,
+        hostname: str,
+        *,
+        workos_organization_id: str,
+    ) -> dict[str, Any]:
+        """Authorize one request against current tenant and entitlement state."""
+
+        projection = self.portal_read_model(principal, hostname)
+        row = self._fetch_one(
+            """
+            SELECT a.workos_organization_id, a.state, b.lifecycle_state,
+                   b.lifecycle_version,
+                   (SELECT MAX(version) FROM product_entitlements
+                    WHERE brand_id = b.brand_id AND module = 'client_portal'
+                      AND state = 'active')
+            FROM customer_accounts a
+            JOIN client_brands b ON b.customer_account_id = a.customer_account_id
+            WHERE b.brand_id = ?
+            """,
+            (principal.brand_id,),
+        )
+        if (
+            row is None
+            or row[0] != workos_organization_id
+            or row[1] != "active"
+            or row[2] != "active"
+            or row[4] is None
+        ):
+            self._audit(
+                principal, "portal_access_projection", str(hostname),
+                "DENY_CURRENT_AUTHORITY_STATE",
+            )
+            raise FleetTenancyAuthorizationError(
+                "the account, lifecycle, organisation or portal entitlement is not active"
+            )
+        return {
+            **projection,
+            "lifecycle_state": row[2],
+            "lifecycle_version": int(row[3]),
+            "entitlement_version": int(row[4]),
+        }
+
     def admit_account_brand(
         self,
         principal: Principal,
@@ -531,12 +592,12 @@ class FleetTenantAuthority:
                 """,
                 (customer_account_id, client_brand_id),
             ).fetchone()
-            expected = (
+            expected_binding = (
                 account_name, workos_organization_id, client_brand_name,
-                customer_account_id, tenant_id, principal.brand_id, lifecycle_state,
+                customer_account_id, tenant_id, principal.brand_id,
             )
             if existing is not None:
-                if tuple(existing) != expected:
+                if tuple(existing[:6]) != expected_binding:
                     raise ContractError("account or client brand binding is immutable")
                 outcome = "ALLOW_IDEMPOTENT"
             else:
@@ -624,6 +685,31 @@ class FleetTenantAuthority:
                 raise ContractError(
                     f"tenant lifecycle cannot move from {current_state} to {next_state}"
                 )
+            if next_state == "active":
+                run = connection.execute(
+                    """
+                    SELECT provisioning_run_id, state FROM provisioning_runs
+                    WHERE brand_id = ? AND client_brand_id = ?
+                    ORDER BY created_at DESC, provisioning_run_id DESC LIMIT 1
+                    """,
+                    (principal.brand_id, client_brand_id),
+                ).fetchone()
+                if run is None or run[1] != "completed":
+                    raise ContractError(
+                        "tenant activation requires a completed provisioning run"
+                    )
+                completed = {
+                    item[0]
+                    for item in connection.execute(
+                        "SELECT step_key FROM provisioning_steps "
+                        "WHERE provisioning_run_id = ? AND state = 'completed'",
+                        (run[0],),
+                    ).fetchall()
+                }
+                if completed != set(PROVISIONING_STEPS):
+                    raise ContractError(
+                        "tenant activation requires every provisioning step"
+                    )
             connection.execute(
                 """
                 UPDATE client_brands
@@ -660,6 +746,198 @@ class FleetTenantAuthority:
         finally:
             connection.close()
         return self.account_brand_projection(principal)
+
+    def start_provisioning(
+        self,
+        principal: Principal,
+        *,
+        provisioning_run_id: str,
+        client_brand_id: str,
+    ) -> dict[str, Any]:
+        """Create the durable fifteen-step activation checklist."""
+
+        self._authorize_mutation(
+            principal, "start_provisioning", provisioning_run_id,
+            principal.brand_id, principal.actor_id,
+        )
+        if not provisioning_run_id.startswith("provisioning_"):
+            raise ContractError("provisioning run ID must use the provisioning_ prefix")
+        connection = self._connect()
+        now = utc_now()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            brand = connection.execute(
+                "SELECT lifecycle_state FROM client_brands "
+                "WHERE client_brand_id = ? AND brand_id = ?",
+                (client_brand_id, principal.brand_id),
+            ).fetchone()
+            if brand is None:
+                raise KeyError(client_brand_id)
+            existing = connection.execute(
+                "SELECT brand_id, client_brand_id FROM provisioning_runs "
+                "WHERE provisioning_run_id = ?",
+                (provisioning_run_id,),
+            ).fetchone()
+            if existing is not None and tuple(existing) != (
+                principal.brand_id, client_brand_id,
+            ):
+                raise ContractError("provisioning run identity is already bound")
+            if existing is None:
+                connection.execute(
+                    """
+                    INSERT INTO provisioning_runs (
+                        provisioning_run_id, brand_id, client_brand_id, state,
+                        created_at, updated_at
+                    ) VALUES (?, ?, ?, 'running', ?, ?)
+                    """,
+                    (
+                        provisioning_run_id, principal.brand_id,
+                        client_brand_id, now, now,
+                    ),
+                )
+                connection.executemany(
+                    """
+                    INSERT INTO provisioning_steps (
+                        provisioning_run_id, step_key, state,
+                        evidence_checksum, updated_at
+                    ) VALUES (?, ?, 'pending', NULL, ?)
+                    """,
+                    [
+                        (provisioning_run_id, step_key, now)
+                        for step_key in PROVISIONING_STEPS
+                    ],
+                )
+            self._insert_audit(
+                connection, principal, "start_provisioning",
+                provisioning_run_id,
+                "ALLOW_IDEMPOTENT" if existing is not None else "ALLOW",
+            )
+            connection.commit()
+        except (ContractError, KeyError):
+            _rollback(connection)
+            raise
+        except sqlite3.Error as exc:
+            _rollback(connection)
+            raise FleetTenancyError("could not start provisioning") from exc
+        finally:
+            connection.close()
+        return self.provisioning_projection(principal, provisioning_run_id)
+
+    def complete_provisioning_step(
+        self,
+        principal: Principal,
+        *,
+        provisioning_run_id: str,
+        step_key: str,
+        evidence_checksum: str,
+    ) -> dict[str, Any]:
+        """Complete one checklist step with immutable checksum evidence."""
+
+        self._authorize_mutation(
+            principal, "complete_provisioning_step", step_key,
+            principal.brand_id, principal.actor_id,
+        )
+        if step_key not in PROVISIONING_STEPS:
+            raise ContractError("unknown provisioning step")
+        if not re.fullmatch(r"sha256:[0-9a-f]{64}", evidence_checksum):
+            raise ContractError("provisioning evidence checksum is invalid")
+        connection = self._connect()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                """
+                SELECT s.state, s.evidence_checksum, r.brand_id
+                FROM provisioning_steps s
+                JOIN provisioning_runs r USING (provisioning_run_id)
+                WHERE s.provisioning_run_id = ? AND s.step_key = ?
+                """,
+                (provisioning_run_id, step_key),
+            ).fetchone()
+            if row is None or row[2] != principal.brand_id:
+                raise KeyError(step_key)
+            if row[0] == "completed" and row[1] != evidence_checksum:
+                raise ContractError("completed provisioning evidence is immutable")
+            idempotent = row[0] == "completed" and row[1] == evidence_checksum
+            if idempotent:
+                connection.rollback()
+            now = utc_now()
+            if not idempotent:
+                connection.execute(
+                    """
+                    UPDATE provisioning_steps
+                    SET state = 'completed', evidence_checksum = ?, updated_at = ?
+                    WHERE provisioning_run_id = ? AND step_key = ?
+                    """,
+                    (evidence_checksum, now, provisioning_run_id, step_key),
+                )
+                remaining = connection.execute(
+                    "SELECT COUNT(*) FROM provisioning_steps "
+                    "WHERE provisioning_run_id = ? AND state != 'completed'",
+                    (provisioning_run_id,),
+                ).fetchone()[0]
+                connection.execute(
+                    "UPDATE provisioning_runs SET state = ?, updated_at = ? "
+                    "WHERE provisioning_run_id = ?",
+                    ("completed" if remaining == 0 else "running", now, provisioning_run_id),
+                )
+                self._insert_audit(
+                    connection, principal, "complete_provisioning_step",
+                    step_key, "ALLOW_COMPLETED",
+                )
+                connection.commit()
+        except (ContractError, KeyError):
+            _rollback(connection)
+            raise
+        except sqlite3.Error as exc:
+            _rollback(connection)
+            raise FleetTenancyError("could not complete provisioning step") from exc
+        finally:
+            connection.close()
+        return self.provisioning_projection(principal, provisioning_run_id)
+
+    def provisioning_projection(
+        self,
+        principal: Principal,
+        provisioning_run_id: str,
+    ) -> dict[str, Any]:
+        _require_reader(principal)
+        connection = self._connect()
+        try:
+            run = connection.execute(
+                """
+                SELECT client_brand_id, state, created_at, updated_at
+                FROM provisioning_runs
+                WHERE provisioning_run_id = ? AND brand_id = ?
+                """,
+                (provisioning_run_id, principal.brand_id),
+            ).fetchone()
+            if run is None:
+                raise KeyError(provisioning_run_id)
+            rows = connection.execute(
+                """
+                SELECT step_key, state, evidence_checksum, updated_at
+                FROM provisioning_steps WHERE provisioning_run_id = ?
+                ORDER BY rowid
+                """,
+                (provisioning_run_id,),
+            ).fetchall()
+        finally:
+            connection.close()
+        return {
+            "provisioning_run_id": provisioning_run_id,
+            "brand_id": principal.brand_id,
+            "client_brand_id": run[0],
+            "state": run[1],
+            "created_at": run[2],
+            "updated_at": run[3],
+            "steps": [
+                {
+                    "step_key": row[0], "state": row[1],
+                    "evidence_checksum": row[2], "updated_at": row[3],
+                }
+                for row in rows
+            ],
+        }
 
     def account_brand_projection(self, principal: Principal) -> dict[str, Any]:
         """Return the safe account/brand/tenant projection for one principal."""

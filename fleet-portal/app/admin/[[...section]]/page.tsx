@@ -1,17 +1,34 @@
 import Link from "next/link";
 import { PageIntro, SectionHeading, Status } from "@/components/ui";
+import { authorityCall } from "@/lib/authority";
 import { requireFleetAdministrator } from "@/lib/identity";
 
 export const dynamic = "force-dynamic";
 const sections = ["accounts", "brands", "tenants", "provisioning", "users", "entitlements", "support", "health", "audit"];
 
+type AdminProjection = {
+  brand_id: string;
+  tenant: null | Record<string, string | number>;
+  provisioning: null | { state: string; steps: Array<{ step_key: string; state: string; evidence_checksum: string | null }> };
+  portal_counts: Record<string, number>;
+  audit: Array<{ sequence: number; actor_id: string; operation: string; target_id: string; outcome: string; recorded_at: string }>;
+};
+
 export default async function AdminPage({ params }: { params: Promise<{ section?: string[] }> }) {
-  await requireFleetAdministrator();
+  const administrator = await requireFleetAdministrator();
   const value = await params;
   const section = value.section?.[0] ?? "accounts";
   if (!sections.includes(section)) throw new Error("Unknown Fleet administration section.");
-  return <div className="admin-shell"><aside><Link className="brandmark" href="/admin"><span>FLEET / ADMIN</span></Link><nav>{sections.map(item => <Link href={`/admin/${item}`} key={item}>{item.replaceAll("-", " ")}</Link>)}</nav><a href="https://fleet.madebyfleet.com/">Open client view →</a></aside><main className="admin-main"><PageIntro eyebrow="Fleet administration" title={section[0].toUpperCase() + section.slice(1)} description="Fleet-only operational control. Client identities cannot enter this surface." />
-    <section className="metric-grid compact"><article className="metric green"><span className="metric-value">1</span><strong>Production tenant</strong><p>Fleet DMA only</p></article><article className="metric"><span className="metric-value">0</span><strong>External clients</strong><p>G2.7 remains separately gated</p></article><article className="metric"><span className="metric-value">4</span><strong>Protected services</strong><p>Web, authority, command and ingest workers</p></article></section>
-    <section className="panel"><SectionHeading kicker="Current state" title={`${section} controls are ready`} /><p>The G2.6 implementation exposes the bounded Fleet DMA control surface. External tenant creation, billing, portfolio views and public signup remain disabled.</p><Status tone="good">Exact tenant and Fleet-role boundary enforced</Status></section>
+  const view = await authorityCall<AdminProjection>({ operation: "admin_projection", admin_subject: administrator.userId });
+  const tenantState = String(view.tenant?.lifecycle_state ?? "unavailable");
+  const sectionData: Record<string, unknown> = section === "audit" ? { events: view.audit } :
+    section === "provisioning" ? { provisioning: view.provisioning } :
+    section === "health" ? { tenant_state: tenantState, ...view.portal_counts } :
+    section === "users" ? { memberships: view.portal_counts.memberships, active: view.portal_counts.active_memberships } :
+    section === "tenants" || section === "accounts" || section === "brands" ? { tenant: view.tenant } :
+    { tenant: view.tenant, operational_counts: view.portal_counts };
+  return <div className="admin-shell"><aside><Link className="brandmark" href="/admin"><span>FLEET / ADMIN</span></Link><nav>{sections.map(item => <Link href={`/admin/${item}`} key={item}>{item.replaceAll("-", " ")}</Link>)}</nav><a href="https://fleet.madebyfleet.com/">Open client view →</a></aside><main className="admin-main"><PageIntro eyebrow="Fleet administration" title={section[0].toUpperCase() + section.slice(1)} description="Fleet-only operational data from the protected tenant and portal authorities." />
+    <section className="metric-grid compact"><article className="metric green"><span className="metric-value">{tenantState}</span><strong>Tenant state</strong><p>{view.brand_id}</p></article><article className="metric"><span className="metric-value">{view.portal_counts.pending_approvals ?? 0}</span><strong>Pending approvals</strong><p>Current Paperclip decisions</p></article><article className="metric"><span className="metric-value">{view.portal_counts.unknown_commands ?? 0}</span><strong>Unknown outcomes</strong><p>Require automatic reconciliation</p></article></section>
+    <section className="panel"><SectionHeading kicker="Current authority state" title={`${section} projection`} /><pre>{JSON.stringify(sectionData, null, 2)}</pre><Status tone={tenantState === "active" ? "good" : "attention"}>Read from current authority</Status></section>
   </main></div>;
 }

@@ -19,11 +19,13 @@ def main() -> None:
     parser.add_argument("--database", type=Path, required=True)
     parser.add_argument("--approval-id", required=True)
     parser.add_argument("--approval-checksum", required=True)
+    parser.add_argument("--candidate-id")
     args = parser.parse_args()
     record = FleetPortalAuthority(args.database).bind_paperclip_approval(
         actor_id="fleet_platform_administrator", tenant_id="tenant_fleet",
         brand_id="brand_fleet", approval_id=args.approval_id,
         approval_checksum=args.approval_checksum,
+        candidate_id=args.candidate_id,
     )
     print(json.dumps(record, sort_keys=True))
 
